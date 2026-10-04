@@ -33,35 +33,97 @@
 </div>
 <button class="back" onclick="location.href='/'">返回主页</button>
 <script>
+// 设备指纹：用于"每人每周一次"的去重，替代旧版可被"换个 User-Agent"绕过的方案。
+// 刻意不使用 localStorage / Cookie，这样清缓存不会把限制重置；
+// 采集的是设备与浏览器本身的稳定特征（屏幕、时区、CPU 核数、Canvas / WebGL 差异）。
+async function deviceFingerprint(){
+  const nav = navigator, scr = window.screen || {};
+  let canvasSig = 'no-canvas';
+  try {
+    const c = document.createElement('canvas');
+    c.width = 220; c.height = 44;
+    const ctx = c.getContext('2d');
+    if(ctx){
+      ctx.textBaseline = 'top'; ctx.font = '14px "Arial"';
+      ctx.fillStyle = '#f60'; ctx.fillRect(0, 0, 110, 22);
+      ctx.fillStyle = '#069'; ctx.fillText('盐中之声 yczx', 2, 3);
+      ctx.strokeStyle = 'rgba(102,204,0,.7)';
+      ctx.beginPath(); ctx.arc(58, 22, 15, 0, Math.PI * 2); ctx.stroke();
+      canvasSig = c.toDataURL();
+    }
+  } catch(e) {}
+  let glSig = 'no-webgl';
+  try {
+    const c2 = document.createElement('canvas');
+    const gl = c2.getContext('webgl') || c2.getContext('experimental-webgl');
+    if(gl){
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      glSig = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    }
+  } catch(e) {}
+  let tz = '';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e) {}
+  const raw = [nav.userAgent || '', nav.platform || '', nav.language || '', (nav.languages || []).join(','),
+    nav.hardwareConcurrency || '', nav.maxTouchPoints || '',
+    (scr.width || 0) + 'x' + (scr.height || 0) + 'x' + (scr.colorDepth || 0),
+    window.devicePixelRatio || 0, tz, canvasSig, glSig].join('|');
+  // 优先用 WebCrypto；http 等非安全上下文没有 crypto.subtle 时降级为确定性哈希。
+  if(window.crypto && window.crypto.subtle){
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch(e) {}
+  }
+  let out = '';
+  for(let seed = 0; seed < 4; seed++){
+    let h = (0x811c9dc5 ^ (seed * 0x9e3779b1)) >>> 0;
+    for(let i = 0; i < raw.length; i++){ h ^= raw.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    out += h.toString(16).padStart(8, '0');
+  }
+  return out;
+}
+
 async function vote(){
   const title = document.getElementById('title').value.trim();
   const artist = document.getElementById('artist').value.trim();
   const category = document.getElementById('category').value;
   const msg = document.getElementById('msg');
-  const pw = sessionStorage.getItem('pw') || '';
 
-  if(!pw){ alert('请先回主页输入口令登录！'); location.href='/'; return; }
   if(!title || !artist){ msg.style.color = '#e11d48'; msg.textContent = '歌名和歌手都要填哦'; return; }
   
   if(!confirm('确认提交这首歌吗？\n歌名：' + title + '\n歌手：' + artist)) return;
 
   msg.style.color = '#0284c7'; msg.textContent = '提交中...';
   try {
+    // 不再传 password / class_id：登录态由 HttpOnly 会话 Cookie 自动携带，
+    // 班级身份由服务端决定，客户端无从伪造。
+    const fingerprint = await deviceFingerprint();
     const r = await fetch('/api/vote', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({title, artist, category_id: category, password: pw, class_id: 1})
+      body: JSON.stringify({title, artist, category_id: category, fingerprint})
     });
     const d = await r.json();
     if(r.ok){
       msg.style.color = '#059669'; msg.textContent = '点歌成功！等待管理员审核';
       document.getElementById('title').value = '';
       document.getElementById('artist').value = '';
+    } else if(r.status === 401){
+      msg.style.color = '#e11d48'; msg.textContent = '登录已过期，正在返回主页…';
+      setTimeout(() => { location.href = '/'; }, 1200);
     } else {
       msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
     }
   } catch(e) { msg.style.color = '#e11d48'; msg.textContent = '网络错误'; }
 }
+
+// 进页面先确认会话仍有效（替代旧版读取 sessionStorage 里保存的口令）。
+(async function(){
+  try {
+    const r = await fetch('/api/rank?status=pending');
+    if(r.status === 401){ alert('请先回主页输入口令登录！'); location.href = '/'; }
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>

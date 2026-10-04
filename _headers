@@ -1,0 +1,32 @@
+# ============================================================
+#  全站安全响应头
+#
+#  ⚠️ 重要限制：_headers 只作用于 Cloudflare Pages 的**静态资源**，
+#     不作用于 Functions 的响应。因此 /api/* 返回的 JSON 里
+#     nosniff / no-store 是由 _lib/http.js 自己加的，不是靠这里。
+# ============================================================
+
+/*
+  # 关于 script-src：
+  # 本项目按要求保留了页面内联的 <script> 与 onclick 属性，因此这里
+  # 必须放开 'unsafe-inline'，否则整个页面会失效。
+  #
+  # 这意味着：针对 XSS，**主要防线是代码里的 escapeHtml 转义**
+  # （见 index.html / admin.html 的 <script>，以及后端 _lib/validate.js 的入库收敛），
+  # CSP 在这里只能作为兜底，挡住"外链注入"这一类攻击，
+  # 挡不住"页面内联脚本注入"。
+  #
+  # 若将来愿意把脚本移到 /assets/*.js 外链文件、并去掉 onclick 属性，
+  # 就可以把 script-src 收紧为 'self'，那时 CSP 才会成为真正的硬防线。
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  X-Permitted-Cross-Domain-Policies: none
+
+# 图片体积大且不常改，给较长缓存；改内容后建议改文件名。
+/assets/*.png
+  Cache-Control: public, max-age=604800

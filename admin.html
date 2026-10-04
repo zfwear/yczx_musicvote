@@ -53,16 +53,29 @@
   <div id="listBox"><p class="sub">加载中...</p></div>
 </div>
 <script>
+// 所有来自后端的数据必须经这里转义后才能拼进 innerHTML。
+function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
+// 数字字段一律强制转整数，避免从 id / 票数这类字段打进来的注入。
+function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
+
 let currentStatus = 'pending';
+let settingsCache = { classes: [], banned: [], categories: [], security: {} };
+
+function showLogin(){
+  document.getElementById('adminBox').classList.add('hidden');
+  document.getElementById('loginBox').classList.remove('hidden');
+}
+
 function switchTab(status, btn){
   currentStatus = status;
   document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  if(btn) btn.classList.add('active');
   loadList();
 }
+
 async function adminLogin(){
   const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
+  const password = document.getElementById('password').value;
   const token = document.getElementById('token').value.trim();
   const msg = document.getElementById('loginMsg');
   if(!username || !password){ msg.textContent = '账号和密码都要填'; return; }
@@ -75,65 +88,131 @@ async function adminLogin(){
     });
     const d = await r.json();
     if(r.ok){
-      sessionStorage.setItem('admin_pw', password);
+      // 不再把原始密码写进 sessionStorage —— 登录态由服务端 HttpOnly 会话 Cookie
+      // 承担，脚本读不到，XSS 也就偷不走。
+      document.getElementById('password').value = '';
+      document.getElementById('token').value = '';
+      msg.textContent = '';
       document.getElementById('loginBox').classList.add('hidden');
       document.getElementById('adminBox').classList.remove('hidden');
       loadList();
     } else { msg.textContent = d.error || '登录失败'; }
   } catch(e) { msg.textContent = '网络错误'; }
 }
+
 async function loadList(){
   const box = document.getElementById('listBox');
   if(currentStatus === 'settings') { loadSettings(); return; }
   box.innerHTML = '<p class="sub">加载中...</p>';
   try {
-    const r = await fetch('/api/admin-list?status=' + currentStatus);
+    const r = await fetch('/api/admin-list?status=' + encodeURIComponent(currentStatus));
+    if(r.status === 401 || r.status === 403){ showLogin(); return; }
     const list = await r.json();
-    if(!list.length){ box.innerHTML = '<p class="sub">这里空空如也</p>'; return; }
-    box.innerHTML = list.map(s => `
+    if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p class="sub">这里空空如也</p>'; return; }
+    box.innerHTML = list.map(s => {
+      const id = safeInt(s.id);
+      const catId = safeInt(s.category_id);
+      const reported = safeInt(s.is_reported) === 1;
+      return `
       <div class="card">
-        <h3>${s.title} - ${s.artist}</h3>
-        <p>分类：${s.category_name} | 票数：${s.votes} | 班级：${s.class_id}</p>
+        <h3>${escapeHtml(s.title)} - ${escapeHtml(s.artist)}</h3>
+        <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${safeInt(s.class_id)}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}</p>
         <div style="margin: 8px 0;">
-          <select onchange="updateCategory(${s.id}, this.value)" style="padding:6px; font-size:14px; width:auto; border-radius:6px; border:1px solid #e2e8f0;">
-            <option value="1" ${s.category_id == 1 ? 'selected' : ''}>纯音乐</option>
-            <option value="2" ${s.category_id == 2 ? 'selected' : ''}>中文歌</option>
-            <option value="3" ${s.category_id == 3 ? 'selected' : ''}>英文歌</option>
-            <option value="4" ${s.category_id == 4 ? 'selected' : ''}>小语种</option>
+          <select onchange="updateCategory(${id}, this.value)" style="padding:6px; font-size:14px; width:auto; border-radius:6px; border:1px solid #e2e8f0;">
+            <option value="1" ${catId === 1 ? 'selected' : ''}>纯音乐</option>
+            <option value="2" ${catId === 2 ? 'selected' : ''}>中文歌</option>
+            <option value="3" ${catId === 3 ? 'selected' : ''}>英文歌</option>
+            <option value="4" ${catId === 4 ? 'selected' : ''}>小语种</option>
           </select>
         </div>
         <div class="actions">
-          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${s.id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${s.id}, 'reject')">拒绝</button>` : ''}
-          ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${s.id}, 'reject')">移入回收站</button>` : ''}
-          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${s.id}, 'restore')">恢复</button>` : ''}
+          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button onclick="action(${id}, 'clear_report')" style="background:#64748b;">清除举报</button>` : ''}` : ''}
+          ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${id}, 'reject')">移入回收站</button>` : ''}
+          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button>` : ''}
         </div>
       </div>
-    `).join('');
+    `}).join('');
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
 }
-  async function loadSettings(){
+
+/* ---------------- 系统设置 ---------------- */
+
+async function loadSettings(){
   const box = document.getElementById('listBox');
   box.innerHTML = '<p class="sub">加载中...</p>';
-  const r = await fetch('/api/admin-settings');
-  const banneds = await r.json();
-  
-  let bannedHtml = '';
-  if(banneds.length) {
-    bannedHtml = banneds.map(b => `
+  try {
+    const r = await fetch('/api/admin-settings');
+    if(r.status === 401 || r.status === 403){ showLogin(); return; }
+    const data = await r.json();
+    settingsCache.classes = Array.isArray(data.classes) ? data.classes : [];
+    settingsCache.banned = Array.isArray(data.banned) ? data.banned : [];
+    settingsCache.categories = Array.isArray(data.categories) ? data.categories : [];
+    settingsCache.security = data.security || {};
+    renderSettings();
+  } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
+}
+
+function renderSettings(){
+  const box = document.getElementById('listBox');
+
+  const classRows = settingsCache.classes.length ? settingsCache.classes.map(c => {
+    const id = safeInt(c.id);
+    return `
       <div class="card">
-        <p style="margin:0 0 6px 0;font-size:13px;">${b.type === 'artist' ? '歌手' : '歌名'}：<b>${b.keyword}</b>（${b.reason}）</p>
-        <button class="btn-reject" onclick="deleteBanned(${b.id})">删除</button>
+        <p style="margin:0 0 6px 0;font-size:13px;">班级：<b>${escapeHtml(c.name)}</b>（编号 ${id}）</p>
+        <button onclick="changeClassPassword(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:bold;">修改口令</button>
+        <button class="btn-reject" onclick="deleteClass(${id})">删除</button>
       </div>
-    `).join('');
-  } else {
-    bannedHtml = '<p class="sub">黑名单为空</p>';
-  }
+    `;
+  }).join('') : '<p class="sub">还没有配置其它班级口令</p>';
+
+  const weightRows = settingsCache.categories.map(c => {
+    const id = safeInt(c.id);
+    return `
+      <div class="card">
+        <p style="margin:0 0 6px 0;font-size:13px;">${escapeHtml(c.name)}</p>
+        <input id="weight_${id}" type="number" min="0" max="1000" step="1" value="${safeInt(c.weight)}" style="font-size:14px;padding:10px;margin:8px 0;width:120px;">
+        <button onclick="saveWeight(${id})" style="font-size:14px;padding:10px;">保存权重</button>
+      </div>
+    `;
+  }).join('');
+
+  const bannedHtml = settingsCache.banned.length ? settingsCache.banned.map(b => {
+    const id = safeInt(b.id);
+    const forever = String(b.expire_at || '').indexOf('2099') === 0;
+    return `
+      <div class="card">
+        <p style="margin:0 0 6px 0;font-size:13px;">${b.type === 'artist' ? '歌手' : '歌名'}：<b>${escapeHtml(b.keyword)}</b>（${escapeHtml(b.reason)}）${forever ? '' : '<br>到期自动解禁：' + escapeHtml(b.expire_at)}</p>
+        <button class="btn-reject" onclick="deleteBanned(${id})">删除</button>
+      </div>
+    `;
+  }).join('') : '<p class="sub">黑名单为空</p>';
+
+  const pepperNote = settingsCache.security.pepperConfigured
+    ? '<p class="sub" style="color:#059669;">已配置 AUTH_PEPPER，班级口令索引受服务端私钥保护</p>'
+    : '<p class="sub" style="color:#b45309;">建议在 Pages 环境变量里配置 AUTH_PEPPER（随机字符串），用于保护班级口令索引</p>';
 
   box.innerHTML = `
     <div class="card">
-      <h3>修改班级口令</h3>
-      <input id="newClassPw" placeholder="新班级口令" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="updateClassPassword()" style="font-size:14px;padding:10px;">保存新口令</button>
+      <h3>添加班级口令</h3>
+      <input id="newClassName" placeholder="班级名称（如：高一(3)班）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="newClassPw" placeholder="该班级口令（至少 6 位）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="addClass()" style="font-size:14px;padding:10px;">添加</button>
+    </div>
+    <div class="card">
+      <h3>班级口令列表</h3>
+      ${classRows}
+    </div>
+    <div class="card">
+      <h3>分类权重</h3>
+      ${weightRows}
+    </div>
+    <div class="card">
+      <h3>修改管理员密码</h3>
+      <input id="curAdminPw" type="password" placeholder="当前密码" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="newAdminPw" type="password" placeholder="新密码（至少 8 位）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="changeAdminPassword()" style="font-size:14px;padding:10px;">保存新密码</button>
+      ${pepperNote}
     </div>
     <div class="card">
       <h3>添加违禁名单</h3>
@@ -141,8 +220,14 @@ async function loadList(){
         <option value="artist">违禁歌手</option>
         <option value="title">违禁歌名</option>
       </select>
-      <input id="bannedKeyword" placeholder="关键词（如：吴亦凡）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bannedKeyword" placeholder="关键词（如：某歌手名）" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bannedReason" placeholder="原因（选填）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <select id="bannedExpiry" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+        <option value="forever">长期有效</option>
+        <option value="30">30 天后自动解禁</option>
+        <option value="90">90 天后自动解禁</option>
+        <option value="365">一年后自动解禁</option>
+      </select>
       <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
     </div>
     <div class="card">
@@ -151,59 +236,116 @@ async function loadList(){
     </div>
   `;
 }
-  async function updateClassPassword(){
-  const newPw = document.getElementById('newClassPw').value.trim();
-  if(!newPw) { alert('新口令不能为空'); return; }
-  const adminPw = sessionStorage.getItem('admin_pw') || '';
-  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'update_class_password', new_password: newPw, password: adminPw})});
-  const d = await r.json();
-  if(r.ok) alert('修改成功！新口令已生效'); else alert(d.error || '修改失败');
+
+/** 统一的设置写接口调用：不再携带管理员密码。 */
+async function settingsPost(body, okText){
+  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(okText || d.message || '操作成功'); loadSettings(); return; }
+  alert(d.error || '操作失败');
 }
+
+async function addClass(){
+  const name = document.getElementById('newClassName').value.trim();
+  const pw = document.getElementById('newClassPw').value.trim();
+  if(!name || !pw){ alert('班级名称和口令都要填'); return; }
+  if(pw.length < 6){ alert('口令至少 6 位'); return; }
+  if(!confirm('确认添加班级【' + name + '】及其口令吗？')) return;
+  settingsPost({action:'add_class', name, password: pw}, '添加成功');
+}
+
+async function changeClassPassword(id){
+  const pw = prompt('请输入该班级的新口令（至少 6 位）');
+  if(pw === null) return;
+  if(pw.trim().length < 6){ alert('口令至少 6 位'); return; }
+  if(!confirm('确认修改吗？修改后该班级所有已登录设备会立即失效。')) return;
+  settingsPost({action:'update_class_password', id: safeInt(id), new_password: pw.trim()}, '口令已更新');
+}
+
+async function deleteClass(id){
+  if(!confirm('确认删除这个班级口令吗？删除后该班级将无法登录。')) return;
+  settingsPost({action:'delete_class', id: safeInt(id)}, '已删除');
+}
+
+async function saveWeight(id){
+  const input = document.getElementById('weight_' + safeInt(id));
+  const weight = Number(input ? input.value : NaN);
+  if(!Number.isInteger(weight) || weight < 0 || weight > 1000){ alert('权重需要是 0 到 1000 之间的整数'); return; }
+  if(!confirm('确认把这个分类的权重改为 ' + weight + ' 吗？正式榜排序会立即生效。')) return;
+  settingsPost({action:'update_category_weight', id: safeInt(id), weight: weight}, '权重已更新');
+}
+
+async function changeAdminPassword(){
+  const cur = document.getElementById('curAdminPw').value;
+  const next = document.getElementById('newAdminPw').value.trim();
+  if(!cur || !next){ alert('请填写当前密码和新密码'); return; }
+  if(next.length < 8){ alert('新密码至少 8 位'); return; }
+  if(!confirm('确认修改管理员密码吗？修改后其它设备上的登录会立即失效。')) return;
+  settingsPost({action:'change_admin_password', current_password: cur, new_password: next}, '密码已更新');
+}
+
+/** SQLite 的 datetime('now') 是 UTC，所以过期时间也必须按 UTC 格式化。 */
+function toSqlDateTime(d){
+  const p = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + ' '
+    + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+}
+
 async function addBanned(){
   const type = document.getElementById('bannedType').value;
   const keyword = document.getElementById('bannedKeyword').value.trim();
   const reason = document.getElementById('bannedReason').value.trim() || '违规';
+  const expiry = document.getElementById('bannedExpiry').value;
   if(!keyword) { alert('关键词不能为空'); return; }
-  const adminPw = sessionStorage.getItem('admin_pw') || '';
-  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'add_banned', type, keyword, reason, password: adminPw})});
-  const d = await r.json();
-  if(r.ok) { alert('添加成功'); loadSettings(); } else alert(d.error || '添加失败');
+  const body = {action:'add_banned', type, keyword, reason};
+  if(expiry !== 'forever'){ body.expire_at = toSqlDateTime(new Date(Date.now() + Number(expiry) * 86400000)); }
+  if(!confirm('确认把【' + keyword + '】加入黑名单吗？')) return;
+  settingsPost(body, '添加成功');
 }
+
 async function deleteBanned(id){
-  const adminPw = sessionStorage.getItem('admin_pw') || '';
-  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'delete_banned', id, password: adminPw})});
-  if(r.ok) { alert('已删除'); loadSettings(); } else alert('删除失败');
+  if(!confirm('确认删除这条黑名单记录吗？')) return;
+  settingsPost({action:'delete_banned', id: safeInt(id)}, '已删除');
 }
+
 async function action(id, type){
-  const adminPw = sessionStorage.getItem('admin_pw') || '';
-  const typeText = type === 'approve' ? '通过' : (type === 'reject' ? '拒绝' : '恢复');
+  const typeText = type === 'approve' ? '通过' : (type === 'reject' ? '拒绝' : (type === 'restore' ? '恢复' : '清除举报标记'));
   if(!confirm('确认要执行【' + typeText + '】操作吗？')) return;
   const r = await fetch('/api/admin-action', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id, type, password: adminPw})
+    body: JSON.stringify({id: safeInt(id), type})
   });
-  if(r.ok){ loadList(); } else { alert('操作失败'); }
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ loadList(); } else { alert(d.error || '操作失败'); }
 }
+
 async function updateCategory(id, catId){
-  const adminPw = sessionStorage.getItem('admin_pw') || '';
   const r = await fetch('/api/admin-update', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id, category_id: catId, password: adminPw})
+    body: JSON.stringify({id: safeInt(id), category_id: safeInt(catId)})
   });
-  if(r.ok){ loadList(); } else { alert('修改失败'); }
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ loadList(); } else { alert(d.error || '修改失败'); }
 }
-function logout(){
-  sessionStorage.removeItem('admin_pw');
-  document.getElementById('adminBox').classList.add('hidden');
-  document.getElementById('loginBox').classList.remove('hidden');
+
+async function logout(){
+  try { await fetch('/api/logout', {method:'POST'}); } catch(e) {}
+  showLogin();
 }
-if(sessionStorage.getItem('admin_pw')){
-  document.getElementById('loginBox').classList.add('hidden');
-  document.getElementById('adminBox').classList.remove('hidden');
-  loadList();
-}
+
+// 启动：用一次探测请求判断会话是否有效，有效就直奔后台。
+(async function boot(){
+  try {
+    const r = await fetch('/api/admin-list?status=pending');
+    if(r.ok){
+      document.getElementById('loginBox').classList.add('hidden');
+      document.getElementById('adminBox').classList.remove('hidden');
+      loadList();
+    } else { showLogin(); }
+  } catch(e) { showLogin(); }
+})();
 </script>
 </body>
 </html>

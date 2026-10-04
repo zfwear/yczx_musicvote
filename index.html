@@ -40,75 +40,113 @@
     <img src="/assets/school-badge.png" alt="校徽" class="badge">
   </div>
   <a href="/vote.html" class="btn">➕ 去点歌投票</a>
-  <div id="rankList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
+  <div id="rankList">
+    <div id="pendingList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
+    <div id="approvedList"></div>
+  </div>
   <footer><img src="/assets/radio-logo.png" alt="盐中之声"><p>江苏省盐城中学 · 盐中之声广播站</p></footer>
 </div>
 <script>
+// 所有来自后端的数据必须经这里转义后才能拼进 innerHTML，
+// 否则歌名里的 <img src=x onerror=...> 会被浏览器当代码执行。
+function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
+// 数字字段一律强制转整数，避免 "1);alert(1)//" 这类从 id / 票数打进来的注入。
+function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
+
 let currentMobileTab = 'pending';
+
+function showGate(){
+  document.getElementById('gate').style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+}
+function showApp(){
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}
+
 async function checkPw(){
   const pw = document.getElementById('pw').value.trim();
   const msg = document.getElementById('gateMsg');
   if(!pw){ msg.textContent = '请输入口令'; return; }
   msg.textContent = '验证中...';
   try {
+    // 口令只在这一个请求里出现；服务端签发 HttpOnly 会话 Cookie，
+    // 后续所有请求都不再携带口令。旧版把口令塞进 sessionStorage
+    // 并反复拼进 URL，一旦有 XSS 就会被直接读走。
     const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
     const d = await r.json();
     if(r.ok){
-      sessionStorage.setItem('pw', pw);
-      document.getElementById('gate').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
+      document.getElementById('pw').value = '';
+      msg.textContent = '';
+      showApp();
       loadPending();
       loadApproved();
     } else { msg.textContent = d.error || '口令错误'; }
   } catch(e) { msg.textContent = '网络错误'; }
 }
+
 function switchMobileTab(tab){
   currentMobileTab = tab;
-  document.getElementById('tabPending').className = tab === 'pending' ? 'active' : '';
-  document.getElementById('tabApproved').className = tab === 'approved' ? 'active' : '';
-  document.getElementById('pendingCol').className = tab === 'pending' ? 'col active' : 'col';
-  document.getElementById('approvedCol').className = tab === 'approved' ? 'col active' : 'col';
+  const setClass = (id, cls) => { const el = document.getElementById(id); if(el) el.className = cls; };
+  setClass('tabPending', tab === 'pending' ? 'active' : '');
+  setClass('tabApproved', tab === 'approved' ? 'active' : '');
+  setClass('pendingCol', tab === 'pending' ? 'col active' : 'col');
+  setClass('approvedCol', tab === 'approved' ? 'col active' : 'col');
 }
+
 async function loadPending(){
+  const box = document.getElementById('pendingList');
+  if(!box) return;
   try {
-    const pw = sessionStorage.getItem('pw') || '';
-    const res = await fetch('/api/rank?class_id=1&status=pending&password=' + pw);
+    // 不再传 class_id 与 password：班级身份由服务端会话决定，客户端伪造不了。
+    const res = await fetch('/api/rank?status=pending');
+    if(res.status === 401){ showGate(); return; }
     const list = await res.json();
-    const box = document.getElementById('pendingList');
-    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无待审核歌曲</p>'; return; }
+    if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无待审核歌曲</p>'; return; }
     box.innerHTML = list.map(s => `
       <div class="rank-card">
-        <div class="rank-info"><h3>${s.title}</h3><p>${s.artist} · <span style="color:#0284c7;">${s.category_name}</span></p></div>
-        <div style="display:flex;align-items:center;"><span class="rank-votes">${s.votes}票</span><button class="btn-upvote" onclick="upvote(${s.id})">投票</button></div>
+        <div class="rank-info"><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
+        <div style="display:flex;align-items:center;"><span class="rank-votes">${safeInt(s.votes)}票</span><button class="btn-upvote" onclick="upvote(${safeInt(s.id)})">投票</button></div>
       </div>
     `).join('');
-  } catch(e) { document.getElementById('pendingList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
+  } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
+
 async function loadApproved(){
+  const box = document.getElementById('approvedList');
+  if(!box) return;
   try {
-    const pw = sessionStorage.getItem('pw') || '';
-    const res = await fetch('/api/rank?class_id=1&status=approved&password=' + pw);
+    // 正式榜后端不下发票数字段，所以这里也不显示票数。
+    const res = await fetch('/api/rank?status=approved');
+    if(res.status === 401){ showGate(); return; }
     const list = await res.json();
-    const box = document.getElementById('approvedList');
-    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无已通过歌曲</p>'; return; }
+    if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无已通过歌曲</p>'; return; }
     box.innerHTML = list.map((s, i) => `
       <div class="rank-card">
-        <div class="rank-info"><h3>${i+1}. ${s.title}</h3><p>${s.artist} · <span style="color:#0284c7;">${s.category_name}</span></p></div>
+        <div class="rank-info"><h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
       </div>
     `).join('');
-  } catch(e) { document.getElementById('approvedList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
+  } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
+
 async function upvote(id){
-  const pw = sessionStorage.getItem('pw') || '';
   if(!confirm('确认给这首歌投一票吗？')) return;
   try {
-    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, password: pw})});
+    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id)})});
     const d = await r.json();
     if(r.ok){ alert('投票成功！'); loadPending(); }
     else { alert(d.error || '操作失败'); }
   } catch(e) { alert('网络错误'); }
 }
-if(sessionStorage.getItem('pw')){ document.getElementById('gate').style.display = 'none'; document.getElementById('app').style.display = 'block'; loadPending(); loadApproved(); }
+
+// 启动：用一次探测请求判断会话是否还有效，有效就直接进主页。
+(async function boot(){
+  try {
+    const r = await fetch('/api/rank?status=pending');
+    if(r.ok){ showApp(); loadPending(); loadApproved(); }
+    else { showGate(); }
+  } catch(e) { showGate(); }
+})();
 </script>
 </body>
 </html>
