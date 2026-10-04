@@ -28,6 +28,8 @@
     <option value="1">纯音乐</option>
     <option value="4">小语种</option>
   </select>
+  <button onclick="searchSongs()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">🔍 搜索歌曲（只输一部分歌名或歌手也行）</button>
+  <div id="searchBox"></div>
   <button onclick="vote()">提交点歌</button>
   <button onclick="auditionInput()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">▶ 先试听一下</button>
   <p id="msg"></p>
@@ -110,7 +112,9 @@ async function vote(){
     });
     const d = await r.json();
     if(r.ok){
-      msg.style.color = '#059669'; msg.textContent = '点歌成功！等待管理员审核';
+      // 调试模式会返回专门的提示文案
+      msg.style.color = '#059669';
+      msg.textContent = d.message || '点歌成功！等待管理员审核';
       document.getElementById('title').value = '';
       document.getElementById('artist').value = '';
     } else if(r.status === 401){
@@ -156,27 +160,114 @@ async function auditionInput(){
       box.innerHTML = '<p class="sub">没找到可试听的版本，换个写法再试试</p>';
       return;
     }
-    box.innerHTML = list.map(s => `
-      <div style="background:rgba(255,255,255,0.9);border-radius:10px;padding:10px 12px;margin:8px 0;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="min-width:0;">
-          <div style="font-size:14px;font-weight:600;color:#1e293b;word-break:break-word;">${escapeHtml(s.name)}</div>
-          <div style="font-size:12px;color:#64748b;word-break:break-word;">${escapeHtml(s.artist)}　<span style="color:#0284c7;">${escapeHtml(s.source || '')}</span></div>
-        </div>
-        <button data-track="${escapeHtml(s.id)}" onclick="playFromButton(this)" style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
-      </div>
-    `).join('');
+    box.innerHTML = candidatePanelHtml(
+      '🎧 试听候选',
+      '以下为搜索到的候选版本，不是榜单上的歌曲',
+      list, 'auditionBox', false
+    );
   } catch(e) {
     box.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
   }
 }
 
-// 用 data-* 传参，避免把外部返回的文本拼进 onclick 的 JS 字符串里。
-function playFromButton(button){
-  const box = document.getElementById('auditionBox');
-  const trackId = button.dataset.track;
-  if(!box || !trackId) return;
+/* ---------------- 模糊搜索 ---------------- */
 
-  const old = box.querySelector('audio');
+// 搜到之后可以直接「选这首」把歌名歌手填进表单，避免手打错字。
+// 后端已做三级降级：歌名+歌手 → 只按歌名 → 模糊搜索，
+// 所以只输入一部分（比如「七里」）也能找到。
+async function searchSongs(){
+  const box = document.getElementById('searchBox');
+  const title = document.getElementById('title').value.trim();
+  const artist = document.getElementById('artist').value.trim();
+
+  if(!title && !artist){ alert('请先输入歌名或歌手，再点搜索'); return; }
+
+  box.innerHTML = '<p class="sub">正在搜索…</p>';
+
+  try {
+    let url = '/api/music?q=' + encodeURIComponent(title || artist);
+    if(title && artist) url += '&artist=' + encodeURIComponent(artist);
+
+    const r = await fetch(url);
+    const d = await r.json();
+    if(!r.ok){
+      box.innerHTML = '<p class="sub" style="color:#e11d48;">' + escapeHtml(d.error || '搜索失败') + '</p>';
+      return;
+    }
+    const list = Array.isArray(d.results) ? d.results : [];
+    if(!list.length){
+      box.innerHTML = '<p class="sub">没搜到。试试只输歌名，或者换个写法。</p>';
+      return;
+    }
+    box.innerHTML = candidatePanelHtml(
+      '🔍 搜索候选',
+      '点「选这首」会填进上面的表单，不会自动提交',
+      list, 'searchBox', true
+    );
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
+  }
+}
+
+/** 把搜到的歌曲填进表单。用 data-* 传参，避免歌名里的特殊字符破坏 onclick。 */
+function pickSong(button){
+  document.getElementById('title').value = button.dataset.name || '';
+  document.getElementById('artist').value = button.dataset.artist || '';
+  document.getElementById('searchBox').innerHTML = '<p class="sub" style="color:#059669;">已填入上面的表单，确认无误后点「提交点歌」</p>';
+}
+
+/**
+ * 候选面板。
+ *
+ * 刻意**不用**白色卡片样式：左侧品牌色竖条 + 淡蓝底 + 标题与数量，
+ * 让人一眼看出"这是搜出来的候选，不是榜单上的歌"。
+ * 右上角固定「收起 ▲」，不用靠"再点一次"去猜怎么关。
+ */
+function candidatePanelHtml(title, hint, list, boxId, withPick){
+  const rows = list.map(s => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
+      <div style="min-width:0;font-size:13px;word-break:break-word;">
+        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
+        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
+        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
+      </div>
+      <div style="display:flex;gap:6px;flex:0 0 auto;">
+        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" onclick="pickSong(this)"
+          style="width:auto;padding:8px 12px;font-size:13px;margin:0;">选这首</button>` : ''}
+        <button data-track="${escapeHtml(s.id)}" onclick="playFromButton(this)"
+          style="width:auto;padding:8px 12px;font-size:13px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">试听</button>
+      </div>
+    </div>
+  `).join('');
+
+  return `
+    <div style="margin:10px 0 16px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">${escapeHtml(title)} · ${list.length} 个</div>
+        <button onclick="closeCandidatePanel('${boxId}')"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">${escapeHtml(hint)}</div>
+      ${rows}
+    </div>
+  `;
+}
+
+function closeCandidatePanel(boxId){
+  const box = document.getElementById(boxId);
+  if(!box) return;
+  box.dataset.open = '0';
+  box.innerHTML = '';
+}
+
+function playFromButton(button){
+  const host = document.getElementById('auditionBox');
+  const trackId = button.dataset.track;
+  if(!host || !trackId) return;
+
+  // 播放器就放在试听区，顺便滚过去
+  host.dataset.open = '1';
+  const old = host.querySelector('audio');
   if(old) old.remove();
 
   const audio = document.createElement('audio');
@@ -185,7 +276,7 @@ function playFromButton(button){
   audio.src = '/api/music?play=' + encodeURIComponent(trackId);
   audio.style.width = '100%';
   audio.style.marginTop = '8px';
-  box.appendChild(audio);
+  host.appendChild(audio);
   audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 

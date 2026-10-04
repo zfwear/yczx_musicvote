@@ -15,7 +15,25 @@ import {
   parseCookies, serializeCookie, isSecureRequest, clientIp, header, error,
 } from './http.js';
 
-export const SESSION_COOKIE = 'yczx_session';
+/**
+ * 会话 Cookie。
+ *
+ * ⚠️ 学生与管理员**必须用两个不同的 Cookie 名**。
+ * 早期版本共用一个 `yczx_session`，结果是同一个浏览器里登录后台会
+ * 直接顶掉学生的登录（反之亦然）—— 表现为"用户端点试听提示无权限"，
+ * 因为服务端看到的是管理员身份，而试听接口要求学生会话。
+ */
+export const SESSION_COOKIES = {
+  class: 'yczx_class_session',
+  admin: 'yczx_admin_session',
+};
+
+/** 兼容旧 Cookie 名（仅供清理，不再签发）。 */
+export const LEGACY_SESSION_COOKIE = 'yczx_session';
+
+function cookieNameFor(subject) {
+  return SESSION_COOKIES[subject] || SESSION_COOKIES.class;
+}
 
 /**
  * 班级口令查找索引用的私钥。
@@ -47,14 +65,28 @@ export function requireDb(env) {
   return null;
 }
 
-/** 取出请求携带的令牌：优先 Authorization 头，其次 Cookie。 */
-function presentedToken(request) {
+/** 取出候选令牌：Authorization 头优先，其次是对应身份的 Cookie。 */
+function presentedTokens(request, subject) {
+  const out = [];
+
   const auth = request.headers.get('Authorization') || '';
   if (auth.startsWith('Bearer ')) {
-    const t = auth.slice(7).trim();
-    if (t) return t;
+    const token = auth.slice(7).trim();
+    if (token) out.push(token);
   }
-  return parseCookies(request)[SESSION_COOKIE] || '';
+
+  const cookies = parseCookies(request);
+  if (subject) {
+    const value = cookies[cookieNameFor(subject)];
+    if (value) out.push(value);
+  } else {
+    // 不限身份时两种都看，学生会话优先
+    for (const name of [SESSION_COOKIES.class, SESSION_COOKIES.admin]) {
+      if (cookies[name]) out.push(cookies[name]);
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -88,7 +120,7 @@ export async function createSession(env, request, { subject, subjectId, role = n
   return {
     token,
     maxAge: ttlSeconds,
-    setCookie: serializeCookie(SESSION_COOKIE, token, {
+    setCookie: serializeCookie(cookieNameFor(subject), token, {
       maxAge: ttlSeconds,
       secure: isSecureRequest(request),
       httpOnly: true,
@@ -98,19 +130,21 @@ export async function createSession(env, request, { subject, subjectId, role = n
 }
 
 /** 读取当前会话，无效/过期返回 null。 */
-export async function readSession(env, request) {
-  const token = presentedToken(request);
-  if (!token) return null;
+export async function readSession(env, request, subject = null) {
+  const tokens = presentedTokens(request, subject);
+  if (!tokens.length) return null;
 
-  const tokenHash = await sha256Hex(token);
   try {
-    const row = await env.DB.prepare(
-      `SELECT id, subject, subject_id, role, expires_at
-         FROM sessions
-        WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
-    ).bind(tokenHash).first();
-
-    return row || null;
+    for (const token of tokens) {
+      const tokenHash = await sha256Hex(token);
+      const row = await env.DB.prepare(
+        `SELECT id, subject, subject_id, role, expires_at
+           FROM sessions
+          WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
+      ).bind(tokenHash).first();
+      if (row) return row;
+    }
+    return null;
   } catch (err) {
     // 迁移没跑的时候 sessions 表不存在。这是交接场景下最容易踩的坑，
     // 单独识别出来给一句人能看懂的提示，而不是抛 500 堆栈。
@@ -133,7 +167,7 @@ export async function requireSession(env, request, subject) {
 
   let session;
   try {
-    session = await readSession(env, request);
+    session = await readSession(env, request, subject);
   } catch (err) {
     if (err && err.migrationRequired) {
       return {
@@ -156,11 +190,42 @@ export async function requireSession(env, request, subject) {
   return { ok: true, session };
 }
 
+/**
+ * 角色归一化。
+ *
+ * 旧系统的 admins.role 可能是空的 —— 那个年代只有一个管理员、权限是全部，
+ * 所以空值按高级管理员处理（否则连公告都发不了）。
+ * 其它无法识别的取值一律按最低权限（普通管理员）处理，避免意外提权。
+ */
+export function normalizeRole(role) {
+  const value = String(role ?? '').trim().toLowerCase();
+  if (value === 'super') return 'super';
+  if (value === 'admin') return 'admin';
+  if (!value) return 'super';
+  return 'admin';
+}
+
 /** 管理员接口专用：要求是管理员会话，并且（可选）满足角色要求。 */
 export async function requireAdmin(env, request, allowedRoles = null) {
   const result = await requireSession(env, request, 'admin');
   if (!result.ok) return result;
-  if (allowedRoles && !allowedRoles.includes(result.session.role)) {
+
+  // 角色以数据库**当前**值为准，而不是登录那一刻缓存在会话里的值。
+  // 否则给账号补上角色之后，旧会话仍按老角色判断 ——
+  // 这正是"高级管理员发公告却报无权限"的原因。
+  let rawRole = result.session.role;
+  try {
+    const row = await env.DB.prepare('SELECT role FROM admins WHERE id = ?')
+      .bind(result.session.subject_id).first();
+    if (row) rawRole = row.role;
+  } catch {
+    /* 查不到就沿用会话里的 */
+  }
+
+  const role = normalizeRole(rawRole);
+  result.session.role = role;
+
+  if (allowedRoles && !allowedRoles.includes(role)) {
     return { ok: false, response: error('当前角色无权执行该操作', 403) };
   }
   return result;
@@ -179,22 +244,24 @@ export async function requireStaff(env, request) {
   return requireAdmin(env, request, ['super', 'admin']);
 }
 
-/** 撤销当前会话（退出登录）。 */
-export async function revokeSession(env, request) {
-  const token = presentedToken(request);
-  if (!token) return;
-  const tokenHash = await sha256Hex(token);
-  await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+/** 撤销会话（退出登录）。subject 为 null 时把两种身份的令牌都撤销。 */
+export async function revokeSession(env, request, subject = null) {
+  for (const token of presentedTokens(request, subject)) {
+    const tokenHash = await sha256Hex(token);
+    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+  }
 }
 
-/** 清空 Cookie 的头。 */
-export function clearSessionCookie(request) {
-  return serializeCookie(SESSION_COOKIE, '', {
-    maxAge: 0,
-    secure: isSecureRequest(request),
-    httpOnly: true,
-    sameSite: 'Lax',
-  });
+/** 清空 Cookie 的头：两种身份 + 旧名字一起清，避免残留。 */
+export function clearSessionCookies(request) {
+  const secure = isSecureRequest(request);
+  return [SESSION_COOKIES.class, SESSION_COOKIES.admin, LEGACY_SESSION_COOKIE]
+    .map((name) => serializeCookie(name, '', {
+      maxAge: 0,
+      secure,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }));
 }
 
 /**

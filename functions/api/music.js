@@ -325,7 +325,9 @@ export async function onRequestGet(context) {
     return json({ configured: true, provider: providerMode(env) });
   }
 
-  const auth = await requireSession(env, request, 'class');
+  // 学生或管理员都可以试听（后台审核时也需要听一下）。
+  // 传 null 表示两种会话都接受。
+  const auth = await requireSession(env, request, null);
   if (!auth.ok) return auth.response;
 
   const ip = clientIp(request);

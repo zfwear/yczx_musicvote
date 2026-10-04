@@ -4,7 +4,11 @@ import {
   randomReadableCode, formatInviteCode, sha256Hex, normalizeInviteCode,
 } from '../../_lib/crypto.js';
 import { parsePositiveInt, parseEnum, sanitizeText } from '../../_lib/validate.js';
-import { changedRows } from '../../_lib/db.js';
+import { changedRows, isMissingTable } from '../../_lib/db.js';
+
+const MIGRATION_HINT =
+  '数据库尚未执行 003 迁移（缺少动态口令表），'
+  + '请先在 D1 控制台执行 sql/003_multi_admin_and_announcements.sql';
 
 /**
  * 动态口令（管理员邀请码）管理 —— 仅高级管理员可用。
@@ -29,6 +33,15 @@ function toSqlDateTime(date) {
 }
 
 export async function onRequestGet(context) {
+  try {
+    return await handleGet(context);
+  } catch (err) {
+    if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+    throw err;
+  }
+}
+
+async function handleGet(context) {
   const { request, env } = context;
 
   const auth = await requireSuper(env, request);
@@ -51,6 +64,15 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPost(context) {
+  try {
+    return await handlePost(context);
+  } catch (err) {
+    if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+    throw err;
+  }
+}
+
+async function handlePost(context) {
   const { request, env } = context;
 
   const auth = await requireSuper(env, request);

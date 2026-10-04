@@ -1,6 +1,7 @@
 import { error, json } from '../../_lib/http.js';
 import { requireSession } from '../../_lib/auth.js';
 import { parseEnum } from '../../_lib/validate.js';
+import { getVoteCap, applyVoteCap } from '../../_lib/settings.js';
 
 /**
  * 榜单查询（学生端）—— 双榜单分离。
@@ -51,7 +52,9 @@ export async function onRequestGet(context) {
         LIMIT 50`
     ).all();
 
-    return json(results || []);
+    // 超过上限的票不计入票数：票照收，但显示与排序都用封顶后的值。
+    const cap = await getVoteCap(env);
+    return json(applyVoteCap(results || [], cap));
   }
 
   // 正式榜：不含 votes

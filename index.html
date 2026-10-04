@@ -143,6 +143,10 @@ async function checkPw(){
       loadAnnouncements();
       loadPending();
       loadApproved();
+      // 用管理员身份登录时进入调试模式：点歌不限次数、不查重
+      if(d.debug){
+        alert('已进入调试模式：\n\n· 点歌不限次数（不占用每周额度）\n· 同一首歌可以反复提交\n· 提交的歌会在后台标注「调试模式」\n· 与已有正式歌曲重复的调试歌曲不会显示在审核列表里');
+      }
     } else { msg.textContent = d.error || '口令错误'; }
   } catch(e) { msg.textContent = '网络错误'; }
 }
@@ -263,15 +267,7 @@ async function audition(songId, title, artist){
       host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">没找到可试听的版本</p>';
       return;
     }
-    host.innerHTML = list.map(s => `
-      <div style="background:rgba(255,255,255,0.85);border-radius:12px;padding:10px 12px;margin:8px 0;border:1px solid rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="min-width:0;">
-          <div style="font-size:14px;font-weight:600;color:#1e293b;word-break:break-word;">${escapeHtml(s.name)}</div>
-          <div style="font-size:12px;color:#64748b;word-break:break-word;">${escapeHtml(s.artist)}　<span style="color:#0284c7;">${escapeHtml(s.source || '')}</span></div>
-        </div>
-        <button class="btn-upvote" data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="playFromButton(this)">播放</button>
-      </div>
-    `).join('');
+    host.innerHTML = auditionPanelHtml(songId, list);
   } catch(e) {
     host.innerHTML = '<p style="text-align:center;color:#e11d48;font-size:13px;margin:8px 0;">网络错误</p>';
   }
@@ -279,6 +275,46 @@ async function audition(songId, title, artist){
 
 function playFromButton(button){
   playTrack(button.dataset.track, button.dataset.song);
+}
+
+/**
+ * 试听候选面板。
+ *
+ * 刻意**不用**榜单那种白色卡片样式：左侧品牌色竖条 + 淡蓝底 + 带标题与数量，
+ * 让人一眼看出"这是搜出来的候选，不是榜上的歌"。
+ * 右上角固定一个「收起 ▲」，不必靠"再点一次试听"去猜。
+ */
+function auditionPanelHtml(songId, list){
+  const rows = list.map(s => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
+      <div style="min-width:0;font-size:13px;word-break:break-word;">
+        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
+        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
+        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
+      </div>
+      <button data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="playFromButton(this)"
+        style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
+    </div>
+  `).join('');
+
+  return `
+    <div style="margin:10px 0 16px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
+        <button onclick="closeAudition(${safeInt(songId)})"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">以下为搜索到的候选版本，不是榜单上的歌曲</div>
+      ${rows}
+    </div>
+  `;
+}
+
+function closeAudition(songId){
+  const host = document.getElementById('audition-' + safeInt(songId));
+  if(!host) return;
+  host.dataset.open = '0';
+  host.innerHTML = '';
 }
 
 function playTrack(trackId, songId){

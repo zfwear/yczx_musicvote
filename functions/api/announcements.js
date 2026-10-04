@@ -1,7 +1,7 @@
 import { readJson, error, json } from '../../_lib/http.js';
 import { requireSession, requireStaff } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum, sanitizeText, sanitizeMultiline } from '../../_lib/validate.js';
-import { changedRows } from '../../_lib/db.js';
+import { changedRows, isMissingTable } from '../../_lib/db.js';
 
 /**
  * 公告区。
@@ -14,7 +14,29 @@ import { changedRows } from '../../_lib/db.js';
 const MAX_ACTIVE_LIST = 20;
 const MAX_ADMIN_LIST = 100;
 
+const MIGRATION_HINT =
+  '数据库尚未执行 003 迁移（缺少公告表），'
+  + '请先在 D1 控制台执行 sql/003_multi_admin_and_announcements.sql';
+
 export async function onRequestGet(context) {
+  try {
+    return await handleGet(context);
+  } catch (err) {
+    if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+    throw err;
+  }
+}
+
+export async function onRequestPost(context) {
+  try {
+    return await handlePost(context);
+  } catch (err) {
+    if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+    throw err;
+  }
+}
+
+async function handleGet(context) {
   const { request, env } = context;
 
   // subject 传 null：班级身份或管理员身份都放行。
@@ -43,7 +65,7 @@ export async function onRequestGet(context) {
   return json({ announcements: results || [] });
 }
 
-export async function onRequestPost(context) {
+async function handlePost(context) {
   const { request, env } = context;
 
   const auth = await requireStaff(env, request);

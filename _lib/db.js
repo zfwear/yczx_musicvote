@@ -19,3 +19,16 @@ export function lastRowId(result) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
+
+/**
+ * 判断错误是否为"表不存在"。
+ * 用来把"迁移没跑"翻译成人能看懂的提示，而不是甩一个 500 堆栈给管理员。
+ */
+export function isMissingTable(err) {
+  return /no such table/i.test(String((err && err.message) || ''));
+}
+
+/** 判断错误是否为"列不存在"（迁移只跑了一半）。 */
+export function isMissingColumn(err) {
+  return /no such column/i.test(String((err && err.message) || ''));
+}

@@ -25,6 +25,8 @@ export async function onRequestPost(context) {
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
   const classId = auth.session.subject_id;
+  // 调试模式（用管理员身份在学生端登录）不走每周限次、不查重
+  const isDebug = auth.session.role === 'debug';
 
   const ip = clientIp(request);
   const flood = await rateLimit(env, `vote:${ip}`, 30, 3600);
@@ -65,6 +67,31 @@ export async function onRequestPost(context) {
       LIMIT 1`
   ).bind(artist.value, title.value).first();
   if (banned) return error(`该歌曲或歌手已被过滤：${banned.reason || '违规'}`, 403);
+
+  // ---- 调试模式：不限次数、不查重 ----
+  // 黑名单仍然生效（方便验证黑名单规则），但跳过"每周一次"和重复检查。
+  // 提交的歌标记 is_debug=1，后台审核列表会显示「调试模式」。
+  if (isDebug) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO songs (class_id, title, artist, category_id, status, is_debug)
+         VALUES (0, ?, ?, ?, 'pending', 1)`
+      ).bind(title.value, artist.value, category.value).run();
+    } catch (err) {
+      if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+      // 006 迁移还没执行：退回普通插入，只是后台不会标注调试模式
+      await env.DB.prepare(
+        `INSERT INTO songs (class_id, title, artist, category_id, status)
+         VALUES (0, ?, ?, ?, 'pending')`
+      ).bind(title.value, artist.value, category.value).run();
+    }
+
+    return json({
+      ok: true,
+      debug: true,
+      message: '调试模式：已提交（不占用每周额度、不查重）',
+    });
+  }
 
   // ---- 友好的重复提示（非原子，只为文案）----
   // 全校共用一份榜单，所以查重是**全校范围**的：不同班级点同一首歌也算重复。

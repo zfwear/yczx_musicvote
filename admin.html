@@ -60,7 +60,7 @@ function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? M
 
 let currentStatus = 'pending';
 let currentRole = 'admin';
-let settingsCache = { classes: [], banned: [], categories: [], security: {}, invites: [], admins: [] };
+let settingsCache = { classes: [], banned: [], categories: [], security: {}, invites: [], admins: [], announcements: [], vote: {} };
 
 function showLogin(){
   document.getElementById('adminBox').classList.add('hidden');
@@ -131,10 +131,12 @@ async function loadList(){
       const id = safeInt(s.id);
       const catId = safeInt(s.category_id);
       const reported = safeInt(s.is_reported) === 1;
+      const isDebugSong = safeInt(s.is_debug) === 1;
+      const classText = safeInt(s.class_id) === 0 ? '调试' : ('#' + safeInt(s.class_id));
       return `
       <div class="card">
         <h3>${escapeHtml(s.title)} - ${escapeHtml(s.artist)}</h3>
-        <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${safeInt(s.class_id)}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}</p>
+        <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${classText}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}${isDebugSong ? ' | <span style="color:#7c3aed;font-weight:bold;">调试模式</span>' : ''}</p>
         <div style="margin: 8px 0;">
           <select onchange="updateCategory(${id}, this.value)" style="padding:6px; font-size:14px; width:auto; border-radius:6px; border:1px solid #e2e8f0;">
             <option value="1" ${catId === 1 ? 'selected' : ''}>纯音乐</option>
@@ -144,11 +146,13 @@ async function loadList(){
           </select>
         </div>
         <div class="actions">
+          <button data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="adminAuditionFromButton(this)" style="background:#0891b2;">试听</button>
           ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button onclick="action(${id}, 'clear_report')" style="background:#64748b;">清除举报</button>` : ''}` : ''}
           ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${id}, 'reject')">移入回收站</button>` : ''}
           ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button><button class="btn-reject" onclick="action(${id}, 'delete')">彻底删除</button>` : ''}
         </div>
       </div>
+      <div id="admin-audition-${id}"></div>
     `}).join('');
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
 }
@@ -166,6 +170,7 @@ async function loadSettings(){
     settingsCache.banned = Array.isArray(data.banned) ? data.banned : [];
     settingsCache.categories = Array.isArray(data.categories) ? data.categories : [];
     settingsCache.security = data.security || {};
+    settingsCache.vote = data.vote || { cap: 0, capConfigured: false, totalMembers: 0 };
     if(data.security && data.security.role){ currentRole = data.security.role; }
 
     // 公告：所有管理员都能看和发
@@ -199,16 +204,69 @@ async function loadSettings(){
 function renderSettings(){
   const box = document.getElementById('listBox');
 
-  const classRows = settingsCache.classes.length ? settingsCache.classes.map(c => {
+  const canViewPasswords = settingsCache.security.canViewPasswords !== false;
+  const hasClassMeta = settingsCache.security.hasClassMeta !== false;
+
+  /** 单个班级的卡片（列表里会按年级分组复用） */
+  const buildClassCard = (c) => {
     const id = safeInt(c.id);
+    const pw = typeof c.password === 'string' && c.password ? c.password : '';
+    const count = c.member_count === null || c.member_count === undefined ? '' : String(safeInt(c.member_count));
+
+    let pwHtml;
+    if(!isSuper){
+      pwHtml = '<span style="color:#94a3b8;">（仅高级管理员可见）</span>';
+    } else if(!canViewPasswords){
+      pwHtml = '<span style="color:#b45309;">（尚未执行 005 迁移，暂时看不到；请先在 D1 执行 sql/005_viewable_class_passwords.sql）</span>';
+    } else if(pw){
+      pwHtml = `<b style="font-family:monospace;color:#065f46;letter-spacing:1px;">${escapeHtml(pw)}</b>
+                <button data-copy="${escapeHtml(pw)}" onclick="copyFromButton(this)" style="font-size:12px;padding:4px 10px;width:auto;background:#64748b;box-shadow:none;">复制</button>`;
+    } else {
+      pwHtml = '<span style="color:#b45309;">（执行 005 之前设置的旧口令，无法查看；点「修改口令」重设一次就能看到）</span>';
+    }
+
+    const metaText = `${c.grade ? ' · ' + escapeHtml(c.grade) : ''}${count ? ' · ' + count + ' 人' : ''}`;
+
     return `
       <div class="card">
-        <p style="margin:0 0 6px 0;font-size:13px;">班级：<b>${escapeHtml(c.name)}</b>（编号 ${id}）</p>
+        <p style="margin:0 0 6px 0;font-size:13px;">
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" data-class-check="${id}" style="width:auto;margin:0;">
+            <b>${escapeHtml(c.name)}</b>
+          </label>
+          <span style="color:#94a3b8;">编号 ${id}${metaText}</span>
+        </p>
+        <p style="margin:0 0 8px 0;font-size:13px;">口令：${pwHtml}</p>
         <button onclick="changeClassPassword(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:bold;">修改口令</button>
+        <button onclick="editClassInfo(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:#64748b;box-shadow:none;">改年级/人数</button>
         <button class="btn-reject" onclick="deleteClass(${id})">删除</button>
       </div>
     `;
-  }).join('') : '<p class="sub">还没有配置其它班级口令</p>';
+  };
+
+  // 按年级分组展示 —— 60 个班级平铺一列根本找不到人
+  let classRows = '<p class="sub">还没有配置其它班级口令</p>';
+  if (settingsCache.classes.length) {
+    const groups = new Map();
+    for (const c of settingsCache.classes) {
+      const grade = (c.grade || '').trim() || '未分年级';
+      if (!groups.has(grade)) groups.set(grade, []);
+      groups.get(grade).push(c);
+    }
+
+    classRows = Array.from(groups.entries()).map(([grade, items]) => {
+      const total = items.reduce((sum, c) => sum + (c.member_count || 0), 0);
+      const withCount = items.filter((c) => c.member_count !== null && c.member_count !== undefined).length;
+      const summary = `共 ${items.length} 个班`
+        + (total ? ` · 已填 ${withCount} 个班共 ${total} 人` : ' · 未填人数');
+      return `
+        <p class="sub" style="text-align:left;font-weight:bold;color:#0f172a;margin:14px 0 4px;">
+          ${escapeHtml(grade)}　<span style="font-weight:normal;color:#94a3b8;">${summary}</span>
+        </p>
+        ${items.map(buildClassCard).join('')}
+      `;
+    }).join('');
+  }
 
   const weightRows = settingsCache.categories.map(c => {
     const id = safeInt(c.id);
@@ -318,11 +376,13 @@ function renderSettings(){
 
     <div class="card">
       <h3>一键批量生成班级口令</h3>
-      <p>按序号挨个创建，不用一个个手动加。例如前缀填「高一」、序号 1 到 20，
-         就会一次生成 高一(1)班 … 高一(20)班。</p>
+      <p>按序号挨个创建，不用一个个手动加。例如年级填「高一」、前缀填「高一」、序号 1 到 20，
+         就会一次生成 高一(1)班 … 高一(20)班，并统一记上年级与人数。</p>
+      <input id="bulkGrade" placeholder="年级（如：高一）" value="" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bulkPrefix" placeholder="班级名称前缀" value="高一" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bulkStart" type="number" min="1" max="99" value="1" placeholder="起始序号" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bulkEnd" type="number" min="1" max="99" value="10" placeholder="结束序号" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bulkMemberCount" type="number" min="0" max="10000" placeholder="每班人数（选填，用于汇总全校人数）" style="font-size:14px;padding:10px;margin:8px 0;">
       <select id="bulkMode" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
         <option value="random">每班一个随机口令（推荐，更安全）</option>
         <option value="shared">所有班共用一个口令（简单，但泄露一个等于全泄露）</option>
@@ -334,6 +394,12 @@ function renderSettings(){
 
     <div class="card">
       <h3>班级口令列表</h3>
+      <p>每个班的口令都能直接看到，点「复制」发到班级群就行。<br>
+         勾选多个可以一次性删除（随机生成的那一批尤其好用）。</p>
+      <button onclick="toggleAllClassChecks(true)" style="font-size:14px;padding:10px;background:#64748b;">全选</button>
+      <button onclick="toggleAllClassChecks(false)" style="font-size:14px;padding:10px;background:#64748b;">取消全选</button>
+      <button class="btn-reject" onclick="deleteSelectedClasses()" style="font-size:14px;padding:10px;">删除选中</button>
+      <div style="height:12px;"></div>
       ${classRows}
     </div>
 
@@ -350,6 +416,30 @@ function renderSettings(){
     </div>
   `;
 
+  // 投票上限：超过这个数的票不计入票数（票照收，显示与排序都封顶）
+  const voteInfo = settingsCache.vote || {};
+  const voteCap = safeInt(voteInfo.cap);
+  const totalMembers = safeInt(voteInfo.totalMembers);
+  const someMissingCount = settingsCache.classes.some(
+    (c) => c.member_count === null || c.member_count === undefined
+  );
+
+  const voteSection = isSuper ? `
+    <div class="card">
+      <h3>投票上限（超出部分不计入）</h3>
+      <p>填一个「全校总人数」。<b>票数超过这个数的部分不计入票数</b> ——
+         票照收，但学生端显示的票数与正式榜排序都用封顶后的值，避免刷票把数字刷得离谱。</p>
+      <p class="sub" style="text-align:left;">按班级人数自动汇总：<b>${totalMembers}</b> 人
+         （共 ${settingsCache.classes.length} 个班${someMissingCount ? '，其中有班级还没填人数' : ''}）</p>
+      <input id="voteCapInput" type="number" min="0" max="1000000" value="${voteCap}" placeholder="0 表示不限制" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="saveVoteCap()" style="font-size:14px;padding:10px;">保存上限</button>
+      <button onclick="fillTotalMembers()" style="font-size:14px;padding:10px;background:#64748b;">填入汇总人数</button>
+      ${voteCap > 0
+        ? `<p class="sub" style="color:#059669;">当前上限：${voteCap} 票</p>`
+        : '<p class="sub" style="color:#b45309;">当前未设上限，票数不会被封顶</p>'}
+    </div>
+  ` : '';
+
   box.innerHTML = `
     <div class="card">
       <h3>安全状态</h3>
@@ -365,6 +455,7 @@ function renderSettings(){
     </div>
 
     ${superSections}
+    ${voteSection}
 
     <div class="card">
       <h3>发布公告</h3>
@@ -428,6 +519,201 @@ async function changeClassPassword(id){
 async function deleteClass(id){
   if(!confirm('确认删除这个班级口令吗？删除后该班级将无法登录。')) return;
   settingsPost({action:'delete_class', id: safeInt(id)}, '已删除');
+}
+
+/* 勾选批量操作 —— 随机生成的那批口令尤其需要一次性清掉 */
+
+function toggleAllClassChecks(checked){
+  document.querySelectorAll('[data-class-check]').forEach((el) => { el.checked = !!checked; });
+}
+
+async function deleteSelectedClasses(){
+  const ids = Array.from(document.querySelectorAll('[data-class-check]:checked'))
+    .map((el) => safeInt(el.dataset.classCheck))
+    .filter((id) => id > 0);
+
+  if(!ids.length){ alert('请先勾选要删除的班级'); return; }
+
+  const names = settingsCache.classes
+    .filter((c) => ids.includes(safeInt(c.id)))
+    .map((c) => c.name);
+  const preview = names.slice(0, 10).join('、') + (names.length > 10 ? ' 等' : '');
+
+  if(!confirm('确认删除这 ' + ids.length + ' 个班级口令吗？\n\n' + preview
+    + '\n\n删除后这些班级将无法登录，其在线状态也会立即失效。')) return;
+
+  const r = await fetch('/api/admin-settings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'delete_classes', ids: ids})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已删除'); loadSettings(); }
+  else alert(d.error || '删除失败');
+}
+
+function copyFromButton(button){
+  copyText(button.dataset.copy || '');
+}
+
+/* ---------------- 年级 / 人数 / 投票上限 ---------------- */
+
+async function editClassInfo(id){
+  const item = settingsCache.classes.find((c) => safeInt(c.id) === safeInt(id));
+  if(!item) return;
+
+  const grade = prompt('年级（例如：高一）', item.grade || '');
+  if(grade === null) return;
+
+  const current = item.member_count === null || item.member_count === undefined
+    ? '' : String(safeInt(item.member_count));
+  const countRaw = prompt('班级人数（填数字；留空表示不设置）', current);
+  if(countRaw === null) return;
+
+  const trimmed = countRaw.trim();
+  const memberCount = trimmed === '' ? null : Number(trimmed);
+  if(memberCount !== null && (!Number.isInteger(memberCount) || memberCount < 0 || memberCount > 10000)){
+    alert('人数需要是 0 到 10000 之间的整数');
+    return;
+  }
+
+  if(!confirm('确认保存「' + item.name + '」的年级与人数吗？\n\n年级：' + (grade.trim() || '（不填）')
+    + '\n人数：' + (memberCount === null ? '（不填）' : memberCount))) return;
+
+  const r = await fetch('/api/admin-settings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      action:'update_class_info',
+      id: safeInt(id),
+      grade: grade.trim(),
+      member_count: memberCount,
+    })
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已保存'); loadSettings(); }
+  else alert(d.error || '保存失败');
+}
+
+async function saveVoteCap(){
+  const input = document.getElementById('voteCapInput');
+  const cap = Number(input ? input.value : NaN);
+
+  if(!Number.isInteger(cap) || cap < 0 || cap > 1000000){
+    alert('请填 0 到 1000000 之间的整数（0 表示不限制）');
+    return;
+  }
+
+  const message = cap > 0
+    ? '确认把投票上限设为 ' + cap + ' 票吗？\n\n超过这个数的票**不计入票数**（票照收，学生端显示与正式榜排序都按 ' + cap + ' 封顶）。'
+    : '确认取消投票上限吗？取消后票数不再封顶。';
+  if(!confirm(message)) return;
+
+  settingsPost({action:'set_vote_cap', cap: cap}, '已保存');
+}
+
+function fillTotalMembers(){
+  const input = document.getElementById('voteCapInput');
+  const total = safeInt((settingsCache.vote || {}).totalMembers);
+  if(input) input.value = String(total);
+  if(!total) alert('还没填班级人数，汇总结果是 0。请先在班级列表里填人数。');
+}
+
+/* ---------------- 审核时试听 ---------------- */
+
+function adminAuditionFromButton(button){
+  adminAudition(button.dataset.audition, button.dataset.title, button.dataset.artist);
+}
+
+async function adminAudition(songId, title, artist){
+  const host = document.getElementById('admin-audition-' + safeInt(songId));
+  if(!host) return;
+
+  // 再点一次收起
+  if(host.dataset.open === '1'){
+    host.dataset.open = '0';
+    host.innerHTML = '';
+    return;
+  }
+
+  host.dataset.open = '1';
+  host.innerHTML = '<p class="sub">正在搜索音源…</p>';
+
+  try {
+    let url = '/api/music?q=' + encodeURIComponent(title || '');
+    if(artist) url += '&artist=' + encodeURIComponent(artist);
+    const r = await fetch(url);
+    const d = await r.json().catch(() => ({}));
+
+    if(!r.ok){
+      host.innerHTML = '<p class="sub" style="color:#e11d48;">' + escapeHtml(d.error || '搜索失败') + '</p>';
+      return;
+    }
+    const list = Array.isArray(d.results) ? d.results : [];
+    if(!list.length){
+      host.innerHTML = '<p class="sub">没找到可试听的版本</p>';
+      return;
+    }
+    host.innerHTML = adminAuditionPanelHtml(songId, list);
+  } catch(e) {
+    host.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
+  }
+}
+
+function adminPlayFromButton(button){
+  const host = document.getElementById('admin-audition-' + safeInt(button.dataset.song));
+  const trackId = button.dataset.track;
+  if(!host || !trackId) return;
+
+  const old = host.querySelector('audio');
+  if(old) old.remove();
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = '/api/music?play=' + encodeURIComponent(trackId);
+  audio.style.width = '100%';
+  audio.style.marginTop = '8px';
+  host.appendChild(audio);
+  audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
+}
+
+/**
+ * 试听候选面板。
+ * 刻意和审核卡片（白色 .card）区分开：左侧品牌色竖条 + 淡蓝底 + 标题数量，
+ * 并固定一个「收起 ▲」，不用靠"再点一次试听"去猜怎么关。
+ */
+function adminAuditionPanelHtml(songId, list){
+  const rows = list.map(s => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
+      <div style="min-width:0;font-size:13px;word-break:break-word;">
+        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
+        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
+        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
+      </div>
+      <button data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="adminPlayFromButton(this)"
+        style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
+    </div>
+  `).join('');
+
+  return `
+    <div style="margin:8px 0 14px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
+        <button onclick="closeAdminAudition(${safeInt(songId)})"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">以下为搜索到的候选版本，不是本页的待审歌曲</div>
+      ${rows}
+    </div>
+  `;
+}
+
+function closeAdminAudition(songId){
+  const host = document.getElementById('admin-audition-' + safeInt(songId));
+  if(!host) return;
+  host.dataset.open = '0';
+  host.innerHTML = '';
 }
 
 async function saveWeight(id){
@@ -625,22 +911,33 @@ function randomPassword(length){
  * 拆成 20 个请求后，每个请求都在预算内，总耗时只是多了几次网络往返。
  */
 async function bulkGenerate(){
+  const grade = document.getElementById('bulkGrade').value.trim();
   const prefix = document.getElementById('bulkPrefix').value.trim();
   const start = safeInt(document.getElementById('bulkStart').value);
   const end = safeInt(document.getElementById('bulkEnd').value);
   const mode = document.getElementById('bulkMode').value;
   const sharedPw = document.getElementById('bulkSharedPw').value.trim();
+  const memberRaw = document.getElementById('bulkMemberCount').value.trim();
+  const memberCount = memberRaw === '' ? null : Number(memberRaw);
   const resultBox = document.getElementById('bulkResult');
 
   if(!prefix){ alert('请填写班级名称前缀，例如「高一」'); return; }
   if(!start || !end || end < start){ alert('序号范围不对，结束序号要大于等于起始序号'); return; }
   if(end - start + 1 > 60){ alert('一次最多生成 60 个班级，请分批'); return; }
   if(mode === 'shared' && sharedPw.length < 6){ alert('统一口令至少 6 位'); return; }
+  if(memberCount !== null && (!Number.isInteger(memberCount) || memberCount < 0 || memberCount > 10000)){
+    alert('每班人数需要是 0 到 10000 之间的整数');
+    return;
+  }
 
   const count = end - start + 1;
   const modeText = mode === 'random' ? '每班一个随机口令' : '所有班共用一个口令';
-  const warn = mode === 'random' ? '\n\n⚠️ 随机口令只显示这一次，生成后请立刻复制保存。' : '';
-  if(!confirm('确认生成 ' + count + ' 个班级吗？\n\n名称：' + prefix + '(' + start + ')班 ~ ' + prefix + '(' + end + ')班\n方式：' + modeText + warn)) return;
+  // 口令是可查看的（加密存在数据库里），所以不必再提醒"只显示这一次"
+  if(!confirm('确认生成 ' + count + ' 个班级吗？\n\n'
+    + (grade ? '年级：' + grade + '\n' : '')
+    + '名称：' + prefix + '(' + start + ')班 ~ ' + prefix + '(' + end + ')班\n'
+    + '方式：' + modeText
+    + (memberCount !== null ? '\n每班人数：' + memberCount : ''))) return;
 
   const created = [];
   const failed = [];
@@ -655,7 +952,13 @@ async function bulkGenerate(){
       const r = await fetch('/api/admin-settings', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({action:'add_class', name: name, password: password})
+        body: JSON.stringify({
+          action:'add_class',
+          name: name,
+          password: password,
+          grade: grade,
+          member_count: memberCount,
+        })
       });
       const d = await r.json().catch(() => ({}));
       if(r.ok) created.push({ name: name, password: password });
@@ -670,7 +973,7 @@ async function bulkGenerate(){
     <div class="card" style="background:rgba(5,150,105,0.08);border-color:rgba(5,150,105,0.35);">
       <h3>生成完成：成功 ${created.length} 个${failed.length ? '，失败 ' + failed.length + ' 个' : ''}</h3>
       ${created.length ? `
-        <p>${mode === 'random' ? '⚠️ 这些口令只显示这一次，请立刻复制保存（可贴到班级群里分发）。' : '所有班级共用同一个口令。'}</p>
+        <p>${mode === 'random' ? '这些口令之后随时可以在下方「班级口令列表」里查看和复制。' : '所有班级共用同一个口令。'}</p>
         <textarea id="bulkOutput" readonly rows="${Math.min(20, created.length + 2)}"
           style="font-size:13px;padding:10px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.95);font-family:monospace;">${escapeHtml(lines)}</textarea>
         <button onclick="copyBulk()" style="font-size:14px;padding:10px;background:#64748b;">复制全部口令</button>

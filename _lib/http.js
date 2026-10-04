@@ -25,6 +25,16 @@ export function error(message, status = 400, extraHeaders = {}) {
   return json({ error: message }, status, extraHeaders);
 }
 
+/**
+ * 带多个 Set-Cookie 的 JSON 响应。
+ * 普通对象没法承载同名的多个头（会互相覆盖），所以这里用 Headers.append。
+ */
+export function jsonWithCookies(body, status, cookies) {
+  const headers = new Headers(JSON_HEADERS);
+  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
 /** 解析 Cookie 头。 */
 export function parseCookies(request) {
   const header = request.headers.get('Cookie') || '';

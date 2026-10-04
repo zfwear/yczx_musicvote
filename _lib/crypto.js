@@ -201,3 +201,67 @@ export async function hmacHex(secret, message) {
 
 /** 导出给测试使用。 */
 export const __internals = { bytesToB64url, b64urlToBytes, timingSafeEqualBytes };
+
+/* ============================================================
+   可查看的凭据保险箱（AES-GCM）
+   ============================================================
+
+   为什么需要它：
+   班级口令是要**发到各个班**的，管理员必须随时能查到"高一(3)班的口令是什么"。
+   如果只存 PBKDF2 哈希，管理员自己也拿不回来，那就没法分发了。
+
+   所以班级口令存两份：
+     · password            加盐 PBKDF2 哈希 —— 登录校验用，不可逆
+     · password_encrypted  AES-GCM 密文   —— 仅用于管理员查看
+
+   密钥由 AUTH_PEPPER 派生，**存在环境变量里而不是数据库里**。
+   因此只拿到数据库（没有环境变量）依然解不开这些密文，
+   比直接存明文强得多。
+
+   ⚠️ 前提：必须配置 AUTH_PEPPER。不配置时会退回源码里的默认值，
+      等于任何人都能解开密文 —— 后台会明确提示这一点。
+   ============================================================ */
+
+const VAULT_SALT = 'yczx-secret-vault-v1';
+const VAULT_ITERATIONS = 1000;
+
+async function vaultKey(pepper) {
+  const material = await crypto.subtle.importKey(
+    'raw', encoder.encode(pepper), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: encoder.encode(VAULT_SALT), iterations: VAULT_ITERATIONS, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/** 加密一个可查看凭据，返回 v1.<iv>.<密文>。 */
+export async function encryptSecret(pepper, plain) {
+  const key = await vaultKey(pepper);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key, encoder.encode(String(plain))
+  );
+  return `v1.${bytesToB64url(iv)}.${bytesToB64url(new Uint8Array(cipher))}`;
+}
+
+/** 解密；密钥不对或数据损坏时返回 null，不抛异常。 */
+export async function decryptSecret(pepper, stored) {
+  if (typeof stored !== 'string' || !stored.startsWith('v1.')) return null;
+  const parts = stored.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const key = await vaultKey(pepper);
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: b64urlToBytes(parts[1]) },
+      key,
+      b64urlToBytes(parts[2])
+    );
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
+}
