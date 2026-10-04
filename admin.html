@@ -47,7 +47,6 @@
   </div>
   <div id="listBox"><p class="sub">加载中...</p></div>
 </div>
-
 <script>
 let currentStatus = 'pending';
 function switchTab(status, btn){
@@ -107,4 +106,30 @@ async function loadList(){
         </div>
       </div>
     `).join('');
-  } catc
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>';
+  }
+}
+async function action(id, type){
+  const adminPw = sessionStorage.getItem('admin_pw') || '';
+  const r = await fetch('/api/admin-action', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id, type, password: adminPw})
+  });
+  if(r.ok){ loadList(); }
+  else { alert('操作失败'); }
+}
+function logout(){
+  sessionStorage.removeItem('admin_pw');
+  document.getElementById('adminBox').classList.add('hidden');
+  document.getElementById('loginBox').classList.remove('hidden');
+}
+if(sessionStorage.getItem('admin_pw')){
+  document.getElementById('loginBox').classList.add('hidden');
+  document.getElementById('adminBox').classList.remove('hidden');
+  loadList();
+}
+</script>
+</body>
+</html>
