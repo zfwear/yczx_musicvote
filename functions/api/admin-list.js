@@ -4,7 +4,7 @@ export async function onRequestGet(context) {
   const status = url.searchParams.get('status') || 'pending';
 
   const { results } = await env.DB.prepare(
-    `SELECT s.id, s.title, s.artist, s.votes, s.class_id, c.name as category_name 
+    `SELECT s.id, s.title, s.artist, s.votes, s.class_id, s.category_id, c.name as category_name 
      FROM songs s
      JOIN categories c ON s.category_id = c.id
      WHERE s.status = ?
