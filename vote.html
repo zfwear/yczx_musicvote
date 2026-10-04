@@ -5,26 +5,32 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>点歌</title>
 <style>
-  body{font-family:system-ui;max-width:520px;margin:40px auto;padding:0 16px;background:#f7f7f7;}
-  input,select,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px;border:1px solid #ddd;}
-  button{background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:bold;}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  .box{background:rgba(255,255,255,0.85);backdrop-filter:blur(10px);padding:24px;border-radius:16px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 4px 20px rgba(0,0,0,0.05);}
+  h2{text-align:center;color:#0f172a;margin-top:0;}
+  p.sub{text-align:center;color:#64748b;font-size:13px;margin-bottom:20px;}
+  input,select{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 16px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
+  button{font-size:16px;padding:16px;width:100%;box-sizing:border-box;border:0;border-radius:14px;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);transition:transform 0.2s;}
+  button:active{transform:scale(0.97);}
   #msg{min-height:24px;font-size:14px;text-align:center;margin-top:12px;}
-  .back{background:#6b7280;margin-top:20px;}
+  .back{background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;margin-top:20px;}
 </style>
 </head>
 <body>
-<h2 style="text-align:center;color:#1e3a8a;">点歌投票</h2>
-<p style="text-align:center;color:#888;font-size:13px;">输入你想听的歌，管理员审核后就会出现在榜单上</p>
-<input id="title" placeholder="歌名">
-<input id="artist" placeholder="歌手">
-<select id="category" style="background:#fff;">
-  <option value="2">中文歌</option>
-  <option value="3">英文歌</option>
-  <option value="1">纯音乐</option>
-  <option value="4">小语种</option>
-</select>
-<button onclick="vote()">提交点歌</button>
-<p id="msg"></p>
+<div class="box">
+  <h2>点歌投票</h2>
+  <p class="sub">每人每周只能点一次，请慎重提交哦</p>
+  <input id="title" placeholder="歌名">
+  <input id="artist" placeholder="歌手">
+  <select id="category">
+    <option value="2">中文歌</option>
+    <option value="3">英文歌</option>
+    <option value="1">纯音乐</option>
+    <option value="4">小语种</option>
+  </select>
+  <button onclick="vote()">提交点歌</button>
+  <p id="msg"></p>
+</div>
 <button class="back" onclick="location.href='/'">返回主页</button>
 <script>
 async function vote(){
@@ -34,11 +40,12 @@ async function vote(){
   const msg = document.getElementById('msg');
   const pw = sessionStorage.getItem('pw') || '';
 
+  if(!pw){ alert('请先回主页输入口令登录！'); location.href='/'; return; }
   if(!title || !artist){ msg.style.color = '#e11d48'; msg.textContent = '歌名和歌手都要填哦'; return; }
-
+  
   if(!confirm('确认提交这首歌吗？\n歌名：' + title + '\n歌手：' + artist)) return;
 
-  msg.style.color = '#2563eb'; msg.textContent = '提交中...';
+  msg.style.color = '#0284c7'; msg.textContent = '提交中...';
   try {
     const r = await fetch('/api/vote', {
       method:'POST',
@@ -47,7 +54,7 @@ async function vote(){
     });
     const d = await r.json();
     if(r.ok){
-      msg.style.color = '#059669'; msg.textContent = '✅ 点歌成功！等待管理员审核';
+      msg.style.color = '#059669'; msg.textContent = '点歌成功！等待管理员审核';
       document.getElementById('title').value = '';
       document.getElementById('artist').value = '';
     } else {
