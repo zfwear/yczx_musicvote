@@ -1,0 +1,135 @@
+﻿<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理员后台</title>
+<style>
+  body{font-family:system-ui;max-width:520px;margin:0 auto;padding:20px 16px;background:#f7f7f7;}
+  input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px;border:1px solid #ddd;}
+  button{background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:bold;}
+  .card{background:#fff;padding:14px 16px;border-radius:10px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+  .card h3{margin:0 0 6px 0;font-size:15px;color:#333;}
+  .card p{margin:0 0 10px 0;font-size:13px;color:#666;}
+  .card .actions{display:flex;gap:10px;}
+  .card .actions button{margin:0;padding:10px;font-size:14px;}
+  .btn-pass{background:#059669;}
+  .btn-reject{background:#e11d48;}
+  .hidden{display:none;}
+  .msg{text-align:center;font-size:14px;min-height:20px;color:#e11d48;}
+  .tabs{display:flex;gap:10px;margin-bottom:20px;}
+  .tabs button{background:#e5e7eb;color:#333;padding:10px;font-size:14px;margin:0;}
+  .tabs button.active{background:#2563eb;color:#fff;}
+  .sub{color:#888;font-size:12px;text-align:center;}
+</style>
+</head>
+<body>
+
+<div id="loginBox">
+  <h2 style="text-align:center;color:#1e3a8a;">管理员登录</h2>
+  <p class="sub">请输入管理员账号、密码，如有动态口令请一并填写</p>
+  <input id="username" placeholder="管理员账号" value="admin">
+  <input id="password" type="password" placeholder="管理员密码">
+  <input id="token" placeholder="动态口令 (选填)">
+  <button onclick="adminLogin()">登录</button>
+  <p id="loginMsg" class="msg"></p>
+</div>
+
+<div id="adminBox" class="hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2 style="color:#1e3a8a;margin:0;">管理员后台</h2>
+    <button onclick="logout()" style="width:auto;padding:8px 14px;background:#6b7280;font-size:13px;">退出</button>
+  </div>
+  <div class="tabs">
+    <button class="active" onclick="switchTab('pending', this)">待审核</button>
+    <button onclick="switchTab('approved', this)">已通过</button>
+    <button onclick="switchTab('rejected', this)">回收站</button>
+  </div>
+  <div id="listBox"><p class="sub">加载中...</p></div>
+</div>
+<script>
+let currentStatus = 'pending';
+function switchTab(status, btn){
+  currentStatus = status;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadList();
+}
+async function adminLogin(){
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const token = document.getElementById('token').value.trim();
+  const msg = document.getElementById('loginMsg');
+  if(!username || !password){ msg.textContent = '账号和密码都要填'; return; }
+  msg.textContent = '登录中...';
+  try {
+    const r = await fetch('/api/admin-login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username, password, token})
+    });
+    const d = await r.json();
+    if(r.ok){
+      sessionStorage.setItem('admin_pw', password);
+      document.getElementById('loginBox').classList.add('hidden');
+      document.getElementById('adminBox').classList.remove('hidden');
+      loadList();
+    } else {
+      msg.textContent = d.error || '登录失败';
+    }
+  } catch(e) {
+    msg.textContent = '网络错误';
+  }
+}
+async function loadList(){
+  const box = document.getElementById('listBox');
+  box.innerHTML = '<p class="sub">加载中...</p>';
+  try {
+    const r = await fetch('/api/admin-list?status=' + currentStatus);
+    const list = await r.json();
+    if(!list.length){ box.innerHTML = '<p class="sub">这里空空如也</p>'; return; }
+    box.innerHTML = list.map(s => `
+      <div class="card">
+        <h3>${s.title} - ${s.artist}</h3>
+        <p>分类：${s.category_name} | 票数：${s.votes} | 班级：${s.class_id}</p>
+        <div class="actions">
+          ${currentStatus === 'pending' ? `
+            <button class="btn-pass" onclick="action(${s.id}, 'approve')">✅ 通过</button>
+            <button class="btn-reject" onclick="action(${s.id}, 'reject')">❌ 拒绝</button>
+          ` : ''}
+          ${currentStatus === 'approved' ? `
+            <button class="btn-reject" onclick="action(${s.id}, 'reject')">移入回收站</button>
+          ` : ''}
+          ${currentStatus === 'rejected' ? `
+            <button class="btn-pass" onclick="action(${s.id}, 'restore')">♻️ 恢复</button>
+          ` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>';
+  }
+}
+async function action(id, type){
+  const adminPw = sessionStorage.getItem('admin_pw') || '';
+  const r = await fetch('/api/admin-action', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id, type, password: adminPw})
+  });
+  if(r.ok){ loadList(); }
+  else { alert('操作失败'); }
+}
+function logout(){
+  sessionStorage.removeItem('admin_pw');
+  document.getElementById('adminBox').classList.add('hidden');
+  document.getElementById('loginBox').classList.remove('hidden');
+}
+if(sessionStorage.getItem('admin_pw')){
+  document.getElementById('loginBox').classList.add('hidden');
+  document.getElementById('adminBox').classList.remove('hidden');
+  loadList();
+}
+</script>
+</body>
+</html>
