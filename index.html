@@ -1,0 +1,129 @@
+﻿<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>每日点歌</title>
+<style>
+  body{font-family:system-ui;max-width:520px;margin:40px auto;padding:0 16px;background:#f7f7f7}
+  h2{margin-bottom:4px}
+  .sub{color:#888;font-size:13px;margin-top:0}
+  input,button{font-size:16px;padding:12px;width:100%;box-sizing:border-box;margin:6px 0;border-radius:8px;border:1px solid #ddd}
+  button{background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:bold}
+  button:active{background:#1d4ed8}
+  #msg{color:#2563eb;min-height:20px;font-size:14px}
+  ol{padding-left:24px}
+  li{margin:10px 0;line-height:1.5;background:#fff;padding:10px 12px;border-radius:8px;list-style-position:inside}
+  .votes{color:#e11d48;font-weight:bold}
+  #gate{background:#fff;padding:20px;border-radius:12px;text-align:center}
+  #app{display:none}
+  .err{color:#e11d48}
+</style>
+</head>
+<body>
+
+<!-- 口令墙 -->
+<div id="gate">
+  <h2>🎵 每日点歌</h2>
+  <p class="sub">请输入班级口令</p>
+  <input id="pw" type="password" placeholder="口令" onkeydown="if(event.key==='Enter')checkPw()">
+  <button onclick="checkPw()">进入</button>
+  <p id="gateMsg" class="err"></p>
+</div>
+
+<!-- 投票界面 -->
+<div id="app">
+  <h2>每日点歌投票</h2>
+  <p class="sub">输入你想听的歌，投上一票吧</p>
+  <input id="title"  placeholder="歌名">
+  <input id="artist" placeholder="歌手">
+  <button onclick="vote()">投一票</button>
+  <p id="msg"></p>
+  <h3>排行榜</h3>
+  <ol id="rank"><li>加载中...</li></ol>
+</div>
+
+<script>
+// 口令验证
+async function checkPw(){
+  const pw = document.getElementById('pw').value.trim();
+  const r = await fetch('/api/login', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})
+  });
+  const d = await r.json();
+  if(r.ok){
+    sessionStorage.setItem('pw', pw);
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadRank();
+  } else {
+    document.getElementById('gateMsg').textContent = '口令不对，请重新输入';
+  }
+}
+
+function vote(){
+  const title  = document.getElementById('title').value.trim();
+  const artist = document.getElementById('artist').value.trim();
+  const msg    = document.getElementById('msg');
+  const pw     = sessionStorage.getItem('pw') || '';
+  if(!title || !artist){ msg.textContent = '歌名和歌手都要填哦'; return; }
+  msg.textContent = '提交中...';
+  fetch('/api/vote', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({title, artist, password: pw})
+  })
+  .then(r => r.json().then(d => ({ok: r.ok, d})))
+  .then(({ok, d}) => {
+    if(ok){
+      msg.textContent = `《${d.title}》- ${d.artist} 当前 ${d.votes} 票`;
+      document.getElementById('title').value = '';
+      document.getElementById('artist').value = '';
+      loadRank();
+    } else {
+      msg.textContent = d.error || '出错了';
+    }
+  })
+  .catch(() => msg.textContent = '网络错误');
+}
+
+async function loadRank(){
+  try {
+    const res = await fetch('/api/rank');
+    const list = await res.json();
+    if(!list.length){
+      document.getElementById('rank').innerHTML = '<li>还没有人投票</li>';
+      return;
+    }
+    document.getElementById('rank').innerHTML =
+      list.map(s => `<li>${s.title} - ${s.artist} <span class="votes">${s.votes}票</span></li>`).join('');
+  } catch(e) {
+    document.getElementById('rank').innerHTML = '<li>排行榜加载失败</li>';
+  }
+}
+
+// 刷新页面时如果已经有口令，直接进
+if(sessionStorage.getItem('pw')){
+  checkPw2();
+}
+function checkPw2(){
+  const pw = sessionStorage.getItem('pw');
+  fetch('/api/login', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})
+  }).then(r => {
+    if(r.ok){
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      loadRank();
+    } else {
+      sessionStorage.removeItem('pw');
+    }
+  });
+}
+</script>
+</body>
+</html>
