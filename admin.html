@@ -45,10 +45,11 @@
     <button onclick="logout()">退出</button>
   </div>
   <div class="tabs">
-    <button class="active" onclick="switchTab('pending', this)">待审核</button>
-    <button onclick="switchTab('approved', this)">已通过</button>
-    <button onclick="switchTab('rejected', this)">回收站</button>
-  </div>
+  <button class="active" onclick="switchTab('pending', this)">待审核</button>
+  <button onclick="switchTab('approved', this)">已通过</button>
+  <button onclick="switchTab('rejected', this)">回收站</button>
+  <button onclick="switchTab('settings', this)">系统设置</button>
+</div>
   <div id="listBox"><p class="sub">加载中...</p></div>
 </div>
 <script>
@@ -83,6 +84,7 @@ async function adminLogin(){
 }
 async function loadList(){
   const box = document.getElementById('listBox');
+  if(currentStatus === 'settings') { loadSettings(); return; }
   box.innerHTML = '<p class="sub">加载中...</p>';
   try {
     const r = await fetch('/api/admin-list?status=' + currentStatus);
@@ -101,13 +103,76 @@ async function loadList(){
           </select>
         </div>
         <div class="actions">
-          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${s.id}, 'approve')">✅ 通过</button><button class="btn-reject" onclick="action(${s.id}, 'reject')">❌ 拒绝</button>` : ''}
+          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${s.id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${s.id}, 'reject')">拒绝</button>` : ''}
           ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${s.id}, 'reject')">移入回收站</button>` : ''}
-          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${s.id}, 'restore')">♻️ 恢复</button>` : ''}
+          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${s.id}, 'restore')">恢复</button>` : ''}
         </div>
       </div>
     `).join('');
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
+}
+  async function loadSettings(){
+  const box = document.getElementById('listBox');
+  box.innerHTML = '<p class="sub">加载中...</p>';
+  const r = await fetch('/api/admin-settings');
+  const banneds = await r.json();
+  
+  let bannedHtml = '';
+  if(banneds.length) {
+    bannedHtml = banneds.map(b => `
+      <div class="card">
+        <p style="margin:0 0 6px 0;font-size:13px;">${b.type === 'artist' ? '歌手' : '歌名'}：<b>${b.keyword}</b>（${b.reason}）</p>
+        <button class="btn-reject" onclick="deleteBanned(${b.id})">删除</button>
+      </div>
+    `).join('');
+  } else {
+    bannedHtml = '<p class="sub">黑名单为空</p>';
+  }
+
+  box.innerHTML = `
+    <div class="card">
+      <h3>修改班级口令</h3>
+      <input id="newClassPw" placeholder="新班级口令" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="updateClassPassword()" style="font-size:14px;padding:10px;">保存新口令</button>
+    </div>
+    <div class="card">
+      <h3>添加违禁名单</h3>
+      <select id="bannedType" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+        <option value="artist">违禁歌手</option>
+        <option value="title">违禁歌名</option>
+      </select>
+      <input id="bannedKeyword" placeholder="关键词（如：吴亦凡）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bannedReason" placeholder="原因（选填）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
+    </div>
+    <div class="card">
+      <h3>当前黑名单</h3>
+      <div id="bannedList">${bannedHtml}</div>
+    </div>
+  `;
+}
+  async function updateClassPassword(){
+  const newPw = document.getElementById('newClassPw').value.trim();
+  if(!newPw) { alert('新口令不能为空'); return; }
+  const adminPw = sessionStorage.getItem('admin_pw') || '';
+  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'update_class_password', new_password: newPw, password: adminPw})});
+  const d = await r.json();
+  if(r.ok) alert('修改成功！新口令已生效'); else alert(d.error || '修改失败');
+}
+async function addBanned(){
+  const type = document.getElementById('bannedType').value;
+  const keyword = document.getElementById('bannedKeyword').value.trim();
+  const reason = document.getElementById('bannedReason').value.trim() || '违规';
+  if(!keyword) { alert('关键词不能为空'); return; }
+  const adminPw = sessionStorage.getItem('admin_pw') || '';
+  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'add_banned', type, keyword, reason, password: adminPw})});
+  const d = await r.json();
+  if(r.ok) { alert('添加成功'); loadSettings(); } else alert(d.error || '添加失败');
+}
+async function deleteBanned(id){
+  const adminPw = sessionStorage.getItem('admin_pw') || '';
+  const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'delete_banned', id, password: adminPw})});
+  if(r.ok) { alert('已删除'); loadSettings(); } else alert('删除失败');
 }
 async function action(id, type){
   const adminPw = sessionStorage.getItem('admin_pw') || '';
