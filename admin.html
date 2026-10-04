@@ -24,6 +24,7 @@
 </style>
 </head>
 <body>
+  
 <div id="loginBox">
   <h2 style="text-align:center;color:#1e3a8a;">管理员登录</h2>
   <p class="sub">请输入管理员账号、密码，如有动态口令请一并填写</p>
@@ -33,7 +34,7 @@
   <button onclick="adminLogin()">登录</button>
   <p id="loginMsg" class="msg"></p>
 </div>
-
+  
 <div id="adminBox" class="hidden">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
     <h2 style="color:#1e3a8a;margin:0;">管理员后台</h2>
@@ -44,6 +45,7 @@
     <button onclick="switchTab('approved', this)">已通过</button>
     <button onclick="switchTab('rejected', this)">回收站</button>
   </div>
+  
   <div id="listBox"><p class="sub">加载中...</p></div>
 </div>
 <script>
