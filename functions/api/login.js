@@ -1,10 +1,10 @@
 import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import {
   requireDb, createSession, rateLimit, clearRateLimit,
-  classPasswordLookup, CLASS_TTL_SECONDS,
+  classPasswordLookup, authPepper, CLASS_TTL_SECONDS,
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
-import { verifyPassword, hashPassword } from '../../_lib/crypto.js';
+import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
 
 /**
  * 班级口令登录。
@@ -84,8 +84,20 @@ export async function onRequestPost(context) {
     // 这种情况下保持现状并让本次登录成功，交由管理员去后台清理重复口令。
     try {
       const hashed = await hashPassword(secret.value);
-      await env.DB.prepare('UPDATE classes SET password = ?, password_lookup = ? WHERE id = ?')
-        .bind(hashed, lookup, matched.id).run();
+      // 顺手把 005 的"可查看密文"也补上 —— 否则这个班的口令虽然已经
+      // 升级成哈希了，管理员在后台仍然看不到、没法分发（要再手动重设一次）。
+      const encrypted = await encryptSecret(authPepper(env), secret.value);
+
+      try {
+        await env.DB.prepare(
+          'UPDATE classes SET password = ?, password_lookup = ?, password_encrypted = ? WHERE id = ?'
+        ).bind(hashed, lookup, encrypted, matched.id).run();
+      } catch (err) {
+        // 005 还没执行（没有 password_encrypted 列）：退回只写哈希
+        if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+        await env.DB.prepare('UPDATE classes SET password = ?, password_lookup = ? WHERE id = ?')
+          .bind(hashed, lookup, matched.id).run();
+      }
     } catch {
       /* 升级失败不影响本次登录 */
     }

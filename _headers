@@ -2,7 +2,7 @@
 #  全站安全响应头
 #
 #  ⚠️ 重要限制：_headers 只作用于 Cloudflare Pages 的**静态资源**，
-#     不作用于 Functions 的响应。因此 /api/* 返回的 JSON 里
+#     不作用于 Functions 的响应。因此 /api/* 返回的 JSON 里的
 #     nosniff / no-store 是由 _lib/http.js 自己加的，不是靠这里。
 # ============================================================
 
@@ -12,7 +12,7 @@
   # 必须放开 'unsafe-inline'，否则整个页面会失效。
   #
   # 这意味着：针对 XSS，**主要防线是代码里的 escapeHtml 转义**
-  # （见 index.html / admin.html 的 <script>，以及后端 _lib/validate.js 的入库收敛），
+  # （见 index.html / admin.html 的 <script>，以及后端 _lib/validate.js 的入库收敛）；
   # CSP 在这里只能作为兜底，挡住"外链注入"这一类攻击，
   # 挡不住"页面内联脚本注入"。
   #

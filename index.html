@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>每日点歌</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
   .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
   .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
@@ -24,6 +24,21 @@
   #app{display:none}
   input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
   .err{color:#e11d48;font-size:13px;text-align:center;min-height:18px;}
+  /* ---- 双端适配：手机上用顶部按钮切换，宽屏上左右分栏同时显示 ---- */
+  .mobile-tabs{display:flex;gap:8px;margin-bottom:16px;}
+  .mobile-tabs button{margin:0;padding:10px;font-size:14px;font-weight:600;background:rgba(255,255,255,0.7);backdrop-filter:blur(8px);color:#64748b;border:1px solid rgba(255,255,255,0.9);box-shadow:none;}
+  .mobile-tabs button.active{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);}
+  .col{display:none;}
+  .col.active{display:block;}
+  .col-title{font-size:15px;font-weight:700;color:#0f172a;margin:0 0 12px 0;padding-left:10px;border-left:4px solid #0ea5e9;letter-spacing:0.5px;}
+  .col-title span{font-weight:400;font-size:12px;color:#94a3b8;letter-spacing:0;}
+  @media(min-width:900px){
+    body{max-width:1080px;}
+    .mobile-tabs{display:none;}
+    #rankList{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;}
+    .col{display:block;}
+    .col-title{margin-top:0;}
+  }
 </style>
 </head>
 <body>
@@ -41,9 +56,19 @@
   </div>
   <a href="/vote.html" class="btn">➕ 去点歌投票</a>
   <div id="announceBox"></div>
+  <div class="mobile-tabs">
+    <button id="tabPending" class="active" onclick="switchMobileTab('pending')">🔥 待审核榜</button>
+    <button id="tabApproved" onclick="switchMobileTab('approved')">🎵 正式榜</button>
+  </div>
   <div id="rankList">
-    <div id="pendingList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
-    <div id="approvedList"></div>
+    <div id="pendingCol" class="col active">
+      <p class="col-title">🔥 待审核榜 <span>投票选出你想听的</span></p>
+      <div id="pendingList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
+    </div>
+    <div id="approvedCol" class="col">
+      <p class="col-title">🎵 正式榜 <span>已通过审核</span></p>
+      <div id="approvedList"></div>
+    </div>
   </div>
   <footer><img src="/assets/radio-logo.png" alt="盐中之声"><p>江苏省盐城中学 · 盐中之声广播站</p></footer>
 </div>
@@ -176,7 +201,8 @@ async function loadPending(){
         <div class="rank-info"><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
         <div style="display:flex;align-items:center;gap:6px;">
           <span class="rank-votes">${safeInt(s.votes)}票</span>
-          <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="auditionFromButton(this)">试听</button>
+          <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
+          <button class="btn-upvote" data-report="${id}" onclick="reportFromButton(this)">举报</button>
           <button class="btn-upvote" onclick="upvote(${id})">投票</button>
         </div>
       </div>
@@ -200,7 +226,7 @@ async function loadApproved(){
       return `
       <div class="rank-card">
         <div class="rank-info"><h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
-        <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="auditionFromButton(this)">试听</button>
+        <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
       </div>
       <div id="audition-${id}"></div>
     `;
@@ -237,10 +263,10 @@ async function loadAnnouncements(){
 // 歌名里若出现反斜杠等字符，拼字符串可能把引号转义掉造成注入。
 // data 属性由浏览器解码，天然安全。
 function auditionFromButton(button){
-  audition(button.dataset.audition, button.dataset.title, button.dataset.artist);
+  audition(button.dataset.audition, button.dataset.title, button.dataset.artist, button.dataset.track);
 }
 
-async function audition(songId, title, artist){
+async function audition(songId, title, artist, trackId){
   const host = document.getElementById('audition-' + safeInt(songId));
   if(!host) return;
 
@@ -251,6 +277,16 @@ async function audition(songId, title, artist){
     return;
   }
   host.dataset.open = '1';
+
+  // 点歌时锁定了音源 id：直接播当初选的那一版，不用重新搜索挑版本。
+  // 历史数据没有这个字段，才退回"搜索 + 候选列表"的老流程。
+  if(trackId){
+    host.innerHTML = directTrackPanelHtml(songId, title, artist, trackId);
+    const audio = host.querySelector('audio');
+    if(audio) audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
+    return;
+  }
+
   host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">正在搜索音源…</p>';
 
   try {
@@ -273,39 +309,98 @@ async function audition(songId, title, artist){
   }
 }
 
+/**
+ * 直接播放"点歌时锁定的那一版"。
+ *
+ * 这是默认路径：学生点歌时必须从搜索结果里选一首，音源 id 被一起存了下来。
+ * 所以这里不需要搜索，也不需要让用户再挑一次 —— 点的哪版就听哪版。
+ * 底部留一个「换一个版本」，找不到合适的时还能搜别的。
+ */
+function directTrackPanelHtml(songId, title, artist, trackId){
+  const id = safeInt(songId);
+
+  return `
+    <div style="margin:10px 0 16px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 正在试听 · ${escapeHtml(title)}</div>
+        <button onclick="closeAudition(${id})"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">
+        ${escapeHtml(artist)}　·　点歌时锁定的音源，直接播放这一版
+      </div>
+
+      <div style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
+        <audio controls preload="none" src="/api/music?play=${encodeURIComponent(trackId)}" style="width:100%;"></audio>
+      </div>
+
+      <div style="padding:0 12px 10px;">
+        <button data-title="${escapeHtml(title)}" data-artist="${escapeHtml(artist)}" data-song="${id}" onclick="searchAlternatives(this)"
+          style="width:auto;padding:7px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">这首不对？换个版本</button>
+      </div>
+    </div>
+  `;
+}
+
+/** 从"直接播放"切回"搜索候选列表"。 */
+function searchAlternatives(button){
+  const songId = safeInt(button.dataset.song);
+  const host = document.getElementById('audition-' + songId);
+  if(host) host.dataset.open = '0';
+  audition(songId, button.dataset.title, button.dataset.artist, '');
+}
+
 function playFromButton(button){
   playTrack(button.dataset.track, button.dataset.song);
 }
 
+/** 秒 -> m:ss */
+function formatDuration(seconds){
+  const total = Number(seconds);
+  if(!Number.isFinite(total) || total <= 0) return '';
+  const m = Math.floor(total / 60);
+  const s = Math.round(total % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
 /**
- * 试听候选面板。
+ * 试听候选面板：**顶部一个固定播放器 + 下面一份音乐列表**。
  *
- * 刻意**不用**榜单那种白色卡片样式：左侧品牌色竖条 + 淡蓝底 + 带标题与数量，
- * 让人一眼看出"这是搜出来的候选，不是榜上的歌"。
- * 右上角固定一个「收起 ▲」，不必靠"再点一次试听"去猜。
+ * 早期版本是把 <audio> 追加到列表末尾，点最后一首时播放条会跑到很下面，
+ * 非常难用。现在播放器固定在面板顶部，点任意一行都只替换它的内容。
  */
 function auditionPanelHtml(songId, list){
-  const rows = list.map(s => `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
-      <div style="min-width:0;font-size:13px;word-break:break-word;">
-        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
-        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
-        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
+  const id = safeInt(songId);
+
+  const rows = list.map((s, index) => `
+    <div data-track-row="${escapeHtml(s.id)}"
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+      <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
+      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
+        <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
+        <div style="color:#64748b;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
       </div>
-      <button data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="playFromButton(this)"
-        style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
+      <span style="flex:0 0 auto;font-size:12px;color:#94a3b8;">${escapeHtml(formatDuration(s.duration))}</span>
+      <button data-track="${escapeHtml(s.id)}" data-song="${id}" onclick="playFromButton(this)"
+        style="flex:0 0 auto;width:auto;padding:7px 12px;font-size:13px;margin:0;">播放</button>
     </div>
   `).join('');
 
   return `
-    <div style="margin:10px 0 16px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+    <div style="margin:10px 0 16px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
         <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
-        <button onclick="closeAudition(${safeInt(songId)})"
+        <button onclick="closeAudition(${id})"
           style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
       </div>
-      <div style="font-size:11px;color:#64748b;margin-top:2px;">以下为搜索到的候选版本，不是榜单上的歌曲</div>
-      ${rows}
+      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">以下为搜索到的候选版本，不是榜单上的歌曲</div>
+
+      <div id="audition-player-${id}"
+           style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
+        <div style="font-size:12px;color:#94a3b8;">点下面任意一行的「播放」开始试听</div>
+      </div>
+
+      <div style="padding:0 12px 10px;">${rows}</div>
     </div>
   `;
 }
@@ -317,24 +412,60 @@ function closeAudition(songId){
   host.innerHTML = '';
 }
 
+/**
+ * 播放某一首候选。
+ * 播放器固定在面板顶部，这里只替换它的内容并高亮对应行，不再往列表末尾追加。
+ */
 function playTrack(trackId, songId){
-  const host = document.getElementById('audition-' + safeInt(songId));
-  if(!host || !trackId) return;
-  const old = host.querySelector('audio');
-  if(old) old.remove();
+  const id = safeInt(songId);
+  const host = document.getElementById('audition-' + id);
+  const slot = document.getElementById('audition-player-' + id);
+  if(!host || !slot || !trackId) return;
+
+  host.querySelectorAll('[data-track-row]').forEach((row) => {
+    row.style.background = row.dataset.trackRow === trackId ? 'rgba(14,165,233,0.14)' : 'transparent';
+  });
+
+  slot.innerHTML = '<div style="font-size:12px;font-weight:600;color:#075985;margin-bottom:6px;">正在试听</div>';
 
   const audio = document.createElement('audio');
   audio.controls = true;
   audio.preload = 'none';
   audio.src = '/api/music?play=' + encodeURIComponent(trackId);
   audio.style.width = '100%';
-  audio.style.marginTop = '8px';
-  host.appendChild(audio);
+  slot.appendChild(audio);
   audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 
-async function upvote(id){
-  if(!confirm('确认给这首歌投一票吗？')) return;
+/* ---------------- 举报 ---------------- */
+
+/**
+ * 举报待审核的歌。
+ * 只有被多个班级举报、并且仍在待审核池里的歌，才会进入管理员的举报收件箱 ——
+ * 所以这里明确告诉学生"一个人举报不会立刻有人看到"。
+ */
+async function reportFromButton(button){
+  const id = safeInt(button.dataset.report);
+  if(!id) return;
+
+  const reason = prompt('举报的原因（选填，例如：内容不合适 / 与歌名不符）', '');
+  if(reason === null) return;   // 点了取消
+
+  if(!confirm('确认举报这首歌吗？\n\n同一首歌被多个班级举报后，才会出现在管理员的举报收件箱里。')) return;
+
+  try {
+    const r = await fetch('/api/report', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id: id, reason: reason.trim()})
+    });
+    const d = await r.json();
+    if(r.ok){ alert('已提交举报，感谢反馈'); loadPending(); }
+    else { alert(d.error || '举报失败'); }
+  } catch(e) { alert('网络错误'); }
+}
+
+async function upvote(id){  if(!confirm('确认给这首歌投一票吗？')) return;
   try {
     const fingerprint = await deviceFingerprint();
     const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id), fingerprint: fingerprint})});

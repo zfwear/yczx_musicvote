@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>管理员后台</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
   input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
   button{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;cursor:pointer;font-weight:bold;box-shadow:0 4px 14px rgba(14,165,233,0.3);transition:transform 0.2s;}
   button:active{transform:scale(0.97);}
@@ -60,7 +60,7 @@ function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? M
 
 let currentStatus = 'pending';
 let currentRole = 'admin';
-let settingsCache = { classes: [], banned: [], categories: [], security: {}, invites: [], admins: [], announcements: [], vote: {} };
+let settingsCache = { classes: [], banned: [], categories: [], security: {}, invites: [], admins: [], announcements: [], vote: {}, report: {} };
 
 function showLogin(){
   document.getElementById('adminBox').classList.add('hidden');
@@ -112,15 +112,19 @@ async function loadList(){
 
     // 回收站顶部单独放一个"清空"入口。也顺便把回收站与黑名单的区别写清楚 ——
     // 它们是完全独立的两套数据，经常被混为一谈。
-    const header = currentStatus === 'rejected'
-      ? `<div class="card">
+    let header = '';
+    if (currentStatus === 'rejected') {
+      header = `<div class="card">
            <h3>回收站</h3>
            <p>这里是被拒绝 / 移入回收站的歌曲，可以逐首恢复或彻底删除。<br>
               <b>回收站和黑名单不是一回事</b>：黑名单是"禁止再提交某个歌手 / 某个歌名"的规则，
               在「系统设置」里维护，跟这里的歌曲记录没有关系。</p>
            <button class="btn-reject" onclick="emptyRecycle()">清空回收站</button>
-         </div>`
-      : '';
+         </div>`;
+    } else if (currentStatus === 'pending') {
+      // 待审核页签顶部放举报收件箱 —— 只有被多次举报的才会进来
+      header = await loadReportInbox();
+    }
 
     if(!Array.isArray(list) || !list.length){
       box.innerHTML = header + '<p class="sub">' + (currentStatus === 'rejected' ? '回收站是空的' : '这里空空如也') + '</p>';
@@ -157,6 +161,87 @@ async function loadList(){
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
 }
 
+/* ---------------- 举报收件箱 ---------------- */
+
+/**
+ * 待审核页签顶部的举报收件箱。
+ * 只有**被多个班级举报**、且**仍在待审核池里**的歌才会出现 ——
+ * 一个人随手举报一次不会打扰管理员。
+ */
+async function loadReportInbox(){
+  try {
+    const r = await fetch('/api/admin-reports');
+    if(!r.ok) return '';
+    const d = await r.json();
+
+    if(d.available === false){
+      return `<div class="card">
+        <h3>📬 举报收件箱</h3>
+        <p class="sub" style="color:#b45309;">数据库尚未执行 008 迁移，收件箱暂不可用。<br>请先在 D1 执行 sql/008_report_inbox.sql</p>
+      </div>`;
+    }
+
+    const list = Array.isArray(d.reports) ? d.reports : [];
+    const threshold = safeInt(d.threshold) || 3;
+
+    if(!list.length){
+      return `<div class="card">
+        <h3>📬 举报收件箱</h3>
+        <p class="sub">暂无需要处理的举报。<br>同一首歌被 <b>${threshold}</b> 个以上班级举报、且仍在待审核池里，才会出现在这里。</p>
+      </div>`;
+    }
+
+    const items = list.map(item => {
+      const songId = safeInt(item.song_id);
+      const details = (item.details || []).map(x => `
+        <div style="font-size:12px;color:#64748b;padding:3px 0;border-top:1px dashed rgba(225,29,72,0.2);">
+          · <b style="color:#334155;">${escapeHtml(x.class_name || '未知班级')}</b>：
+          ${x.reason ? escapeHtml(x.reason) : '<span style="color:#94a3b8;">（未填原因）</span>'}
+          <span style="color:#94a3b8;">${escapeHtml(x.created_at)}</span>
+        </div>
+      `).join('');
+
+      return `
+        <div class="card" style="background:rgba(255,255,255,0.95);">
+          <h3>${escapeHtml(item.title)} - ${escapeHtml(item.artist)}</h3>
+          <p><b style="color:#e11d48;">${safeInt(item.report_count)} 个班级举报</b>
+             | 分类：${escapeHtml(item.category_name)} | 当前 ${safeInt(item.votes)} 票</p>
+          ${details}
+          <div class="actions">
+            <button class="btn-pass" onclick="action(${songId}, 'approve')">通过</button>
+            <button class="btn-reject" onclick="action(${songId}, 'reject')">拒绝</button>
+            <button onclick="handleReport(${songId})" style="background:#64748b;">标记已处理</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="card" style="background:rgba(225,29,72,0.07);border-color:rgba(225,29,72,0.35);">
+        <h3>📬 举报收件箱（${list.length} 首待处理）</h3>
+        <p>只有被 <b>${threshold}</b> 个以上班级举报、且仍在待审核池里的歌才会出现在这里。
+           点「标记已处理」后这批举报就不再显示。</p>
+        ${items}
+      </div>
+    `;
+  } catch(e) {
+    return '';
+  }
+}
+
+async function handleReport(songId){
+  if(!confirm('确认把这首歌的举报标记为已处理吗？\n\n已处理的举报不再出现在收件箱，同时清除这首歌的「已被举报」标记。\n（歌本身不会被删除，仍在待审核列表里）')) return;
+
+  const r = await fetch('/api/admin-reports', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'handle', song_id: safeInt(songId)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已处理'); loadList(); }
+  else alert(d.error || '操作失败');
+}
+
 /* ---------------- 系统设置 ---------------- */
 
 async function loadSettings(){
@@ -171,6 +256,7 @@ async function loadSettings(){
     settingsCache.categories = Array.isArray(data.categories) ? data.categories : [];
     settingsCache.security = data.security || {};
     settingsCache.vote = data.vote || { cap: 0, capConfigured: false, totalMembers: 0 };
+    settingsCache.report = data.report || { threshold: 3, defaultThreshold: 3 };
     if(data.security && data.security.role){ currentRole = data.security.role; }
 
     // 公告：所有管理员都能看和发
@@ -284,7 +370,7 @@ function renderSettings(){
     const forever = String(b.expire_at || '').indexOf('2099') === 0;
     return `
       <div class="card">
-        <p style="margin:0 0 6px 0;font-size:13px;">${b.type === 'artist' ? '歌手' : '歌名'}：<b>${escapeHtml(b.keyword)}</b>（${escapeHtml(b.reason)}）${forever ? '' : '<br>到期自动解禁：' + escapeHtml(b.expire_at)}</p>
+        <p style="margin:0 0 6px 0;font-size:13px;">违禁词：<b style="color:#e11d48;">${escapeHtml(b.keyword)}</b>（${escapeHtml(b.reason)}）${forever ? '' : '<br>到期自动解禁：' + escapeHtml(b.expire_at)}</p>
         <button class="btn-reject" onclick="deleteBanned(${id})">删除</button>
       </div>
     `;
@@ -424,6 +510,10 @@ function renderSettings(){
     (c) => c.member_count === null || c.member_count === undefined
   );
 
+  const reportInfo = settingsCache.report || {};
+  const reportThreshold = safeInt(reportInfo.threshold) || 3;
+  const reportDefault = safeInt(reportInfo.defaultThreshold) || 3;
+
   const voteSection = isSuper ? `
     <div class="card">
       <h3>投票上限（超出部分不计入）</h3>
@@ -437,6 +527,15 @@ function renderSettings(){
       ${voteCap > 0
         ? `<p class="sub" style="color:#059669;">当前上限：${voteCap} 票</p>`
         : '<p class="sub" style="color:#b45309;">当前未设上限，票数不会被封顶</p>'}
+    </div>
+
+    <div class="card">
+      <h3>举报收件箱阈值</h3>
+      <p>同一首歌被<b>几个不同班级</b>举报之后，才进入「待审核」页签顶部的举报收件箱。
+         一个人随手举报一次不会打扰你。默认 ${reportDefault}。</p>
+      <input id="reportThresholdInput" type="number" min="2" max="20" value="${reportThreshold}" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="saveReportThreshold()" style="font-size:14px;padding:10px;">保存阈值</button>
+      <p class="sub">当前：被 ${reportThreshold} 个以上班级举报才进收件箱</p>
     </div>
   ` : '';
 
@@ -469,14 +568,13 @@ function renderSettings(){
     </div>
 
     <div class="card">
-      <h3>添加违禁名单</h3>
-      <p><b>黑名单和回收站不是一回事</b>：黑名单是「禁止再提交某个歌手 / 某个歌名」的规则，
+      <h3>添加违禁词</h3>
+      <p><b>黑名单只能封违禁词，不能封具体的歌曲。</b>
+         填进来的词会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都算命中。<br>
+         所以要下架某一首歌，请到「待审核 / 回收站」里处理，不要往这里塞歌名。</p>
+      <p><b>黑名单和回收站也不是一回事</b>：黑名单是"以后不许再提交含这个词的内容"的规则，
          不会删除已有歌曲；回收站要在「回收站」页签里单独管理。</p>
-      <select id="bannedType" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
-        <option value="artist">违禁歌手</option>
-        <option value="title">违禁歌名</option>
-      </select>
-      <input id="bannedKeyword" placeholder="关键词（如：某歌手名）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bannedKeyword" placeholder="违禁词（最多 12 字，如：脏话片段）" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bannedReason" placeholder="原因（选填）" style="font-size:14px;padding:10px;margin:8px 0;">
       <select id="bannedExpiry" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
         <option value="forever">长期有效</option>
@@ -619,6 +717,20 @@ function fillTotalMembers(){
   if(!total) alert('还没填班级人数，汇总结果是 0。请先在班级列表里填人数。');
 }
 
+async function saveReportThreshold(){
+  const input = document.getElementById('reportThresholdInput');
+  const threshold = Number(input ? input.value : NaN);
+
+  if(!Number.isInteger(threshold) || threshold < 2 || threshold > 20){
+    alert('阈值需要是 2 到 20 之间的整数');
+    return;
+  }
+
+  if(!confirm('确认把举报阈值设为 ' + threshold + ' 吗？\n\n同一首歌被 ' + threshold + ' 个以上不同班级举报，才会进入举报收件箱。')) return;
+
+  settingsPost({action:'set_report_threshold', threshold: threshold}, '已保存');
+}
+
 /* ---------------- 审核时试听 ---------------- */
 
 function adminAuditionFromButton(button){
@@ -660,53 +772,82 @@ async function adminAudition(songId, title, artist){
   }
 }
 
-function adminPlayFromButton(button){
-  const host = document.getElementById('admin-audition-' + safeInt(button.dataset.song));
-  const trackId = button.dataset.track;
-  if(!host || !trackId) return;
+/** 秒 -> m:ss */
+function formatDuration(seconds){
+  const total = Number(seconds);
+  if(!Number.isFinite(total) || total <= 0) return '';
+  const m = Math.floor(total / 60);
+  const s = Math.round(total % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
 
-  const old = host.querySelector('audio');
-  if(old) old.remove();
+function adminPlayFromButton(button){
+  adminPlayTrack(button.dataset.track, button.dataset.song);
+}
+
+/**
+ * 试听候选面板：**顶部一个固定播放器 + 下面一份音乐列表**。
+ *
+ * 早期版本把 <audio> 追加到列表末尾，点最后一首时播放条会跑到很下面。
+ * 现在播放器固定在面板顶部，点任意一行都只替换它的内容并高亮该行。
+ * 样式上也刻意和审核卡片（白色 .card）区分：左侧品牌色竖条 + 淡蓝底。
+ */
+function adminAuditionPanelHtml(songId, list){
+  const id = safeInt(songId);
+
+  const rows = list.map((s, index) => `
+    <div data-track-row="${escapeHtml(s.id)}"
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+      <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
+      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
+        <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
+        <div style="color:#64748b;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
+      </div>
+      <span style="flex:0 0 auto;font-size:12px;color:#94a3b8;">${escapeHtml(formatDuration(s.duration))}</span>
+      <button data-track="${escapeHtml(s.id)}" data-song="${id}" onclick="adminPlayFromButton(this)"
+        style="flex:0 0 auto;width:auto;padding:7px 12px;font-size:13px;margin:0;">播放</button>
+    </div>
+  `).join('');
+
+  return `
+    <div style="margin:8px 0 14px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
+        <button onclick="closeAdminAudition(${id})"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">以下为搜索到的候选版本，不是本页的待审歌曲</div>
+
+      <div id="admin-audition-player-${id}"
+           style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
+        <div style="font-size:12px;color:#94a3b8;">点下面任意一行的「播放」开始试听</div>
+      </div>
+
+      <div style="padding:0 12px 10px;">${rows}</div>
+    </div>
+  `;
+}
+
+/** 播放器固定在面板顶部，只替换它的内容，不再往列表末尾追加。 */
+function adminPlayTrack(trackId, songId){
+  const id = safeInt(songId);
+  const host = document.getElementById('admin-audition-' + id);
+  const slot = document.getElementById('admin-audition-player-' + id);
+  if(!host || !slot || !trackId) return;
+
+  host.querySelectorAll('[data-track-row]').forEach((row) => {
+    row.style.background = row.dataset.trackRow === trackId ? 'rgba(14,165,233,0.14)' : 'transparent';
+  });
+
+  slot.innerHTML = '<div style="font-size:12px;font-weight:600;color:#075985;margin-bottom:6px;">正在试听</div>';
 
   const audio = document.createElement('audio');
   audio.controls = true;
   audio.preload = 'none';
   audio.src = '/api/music?play=' + encodeURIComponent(trackId);
   audio.style.width = '100%';
-  audio.style.marginTop = '8px';
-  host.appendChild(audio);
+  slot.appendChild(audio);
   audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
-}
-
-/**
- * 试听候选面板。
- * 刻意和审核卡片（白色 .card）区分开：左侧品牌色竖条 + 淡蓝底 + 标题数量，
- * 并固定一个「收起 ▲」，不用靠"再点一次试听"去猜怎么关。
- */
-function adminAuditionPanelHtml(songId, list){
-  const rows = list.map(s => `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
-      <div style="min-width:0;font-size:13px;word-break:break-word;">
-        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
-        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
-        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
-      </div>
-      <button data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="adminPlayFromButton(this)"
-        style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
-    </div>
-  `).join('');
-
-  return `
-    <div style="margin:8px 0 14px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
-        <button onclick="closeAdminAudition(${safeInt(songId)})"
-          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
-      </div>
-      <div style="font-size:11px;color:#64748b;margin-top:2px;">以下为搜索到的候选版本，不是本页的待审歌曲</div>
-      ${rows}
-    </div>
-  `;
 }
 
 function closeAdminAudition(songId){
@@ -741,14 +882,19 @@ function toSqlDateTime(d){
 }
 
 async function addBanned(){
-  const type = document.getElementById('bannedType').value;
   const keyword = document.getElementById('bannedKeyword').value.trim();
   const reason = document.getElementById('bannedReason').value.trim() || '违规';
   const expiry = document.getElementById('bannedExpiry').value;
-  if(!keyword) { alert('关键词不能为空'); return; }
-  const body = {action:'add_banned', type, keyword, reason};
+
+  if(!keyword){ alert('违禁词不能为空'); return; }
+  if(keyword.length > 12){
+    alert('违禁词最多 12 个字。\n\n黑名单是用来封违禁词的，不是用来封某一首歌的 ——\n要下架某首歌，请到「待审核 / 回收站」里处理。');
+    return;
+  }
+
+  const body = {action:'add_banned', keyword, reason};
   if(expiry !== 'forever'){ body.expire_at = toSqlDateTime(new Date(Date.now() + Number(expiry) * 86400000)); }
-  if(!confirm('确认把【' + keyword + '】加入黑名单吗？')) return;
+  if(!confirm('确认把违禁词【' + keyword + '】加入黑名单吗？\n\n它会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都会被拦下。')) return;
   settingsPost(body, '添加成功');
 }
 

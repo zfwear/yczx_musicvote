@@ -11,6 +11,10 @@
 import { isMissingTable } from './db.js';
 
 export const SETTING_VOTE_CAP = 'vote_cap';
+export const SETTING_REPORT_THRESHOLD = 'report_threshold';
+
+/** 举报进入收件箱所需的"被举报次数"阈值。默认 3，可后台调整。 */
+export const DEFAULT_REPORT_THRESHOLD = 3;
 
 /** 读一个设置；表不存在（迁移没跑）时返回默认值，不抛异常。 */
 export async function getSetting(env, key, fallback = null) {
@@ -48,4 +52,12 @@ export function applyVoteCap(rows, cap) {
     if (!Number.isFinite(raw) || raw <= cap) return row;
     return { ...row, votes: cap, votes_raw: Math.trunc(raw), votes_capped: 1 };
   });
+}
+
+/** 取举报进收件箱的阈值。 */
+export async function getReportThreshold(env) {
+  const raw = await getSetting(env, SETTING_REPORT_THRESHOLD, '');
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 2 && n <= 20) return n;
+  return DEFAULT_REPORT_THRESHOLD;
 }

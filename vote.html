@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>点歌</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
   .box{background:rgba(255,255,255,0.85);backdrop-filter:blur(10px);padding:24px;border-radius:16px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 4px 20px rgba(0,0,0,0.05);}
   h2{text-align:center;color:#0f172a;margin-top:0;}
   p.sub{text-align:center;color:#64748b;font-size:13px;margin-bottom:20px;}
@@ -20,8 +20,10 @@
 <div class="box">
   <h2>点歌投票</h2>
   <p class="sub">每人每周只能点一次，请慎重提交哦</p>
-  <input id="title" placeholder="歌名">
-  <input id="artist" placeholder="歌手">
+  <input id="title" placeholder="点下面「搜索歌曲」选一首" readonly style="background:#f1f5f9;color:#334155;">
+  <input id="artist" placeholder="选中后自动填入" readonly style="background:#f1f5f9;color:#334155;">
+  <input id="trackId" type="hidden" value="">
+  <p id="picked" class="sub" style="color:#0284c7;min-height:16px;margin:2px 0 6px;"></p>
   <select id="category">
     <option value="2">中文歌</option>
     <option value="3">英文歌</option>
@@ -94,10 +96,17 @@ async function vote(){
   const title = document.getElementById('title').value.trim();
   const artist = document.getElementById('artist').value.trim();
   const category = document.getElementById('category').value;
+  const trackId = document.getElementById('trackId').value.trim();
   const msg = document.getElementById('msg');
 
-  if(!title || !artist){ msg.style.color = '#e11d48'; msg.textContent = '歌名和歌手都要填哦'; return; }
-  
+  // 必须从搜索结果里选一首：歌名歌手是只读的，而且要有锁定的音源 id。
+  // 这样这首歌上榜后，任何人点「试听」直接播当初选的那一版。
+  if(!trackId || !title || !artist){
+    msg.style.color = '#e11d48';
+    msg.textContent = '请先点「搜索歌曲」，从列表里选一首歌再提交';
+    return;
+  }
+
   if(!confirm('确认提交这首歌吗？\n歌名：' + title + '\n歌手：' + artist)) return;
 
   msg.style.color = '#0284c7'; msg.textContent = '提交中...';
@@ -108,15 +117,20 @@ async function vote(){
     const r = await fetch('/api/vote', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({title, artist, category_id: category, fingerprint})
+      body: JSON.stringify({
+        title,
+        artist,
+        category_id: category,
+        fingerprint,
+        track_id: trackId,
+      })
     });
     const d = await r.json();
     if(r.ok){
       // 调试模式会返回专门的提示文案
       msg.style.color = '#059669';
       msg.textContent = d.message || '点歌成功！等待管理员审核';
-      document.getElementById('title').value = '';
-      document.getElementById('artist').value = '';
+      clearPicked();
     } else if(r.status === 401){
       msg.style.color = '#e11d48'; msg.textContent = '登录已过期，正在返回主页…';
       setTimeout(() => { location.href = '/'; }, 1200);
@@ -124,6 +138,14 @@ async function vote(){
       msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
     }
   } catch(e) { msg.style.color = '#e11d48'; msg.textContent = '网络错误'; }
+}
+
+/** 清空已选中的那一首。 */
+function clearPicked(){
+  document.getElementById('title').value = '';
+  document.getElementById('artist').value = '';
+  document.getElementById('trackId').value = '';
+  document.getElementById('picked').textContent = '';
 }
 
 /* ---------------- 试听 ---------------- */
@@ -162,8 +184,8 @@ async function auditionInput(){
     }
     box.innerHTML = candidatePanelHtml(
       '🎧 试听候选',
-      '以下为搜索到的候选版本，不是榜单上的歌曲',
-      list, 'auditionBox', false
+      '点「选这首」会把这首歌的歌名歌手填进上面的表单，不会自动提交',
+      list, 'auditionBox', true
     );
   } catch(e) {
     box.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
@@ -209,46 +231,86 @@ async function searchSongs(){
   }
 }
 
-/** 把搜到的歌曲填进表单。用 data-* 传参，避免歌名里的特殊字符破坏 onclick。 */
-function pickSong(button){
-  document.getElementById('title').value = button.dataset.name || '';
-  document.getElementById('artist').value = button.dataset.artist || '';
-  document.getElementById('searchBox').innerHTML = '<p class="sub" style="color:#059669;">已填入上面的表单，确认无误后点「提交点歌」</p>';
+/** 秒 -> m:ss */
+function formatDuration(seconds){
+  const total = Number(seconds);
+  if(!Number.isFinite(total) || total <= 0) return '';
+  const m = Math.floor(total / 60);
+  const s = Math.round(total % 60);
+  return m + ':' + String(s).padStart(2, '0');
 }
 
 /**
- * 候选面板。
+ * 把选中的歌填进表单。
  *
- * 刻意**不用**白色卡片样式：左侧品牌色竖条 + 淡蓝底 + 标题与数量，
- * 让人一眼看出"这是搜出来的候选，不是榜单上的歌"。
- * 右上角固定「收起 ▲」，不用靠"再点一次"去猜怎么关。
+ * 除了歌名歌手，还会把**音源 id 记进隐藏字段 trackId** —— 提交时一起带上，
+ * 这首歌上榜后任何人点「试听」就直接播当初锁定的这一版，不会播成别的版本。
+ * 用 data-* 传参，避免歌名里的特殊字符破坏 onclick。
+ */
+function pickSong(button){
+  const name = button.dataset.name || '';
+  const artist = button.dataset.artist || '';
+  const track = button.dataset.track || '';
+
+  document.getElementById('title').value = name;
+  document.getElementById('artist').value = artist;
+  document.getElementById('trackId').value = track;
+  document.getElementById('picked').textContent =
+    track ? ('已选中：' + name + ' - ' + artist + '（提交后就锁定这一版音源）') : '';
+
+  // 另一个面板如果开着，一起收掉，避免两个列表同时占着屏幕
+  for(const id of ['searchBox', 'auditionBox']){
+    if(id === button.dataset.clear) continue;
+    const other = document.getElementById(id);
+    if(other && other.dataset.open === '1'){ closeCandidatePanel(id); }
+  }
+
+  const box = document.getElementById(button.dataset.clear || 'searchBox');
+  if(!box) return;
+  delete box.dataset.open;
+  box.innerHTML = '<p class="sub" style="color:#059669;">已把「' + escapeHtml(name) + '」填进上面的表单，确认无误后点「提交点歌」</p>';
+}
+
+/**
+ * 候选面板：**顶部一个固定播放器 + 下面一份音乐列表**。
+ *
+ * 早期版本把 <audio> 追加到列表末尾，点最后一首时播放条会跑到很下面。
+ * 现在播放器固定在面板顶部，点任意一行都只替换它的内容并高亮该行。
  */
 function candidatePanelHtml(title, hint, list, boxId, withPick){
-  const rows = list.map(s => `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed rgba(14,165,233,0.35);">
-      <div style="min-width:0;font-size:13px;word-break:break-word;">
-        <b style="color:#0f172a;">${escapeHtml(s.name)}</b><br>
-        <span style="color:#64748b;">${escapeHtml(s.artist)}</span>
-        <span style="color:#0284c7;">${escapeHtml(s.source || '')}</span>
+  const rows = list.map((s, index) => `
+    <div data-track-row="${escapeHtml(s.id)}"
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+      <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
+      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
+        <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
+        <div style="color:#64748b;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
       </div>
-      <div style="display:flex;gap:6px;flex:0 0 auto;">
-        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" onclick="pickSong(this)"
-          style="width:auto;padding:8px 12px;font-size:13px;margin:0;">选这首</button>` : ''}
-        <button data-track="${escapeHtml(s.id)}" onclick="playFromButton(this)"
-          style="width:auto;padding:8px 12px;font-size:13px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">试听</button>
+      <span style="flex:0 0 auto;font-size:12px;color:#94a3b8;">${escapeHtml(formatDuration(s.duration))}</span>
+      <div style="flex:0 0 auto;display:flex;gap:6px;">
+        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-clear="${boxId}" onclick="pickSong(this)"
+          style="width:auto;padding:7px 12px;font-size:13px;margin:0;">选这首</button>` : ''}
+        <button data-track="${escapeHtml(s.id)}" data-target="${boxId}" onclick="playFromButton(this)"
+          style="width:auto;padding:7px 12px;font-size:13px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">播放</button>
       </div>
     </div>
   `).join('');
 
   return `
-    <div style="margin:10px 0 16px;padding:10px 12px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+    <div style="margin:10px 0 16px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
         <div style="font-size:13px;font-weight:700;color:#075985;">${escapeHtml(title)} · ${list.length} 个</div>
         <button onclick="closeCandidatePanel('${boxId}')"
           style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
       </div>
-      <div style="font-size:11px;color:#64748b;margin-top:2px;">${escapeHtml(hint)}</div>
-      ${rows}
+      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">${escapeHtml(hint)}</div>
+
+      <div id="player-${boxId}"
+           style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
+        <div style="font-size:12px;color:#94a3b8;">点下面任意一行的「播放」开始试听</div>
+      </div>
+
+      <div style="padding:0 12px 10px;">${rows}</div>
     </div>
   `;
 }
@@ -261,22 +323,27 @@ function closeCandidatePanel(boxId){
 }
 
 function playFromButton(button){
-  const host = document.getElementById('auditionBox');
-  const trackId = button.dataset.track;
-  if(!host || !trackId) return;
+  playTrack(button.dataset.track, button.dataset.target || 'auditionBox');
+}
 
-  // 播放器就放在试听区，顺便滚过去
-  host.dataset.open = '1';
-  const old = host.querySelector('audio');
-  if(old) old.remove();
+/** 播放器固定在面板顶部，只替换它的内容，不再往列表末尾追加。 */
+function playTrack(trackId, boxId){
+  const box = document.getElementById(boxId);
+  const slot = document.getElementById('player-' + boxId);
+  if(!box || !slot || !trackId) return;
+
+  box.querySelectorAll('[data-track-row]').forEach((row) => {
+    row.style.background = row.dataset.trackRow === trackId ? 'rgba(14,165,233,0.14)' : 'transparent';
+  });
+
+  slot.innerHTML = '<div style="font-size:12px;font-weight:600;color:#075985;margin-bottom:6px;">正在试听</div>';
 
   const audio = document.createElement('audio');
   audio.controls = true;
   audio.preload = 'none';
   audio.src = '/api/music?play=' + encodeURIComponent(trackId);
   audio.style.width = '100%';
-  audio.style.marginTop = '8px';
-  host.appendChild(audio);
+  slot.appendChild(audio);
   audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 

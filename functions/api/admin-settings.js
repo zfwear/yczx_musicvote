@@ -2,10 +2,11 @@ import { readJson, error, json } from '../../_lib/http.js';
 import {
   requireStaff, requireSuper, classPasswordLookup, authPepper, DEFAULT_PEPPER,
 } from '../../_lib/auth.js';
-import { sanitizeText, parsePositiveInt, parseEnum, parseSecret } from '../../_lib/validate.js';
+import { sanitizeText, parsePositiveInt, parseSecret, parseBannedKeyword } from '../../_lib/validate.js';
 import { hashPassword, verifyPassword, encryptSecret, decryptSecret } from '../../_lib/crypto.js';
 import {
   getVoteCap, setSetting, SETTING_VOTE_CAP, getSetting,
+  getReportThreshold, SETTING_REPORT_THRESHOLD, DEFAULT_REPORT_THRESHOLD,
 } from '../../_lib/settings.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -84,6 +85,8 @@ export async function onRequestGet(context) {
   const voteCapRaw = await getSetting(env, SETTING_VOTE_CAP, '');
   const totalMembers = classes.reduce((sum, c) => sum + (c.member_count || 0), 0);
 
+  const reportThreshold = await getReportThreshold(env);
+
   const banned = await env.DB.prepare(
     'SELECT id, type, keyword, reason, expire_at FROM banned_items ORDER BY id DESC LIMIT 200'
   ).all();
@@ -100,6 +103,10 @@ export async function onRequestGet(context) {
       capConfigured: voteCap > 0,
       capRaw: String(voteCapRaw || ''),
       totalMembers,                 // 按班级人数汇总出来的全校人数，供管理员参考
+    },
+    report: {
+      threshold: reportThreshold,   // 举报进入收件箱所需的最少举报次数
+      defaultThreshold: DEFAULT_REPORT_THRESHOLD,
     },
     security: {
       // 提示运维是否配置了 AUTH_PEPPER。没配置功能照常，但少一层保护。
@@ -147,6 +154,8 @@ export async function onRequestPost(context) {
       return updateCategoryWeight(env, data);
     case 'set_vote_cap':
       return setVoteCap(env, data);
+    case 'set_report_threshold':
+      return setReportThreshold(env, data);
     case 'update_class_info':
       return updateClassInfo(env, data);
     case 'change_admin_password':
@@ -286,8 +295,33 @@ async function setVoteCap(env, data) {
   });
 }
 
-/** 修改某个班级的年级与人数。 */
-async function updateClassInfo(env, data) {
+/**
+ * 设置举报进入收件箱的阈值。
+ * 只有被 >= 阈值的不同班级举报、且仍在待审核池里的歌，才会出现在收件箱。
+ */
+async function setReportThreshold(env, data) {
+  const raw = Number(data.threshold);
+  if (!Number.isInteger(raw) || raw < 2 || raw > 20) {
+    return error('举报阈值需要是 2 到 20 之间的整数', 400);
+  }
+
+  try {
+    await setSetting(env, SETTING_REPORT_THRESHOLD, raw);
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    threshold: raw,
+    message: `已设置：被 ${raw} 个以上班级举报的歌才会进入收件箱`,
+  });
+}
+
+/** 修改某个班级的年级与人数。 */async function updateClassInfo(env, data) {
   const id = parsePositiveInt(data.id, { field: '班级' });
   if (!id.ok) return error(id.error, 400);
 
@@ -388,8 +422,9 @@ async function updateClassPassword(env, data) {
 /* ------------------------- 黑名单管理 ------------------------- */
 
 async function addBanned(env, data) {
-  const type = parseEnum(data.type, ['artist', 'title'], { field: '类型', fallback: 'artist' });
-  const keyword = sanitizeText(data.keyword, { maxLength: 40, field: '关键词' });
+  // 黑名单只收"违禁词"。type 列保留是为了兼容历史数据，但**不参与匹配**：
+  // 匹配时歌名与歌手拼在一起看，所以封不了"某一首歌"。
+  const keyword = parseBannedKeyword(data.keyword);
   if (!keyword.ok) return error(keyword.error, 400);
 
   let reason = '管理员封禁';
@@ -406,11 +441,18 @@ async function addBanned(env, data) {
     expireAt = value;
   }
 
-  await env.DB.prepare(
-    'INSERT INTO banned_items (type, keyword, reason, expire_at) VALUES (?, ?, ?, ?)'
-  ).bind(type.value, keyword.value, reason, expireAt).run();
+  // 存 'keyword' 是语义正确的写法；万一线上表带了老 CHECK 约束，退回 'artist'。
+  try {
+    await env.DB.prepare(
+      "INSERT INTO banned_items (type, keyword, reason, expire_at) VALUES ('keyword', ?, ?, ?)"
+    ).bind(keyword.value, reason, expireAt).run();
+  } catch (err) {
+    await env.DB.prepare(
+      "INSERT INTO banned_items (type, keyword, reason, expire_at) VALUES ('artist', ?, ?, ?)"
+    ).bind(keyword.value, reason, expireAt).run();
+  }
 
-  return json({ ok: true, message: '已加入黑名单' });
+  return json({ ok: true, message: `已把违禁词「${keyword.value}」加入黑名单` });
 }
 
 async function deleteBanned(env, data) {

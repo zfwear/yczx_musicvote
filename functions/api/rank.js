@@ -42,6 +42,7 @@ export async function onRequestGet(context) {
               s.title,
               s.artist,
               s.status,
+              s.track_id,
               CAST(s.votes AS INTEGER)       AS votes,
               CAST(s.is_reported AS INTEGER) AS is_reported,
               c.name AS category_name
@@ -63,6 +64,7 @@ export async function onRequestGet(context) {
             s.title,
             s.artist,
             s.status,
+            s.track_id,
             c.name AS category_name,
             CAST(c.weight AS INTEGER) AS category_weight
        FROM songs s

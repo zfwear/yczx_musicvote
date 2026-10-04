@@ -36,7 +36,7 @@ export async function onRequestGet(context) {
     : 'ORDER BY s.created_at DESC, s.id DESC';
 
   const selectWithDebug = `
-    SELECT s.id, s.title, s.artist,
+    SELECT s.id, s.title, s.artist, s.track_id,
            CAST(s.votes AS INTEGER)       AS votes,
            CAST(s.class_id AS INTEGER)    AS class_id,
            CAST(s.category_id AS INTEGER) AS category_id,
@@ -62,7 +62,7 @@ export async function onRequestGet(context) {
   // 006 迁移未执行时没有 is_debug 列，退回不含调试标记的查询，
   // 保证后台始终能打开。
   const selectPlain = `
-    SELECT s.id, s.title, s.artist,
+    SELECT s.id, s.title, s.artist, s.track_id,
            CAST(s.votes AS INTEGER)       AS votes,
            CAST(s.class_id AS INTEGER)    AS class_id,
            CAST(s.category_id AS INTEGER) AS category_id,

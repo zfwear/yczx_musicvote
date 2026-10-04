@@ -91,3 +91,48 @@ export function sanitizeMultiline(input, { maxLength = 500, field = '内容' } =
   if (TAG_START.test(value)) return { ok: false, error: `${field}不能包含 < 或 >` };
   return { ok: true, value };
 }
+
+/**
+ * 违禁词的长度上限。
+ *
+ * 黑名单是"词"的清单，**不是"封某一首歌"的工具**，所以限制单个词的长度：
+ * 一整首歌名基本都会超过这个长度，粘不进来；正常违禁词
+ * （脏话、敏感词、不许出现的歌手名片段）都远在范围内。
+ */
+export const BANNED_KEYWORD_MAX = 12;
+
+/** 违禁词校验：短、可读、不含标签字符。 */
+export function parseBannedKeyword(raw, { maxLength = BANNED_KEYWORD_MAX } = {}) {
+  const text = sanitizeText(raw, { maxLength: 200, field: '违禁词' });
+  if (!text.ok) return text;
+
+  if (text.value.length > maxLength) {
+    return {
+      ok: false,
+      error: `违禁词最多 ${maxLength} 个字。黑名单是用来封违禁词的，不是用来封某一首歌的 —— `
+        + '要下架某首歌，请到「待审核 / 回收站」里处理。',
+    };
+  }
+  return text;
+}
+
+/**
+ * 音源标识（点歌时锁定的那一版）。
+ *
+ * 形如 `ap-1234567890`（苹果）或 `mt-xxxx`（Meting）。
+ * 它会被拼进 /api/music?play=... 交给上游，所以严格收窄字符集，
+ * 杜绝任何意外的 URL 注入。
+ * 空值合法（历史数据没有这个字段），表示前端要走"搜索候选"的老流程。
+ */
+export function parseTrackId(raw) {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, value: '' };
+  if (typeof raw !== 'string') return { ok: false, error: '音源标识不合法' };
+
+  const value = raw.trim();
+  if (!value) return { ok: true, value: '' };
+
+  if (!/^(ap|mt)-[A-Za-z0-9_-]{1,64}$/.test(value)) {
+    return { ok: false, error: '音源标识不合法' };
+  }
+  return { ok: true, value };
+}

@@ -1,6 +1,6 @@
 import { readJson, error, json, clientIp, header } from '../../_lib/http.js';
 import { requireSession, rateLimit } from '../../_lib/auth.js';
-import { sanitizeText, parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
+import { sanitizeText, parsePositiveInt, parseFingerprint, parseTrackId } from '../../_lib/validate.js';
 import { changedRows, lastRowId } from '../../_lib/db.js';
 
 /** 查重窗口：每人每周一次。 */
@@ -49,42 +49,51 @@ export async function onRequestPost(context) {
   const fingerprint = parseFingerprint(data.fingerprint);
   if (!fingerprint.ok) return error(fingerprint.error, 400);
 
+  // 点歌时锁定的那一版音源。前端强制"必须从搜索结果里选一首"，
+  // 所以这里也要求带上；调试模式允许省略（方便压测提交逻辑）。
+  const trackId = parseTrackId(data.track_id);
+  if (!trackId.ok) return error(trackId.error, 400);
+  if (!isDebug && !trackId.value) {
+    return error('请先点「搜索歌曲」，从列表里选一首再提交', 400);
+  }
+
   const categoryRow = await env.DB.prepare('SELECT id FROM categories WHERE id = ?')
     .bind(category.value).first();
   if (!categoryRow) return error('分类不存在', 400);
 
-  // ---- 黑名单 ----
-  // 旧写法：(type='artist' AND keyword LIKE ?) OR (type='title' AND keyword LIKE ?) AND expire_at > now
-  // AND 优先级高于 OR，导致过期时间只作用于 title 分支；而且 `keyword LIKE '%歌手%'`
-  // 是拿关键词去匹配歌手，方向是反的。这里改成 instr 字面包含，两个问题一起解决。
+  // ---- 违禁词过滤 ----
+  // 黑名单里只有"违禁词"，没有"封某首歌"这种条目：把歌名与歌手拼成一条字符串
+  // 做字面包含匹配，词出现在哪一边都算命中，所以没法靠"只封歌名"绕过。
+  //
+  // 旧写法有两个 bug：`keyword LIKE '%歌手%'` 方向是反的（拿关键词去匹配歌手，
+  // 等于永远匹配不上），而且 AND 优先级高于 OR 让过期时间只作用于一个分支。
+  // 现在统一用 instr 做字面包含，两个问题一起解决。
+  //
+  // 注意：这一步在音源 id 与调试模式分支**之前**，所以带没带 track_id 都要过这一关。
   const banned = await env.DB.prepare(
-    `SELECT reason FROM banned_items
+    `SELECT keyword, reason FROM banned_items
       WHERE datetime(expire_at) > datetime('now')
-        AND (
-              (type = 'artist' AND instr(lower(?), lower(keyword)) > 0)
-           OR (type = 'title'  AND instr(lower(?), lower(keyword)) > 0)
-        )
+        AND instr(lower(?), lower(keyword)) > 0
       LIMIT 1`
-  ).bind(artist.value, title.value).first();
-  if (banned) return error(`该歌曲或歌手已被过滤：${banned.reason || '违规'}`, 403);
+  ).bind(`${title.value} ${artist.value}`).first();
+  if (banned) {
+    const why = banned.reason ? `：${banned.reason}` : '';
+    return error(`包含违禁词「${banned.keyword}」${why}`, 403);
+  }
 
   // ---- 调试模式：不限次数、不查重 ----
   // 黑名单仍然生效（方便验证黑名单规则），但跳过"每周一次"和重复检查。
   // 提交的歌标记 is_debug=1，后台审核列表会显示「调试模式」。
   if (isDebug) {
-    try {
-      await env.DB.prepare(
-        `INSERT INTO songs (class_id, title, artist, category_id, status, is_debug)
-         VALUES (0, ?, ?, ?, 'pending', 1)`
-      ).bind(title.value, artist.value, category.value).run();
-    } catch (err) {
-      if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
-      // 006 迁移还没执行：退回普通插入，只是后台不会标注调试模式
-      await env.DB.prepare(
-        `INSERT INTO songs (class_id, title, artist, category_id, status)
-         VALUES (0, ?, ?, ?, 'pending')`
-      ).bind(title.value, artist.value, category.value).run();
-    }
+    const result = await insertSongCompat(env, {
+      classId: 0,
+      title: title.value,
+      artist: artist.value,
+      categoryId: category.value,
+      isDebug: true,
+      trackId: trackId.value,
+    });
+    if (!result.ok) throw result.err;
 
     return json({
       ok: true,
@@ -129,13 +138,26 @@ export async function onRequestPost(context) {
 
   // ---- 原子插歌：同一首歌的并发重复提交由 NOT EXISTS 拦下 ----
   // class_id 只用于标注"这是哪个班点的"，不参与查重与可见性判断。
-  const inserted = await env.DB.prepare(
-    `INSERT INTO songs (class_id, title, artist, category_id, status)
-     SELECT ?, ?, ?, ?, 'pending'
+  // track_id 记下点歌时锁定的那一版音源，之后点「试听」直接播它。
+  const atomicSql = (cols, placeholders) =>
+    `INSERT INTO songs (class_id, title, artist, category_id, status${cols})
+     SELECT ?, ?, ?, ?, 'pending'${placeholders}
       WHERE NOT EXISTS (
             SELECT 1 FROM songs WHERE title = ? AND artist = ?
-      )`
-  ).bind(classId, title.value, artist.value, category.value, title.value, artist.value).run();
+      )`;
+
+  let inserted;
+  try {
+    inserted = await env.DB.prepare(atomicSql(', track_id', ', ?'))
+      .bind(classId, title.value, artist.value, category.value, trackId.value, title.value, artist.value)
+      .run();
+  } catch (err) {
+    if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+    // 009 还没执行：退回不含 track_id 的写法
+    inserted = await env.DB.prepare(atomicSql('', ''))
+      .bind(classId, title.value, artist.value, category.value, title.value, artist.value)
+      .run();
+  }
 
   if (changedRows(inserted) !== 1) {
     // 没插进去就把刚占掉的名额还回去，否则用户白白浪费一周。
@@ -147,4 +169,42 @@ export async function onRequestPost(context) {
   }
 
   return json({ ok: true });
+}
+
+/**
+ * 插入一首歌（调试模式用，不需要查重）。
+ *
+ * 迁移进度不同可用列不同（006 的 is_debug、009 的 track_id），
+ * 从"最全"往"最简"依次尝试，保证任何迁移进度下都能提交。
+ */
+async function insertSongCompat(env, { classId, title, artist, categoryId, isDebug, trackId }) {
+  const variants = [
+    [`INSERT INTO songs (class_id, title, artist, category_id, status, is_debug, track_id)
+      VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+      [classId, title, artist, categoryId, isDebug ? 1 : 0, trackId]],
+    [`INSERT INTO songs (class_id, title, artist, category_id, status, is_debug)
+      VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [classId, title, artist, categoryId, isDebug ? 1 : 0]],
+    [`INSERT INTO songs (class_id, title, artist, category_id, status, track_id)
+      VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [classId, title, artist, categoryId, trackId]],
+    [`INSERT INTO songs (class_id, title, artist, category_id, status)
+      VALUES (?, ?, ?, ?, 'pending')`,
+      [classId, title, artist, categoryId]],
+  ];
+
+  let lastError = null;
+  for (const [sql, params] of variants) {
+    try {
+      await env.DB.prepare(sql).bind(...params).run();
+      return { ok: true };
+    } catch (err) {
+      lastError = err;
+      // 只有"列不存在"才继续降级；其它错误（约束冲突等）直接返回
+      if (!/no such column/i.test(String((err && err.message) || ''))) {
+        return { ok: false, err };
+      }
+    }
+  }
+  return { ok: false, err: lastError };
 }
