@@ -32,8 +32,12 @@ async function vote(){
   const artist = document.getElementById('artist').value.trim();
   const category = document.getElementById('category').value;
   const msg = document.getElementById('msg');
-  const pw = sessionStorage.getItem('pw') || 'yczx2026';
+  const pw = sessionStorage.getItem('pw') || '';
+
   if(!title || !artist){ msg.style.color = '#e11d48'; msg.textContent = '歌名和歌手都要填哦'; return; }
+
+  if(!confirm('确认提交这首歌吗？\n歌名：' + title + '\n歌手：' + artist)) return;
+
   msg.style.color = '#2563eb'; msg.textContent = '提交中...';
   try {
     const r = await fetch('/api/vote', {
@@ -49,9 +53,7 @@ async function vote(){
     } else {
       msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
     }
-  } catch(e) {
-    msg.style.color = '#e11d48'; msg.textContent = '网络错误，请重试';
-  }
+  } catch(e) { msg.style.color = '#e11d48'; msg.textContent = '网络错误'; }
 }
 </script>
 </body>
