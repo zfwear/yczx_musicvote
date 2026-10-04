@@ -5,59 +5,76 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>每日点歌</title>
 <style>
-  body{font-family:system-ui;max-width:520px;margin:0 auto;padding:20px 16px;background:#f7f7f7;}
-  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
-  .header h1{font-size:22px;margin:0;color:#1e3a8a;}
-  .header p{color:#6b7280;font-size:12px;margin:4px 0 0 0;}
-  .badge{width:48px;height:48px;}
-  .btn{display:block;width:100%;padding:14px;background:#2563eb;color:#fff;border:0;border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:24px;}
-  .rank-card{background:#fff;padding:14px 16px;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);display:flex;justify-content:space-between;align-items:center;}
-  .rank-info h3{margin:0 0 4px 0;font-size:15px;color:#333;}
-  .rank-info p{margin:0;font-size:12px;color:#888;}
-  .rank-votes{color:#e11d48;font-weight:bold;font-size:16px;}
-  footer{text-align:center;margin-top:40px;padding-bottom:20px;}
-  footer img{width:100px;height:100px;border-radius:50%;opacity:0.85;}
-  footer p{color:#9ca3af;font-size:12px;margin-top:10px;}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
+  .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
+  .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
+  .badge{width:44px;height:44px;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+  .btn{display:block;width:100%;padding:16px;border:0;border-radius:14px;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-size:16px;font-weight:bold;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:24px;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);transition:transform 0.2s ease;}
+  .btn:active{transform:scale(0.97);}
+  .rank-card{background:rgba(255,255,255,0.85);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);display:flex;justify-content:space-between;align-items:center;animation:fadeInUp 0.4s ease forwards;opacity:0;}
+  @keyframes fadeInUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  .rank-info h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;}
+  .rank-info p{margin:0;font-size:13px;color:#64748b;}
+  .rank-votes{color:#e11d48;font-weight:800;font-size:18px;}
+  footer{text-align:center;margin-top:48px;padding-bottom:24px;}
+  footer img{width:80px;height:80px;border-radius:50%;opacity:0.6;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  footer p{color:#94a3b8;font-size:11px;margin-top:12px;letter-spacing:1px;}
+  #gate{background:rgba(255,255,255,0.8);backdrop-filter:blur(10px);padding:20px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.05);margin-top:40px;}
+  #app{display:none}
+  input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
+  .err{color:#e11d48;font-size:13px;text-align:center;min-height:18px;}
 </style>
 </head>
 <body>
-<div class="header">
-  <div>
-    <h1>每日点歌榜</h1>
-    <p>盐中之声 · 广播站</p>
-  </div>
-  <img src="/assets/school-badge.png" alt="校徽" class="badge">
+<div id="gate">
+  <h2 style="text-align:center;color:#0f172a;margin-top:0;">🎵 盐中之声</h2>
+  <p style="color:#64748b;font-size:13px;text-align:center;">请输入班级口令</p>
+  <input id="pw" type="password" placeholder="口令" onkeydown="if(event.key==='Enter')checkPw()">
+  <button onclick="checkPw()" style="background:#0284c7;color:#fff;border:0;font-weight:bold;cursor:pointer;">进入</button>
+  <p id="gateMsg" class="err"></p>
 </div>
-<a href="/vote.html" class="btn">➕ 去点歌投票</a>
-<div id="rankList"><p style="text-align:center;color:#888;">加载中...</p></div>
-<footer>
-  <img src="/assets/radio-logo.png" alt="盐中之声">
-  <p>江苏省盐城中学 · 盐中之声广播站</p>
-</footer>
+<div id="app">
+  <div class="header">
+    <div><h1>每日点歌榜</h1><p>盐中之声 · 广播站</p></div>
+    <img src="/assets/school-badge.png" alt="校徽" class="badge">
+  </div>
+  <a href="/vote.html" class="btn">➕ 去点歌投票</a>
+  <div id="rankList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
+  <footer><img src="/assets/radio-logo.png" alt="盐中之声"><p>江苏省盐城中学 · 盐中之声广播站</p></footer>
+</div>
 <script>
+async function checkPw(){
+  const pw = document.getElementById('pw').value.trim();
+  const msg = document.getElementById('gateMsg');
+  if(!pw){ msg.textContent = '请输入口令'; return; }
+  msg.textContent = '验证中...';
+  try {
+    const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
+    const d = await r.json();
+    if(r.ok){
+      sessionStorage.setItem('pw', pw);
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      loadRank();
+    } else { msg.textContent = d.error || '口令错误'; }
+  } catch(e) { msg.textContent = '网络错误'; }
+}
 async function loadRank(){
   try {
     const res = await fetch('/api/rank?class_id=1');
     const list = await res.json();
     const box = document.getElementById('rankList');
-    if(!list.length){
-      box.innerHTML = '<p style="text-align:center;color:#888;">暂时还没有通过审核的歌曲哦</p>';
-      return;
-    }
+    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂时还没有通过审核的歌曲哦</p>'; return; }
     box.innerHTML = list.map((s, i) => `
       <div class="rank-card">
-        <div class="rank-info">
-          <h3>${i+1}. ${s.title}</h3>
-          <p>${s.artist} · <span style="color:#2563eb;">${s.category_name}</span></p>
-        </div>
+        <div class="rank-info"><h3>${i+1}. ${s.title}</h3><p>${s.artist} · <span style="color:#0284c7;">${s.category_name}</span></p></div>
         <div class="rank-votes">${s.votes}票</div>
       </div>
     `).join('');
-  } catch(e) {
-    document.getElementById('rankList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误，请刷新重试</p>';
-  }
+  } catch(e) { document.getElementById('rankList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误，请刷新重试</p>'; }
 }
-loadRank();
+if(sessionStorage.getItem('pw')){ document.getElementById('gate').style.display = 'none'; document.getElementById('app').style.display = 'block'; loadRank(); }
 </script>
 </body>
 </html>
