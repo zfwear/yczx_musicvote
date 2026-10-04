@@ -44,6 +44,7 @@
   <footer><img src="/assets/radio-logo.png" alt="盐中之声"><p>江苏省盐城中学 · 盐中之声广播站</p></footer>
 </div>
 <script>
+let currentMobileTab = 'pending';
 async function checkPw(){
   const pw = document.getElementById('pw').value.trim();
   const msg = document.getElementById('gateMsg');
@@ -56,25 +57,58 @@ async function checkPw(){
       sessionStorage.setItem('pw', pw);
       document.getElementById('gate').style.display = 'none';
       document.getElementById('app').style.display = 'block';
-      loadRank();
+      loadPending();
+      loadApproved();
     } else { msg.textContent = d.error || '口令错误'; }
   } catch(e) { msg.textContent = '网络错误'; }
 }
-async function loadRank(){
+function switchMobileTab(tab){
+  currentMobileTab = tab;
+  document.getElementById('tabPending').className = tab === 'pending' ? 'active' : '';
+  document.getElementById('tabApproved').className = tab === 'approved' ? 'active' : '';
+  document.getElementById('pendingCol').className = tab === 'pending' ? 'col active' : 'col';
+  document.getElementById('approvedCol').className = tab === 'approved' ? 'col active' : 'col';
+}
+async function loadPending(){
   try {
-    const res = await fetch('/api/rank?class_id=1');
+    const pw = sessionStorage.getItem('pw') || '';
+    const res = await fetch('/api/rank?class_id=1&status=pending&password=' + pw);
     const list = await res.json();
-    const box = document.getElementById('rankList');
-    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂时还没有通过审核的歌曲哦</p>'; return; }
+    const box = document.getElementById('pendingList');
+    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无待审核歌曲</p>'; return; }
+    box.innerHTML = list.map(s => `
+      <div class="rank-card">
+        <div class="rank-info"><h3>${s.title}</h3><p>${s.artist} · <span style="color:#0284c7;">${s.category_name}</span></p></div>
+        <div style="display:flex;align-items:center;"><span class="rank-votes">${s.votes}票</span><button class="btn-upvote" onclick="upvote(${s.id})">投票</button></div>
+      </div>
+    `).join('');
+  } catch(e) { document.getElementById('pendingList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
+}
+async function loadApproved(){
+  try {
+    const pw = sessionStorage.getItem('pw') || '';
+    const res = await fetch('/api/rank?class_id=1&status=approved&password=' + pw);
+    const list = await res.json();
+    const box = document.getElementById('approvedList');
+    if(!list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无已通过歌曲</p>'; return; }
     box.innerHTML = list.map((s, i) => `
       <div class="rank-card">
         <div class="rank-info"><h3>${i+1}. ${s.title}</h3><p>${s.artist} · <span style="color:#0284c7;">${s.category_name}</span></p></div>
-        <div class="rank-votes">${s.votes}票</div>
       </div>
     `).join('');
-  } catch(e) { document.getElementById('rankList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误，请刷新重试</p>'; }
+  } catch(e) { document.getElementById('approvedList').innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
-if(sessionStorage.getItem('pw')){ document.getElementById('gate').style.display = 'none'; document.getElementById('app').style.display = 'block'; loadRank(); }
+async function upvote(id){
+  const pw = sessionStorage.getItem('pw') || '';
+  if(!confirm('确认给这首歌投一票吗？')) return;
+  try {
+    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, password: pw})});
+    const d = await r.json();
+    if(r.ok){ alert('投票成功！'); loadPending(); }
+    else { alert(d.error || '操作失败'); }
+  } catch(e) { alert('网络错误'); }
+}
+if(sessionStorage.getItem('pw')){ document.getElementById('gate').style.display = 'none'; document.getElementById('app').style.display = 'block'; loadPending(); loadApproved(); }
 </script>
 </body>
 </html>
