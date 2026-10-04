@@ -31,12 +31,12 @@
 <body>
 <div id="loginBox" class="login-box">
   <h2 style="text-align:center;color:#0f172a;margin-top:0;">管理员登录</h2>
-  <p class="sub">请输入管理员账号、密码，如有动态口令请一并填写</p>
+  <p class="sub">请输入管理员账号与密码</p>
   <input id="username" placeholder="管理员账号" value="admin">
   <input id="password" type="password" placeholder="管理员密码">
-  <input id="token" placeholder="动态口令 (选填)">
   <button onclick="adminLogin()">登录</button>
   <p id="loginMsg" class="msg"></p>
+  <p class="sub" style="margin-bottom:0;">没有账号？<a href="/register.html" style="color:#0284c7;text-decoration:none;">用动态口令注册</a></p>
 </div>
 
 <div id="adminBox" class="hidden">
@@ -59,7 +59,8 @@ function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => (
 function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
 
 let currentStatus = 'pending';
-let settingsCache = { classes: [], banned: [], categories: [], security: {} };
+let currentRole = 'admin';
+let settingsCache = { classes: [], banned: [], categories: [], security: {}, invites: [], admins: [] };
 
 function showLogin(){
   document.getElementById('adminBox').classList.add('hidden');
@@ -76,23 +77,23 @@ function switchTab(status, btn){
 async function adminLogin(){
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
-  const token = document.getElementById('token').value.trim();
   const msg = document.getElementById('loginMsg');
   if(!username || !password){ msg.textContent = '账号和密码都要填'; return; }
   msg.textContent = '登录中...';
   try {
+    // 动态口令已不在登录流程里：它只用于「注册新管理员」，见 register.html。
     const r = await fetch('/api/admin-login', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({username, password, token})
+      body: JSON.stringify({username, password})
     });
     const d = await r.json();
     if(r.ok){
       // 不再把原始密码写进 sessionStorage —— 登录态由服务端 HttpOnly 会话 Cookie
       // 承担，脚本读不到，XSS 也就偷不走。
       document.getElementById('password').value = '';
-      document.getElementById('token').value = '';
       msg.textContent = '';
+      currentRole = d.role || 'admin';
       document.getElementById('loginBox').classList.add('hidden');
       document.getElementById('adminBox').classList.remove('hidden');
       loadList();
@@ -108,8 +109,25 @@ async function loadList(){
     const r = await fetch('/api/admin-list?status=' + encodeURIComponent(currentStatus));
     if(r.status === 401 || r.status === 403){ showLogin(); return; }
     const list = await r.json();
-    if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p class="sub">这里空空如也</p>'; return; }
-    box.innerHTML = list.map(s => {
+
+    // 回收站顶部单独放一个"清空"入口。也顺便把回收站与黑名单的区别写清楚 ——
+    // 它们是完全独立的两套数据，经常被混为一谈。
+    const header = currentStatus === 'rejected'
+      ? `<div class="card">
+           <h3>回收站</h3>
+           <p>这里是被拒绝 / 移入回收站的歌曲，可以逐首恢复或彻底删除。<br>
+              <b>回收站和黑名单不是一回事</b>：黑名单是"禁止再提交某个歌手 / 某个歌名"的规则，
+              在「系统设置」里维护，跟这里的歌曲记录没有关系。</p>
+           <button class="btn-reject" onclick="emptyRecycle()">清空回收站</button>
+         </div>`
+      : '';
+
+    if(!Array.isArray(list) || !list.length){
+      box.innerHTML = header + '<p class="sub">' + (currentStatus === 'rejected' ? '回收站是空的' : '这里空空如也') + '</p>';
+      return;
+    }
+
+    box.innerHTML = header + list.map(s => {
       const id = safeInt(s.id);
       const catId = safeInt(s.category_id);
       const reported = safeInt(s.is_reported) === 1;
@@ -128,7 +146,7 @@ async function loadList(){
         <div class="actions">
           ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button onclick="action(${id}, 'clear_report')" style="background:#64748b;">清除举报</button>` : ''}` : ''}
           ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${id}, 'reject')">移入回收站</button>` : ''}
-          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button>` : ''}
+          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button><button class="btn-reject" onclick="action(${id}, 'delete')">彻底删除</button>` : ''}
         </div>
       </div>
     `}).join('');
@@ -148,6 +166,32 @@ async function loadSettings(){
     settingsCache.banned = Array.isArray(data.banned) ? data.banned : [];
     settingsCache.categories = Array.isArray(data.categories) ? data.categories : [];
     settingsCache.security = data.security || {};
+    if(data.security && data.security.role){ currentRole = data.security.role; }
+
+    // 公告：所有管理员都能看和发
+    try {
+      const annRes = await fetch('/api/announcements?all=1');
+      const annData = annRes.ok ? await annRes.json() : { announcements: [] };
+      settingsCache.announcements = Array.isArray(annData.announcements) ? annData.announcements : [];
+    } catch(e) { settingsCache.announcements = []; }
+
+    // 动态口令与管理员列表：只有高级管理员能看，普通管理员请求会拿到 403，忽略即可
+    settingsCache.invites = [];
+    settingsCache.admins = [];
+    if(currentRole === 'super'){
+      try {
+        const invRes = await fetch('/api/admin-invites');
+        const invData = invRes.ok ? await invRes.json() : { invites: [] };
+        settingsCache.invites = Array.isArray(invData.invites) ? invData.invites : [];
+      } catch(e) { /* 忽略 */ }
+      try {
+        const accRes = await fetch('/api/admin-accounts');
+        const accData = accRes.ok ? await accRes.json() : { admins: [] };
+        settingsCache.admins = Array.isArray(accData.admins) ? accData.admins : [];
+        settingsCache.currentAdminId = safeInt(accData.currentId);
+      } catch(e) { /* 忽略 */ }
+    }
+
     renderSettings();
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
 }
@@ -192,30 +236,151 @@ function renderSettings(){
     ? '<p class="sub" style="color:#059669;">已配置 AUTH_PEPPER，班级口令索引受服务端私钥保护</p>'
     : '<p class="sub" style="color:#b45309;">建议在 Pages 环境变量里配置 AUTH_PEPPER（随机字符串），用于保护班级口令索引</p>';
 
-  box.innerHTML = `
+  const isSuper = currentRole === 'super';
+
+  // ---- 动态口令列表（仅高级管理员可见）----
+  const inviteRows = settingsCache.invites.length ? settingsCache.invites.map(v => {
+    const id = safeInt(v.id);
+    const usable = safeInt(v.is_usable) === 1;
+    return `
+      <div class="card">
+        <p style="margin:0 0 6px 0;font-size:13px;">${v.note ? escapeHtml(v.note) + ' · ' : ''}已用 ${safeInt(v.used_count)}/${safeInt(v.max_uses)} 次<br>
+           有效期至 ${escapeHtml(v.expires_at)}（UTC）<br>
+           <span style="color:${usable ? '#059669' : '#e11d48'};">${usable ? '可用' : '已失效（过期或用尽）'}</span></p>
+        <button class="btn-reject" onclick="revokeInvite(${id})">作废</button>
+      </div>
+    `;
+  }).join('') : '<p class="sub">还没有生成过动态口令</p>';
+
+  // ---- 管理员账号列表（仅高级管理员可见）----
+  const adminRows = settingsCache.admins.length ? settingsCache.admins.map(a => {
+    const id = safeInt(a.id);
+    const isSuperAccount = a.role === 'super';
+    const isSelf = id === settingsCache.currentAdminId;
+    return `
+      <div class="card">
+        <p style="margin:0 0 6px 0;font-size:13px;"><b>${escapeHtml(a.username)}</b>
+           ${isSuperAccount ? '<span style="color:#0284c7;">（高级管理员）</span>' : '（普通管理员）'}
+           ${isSelf ? ' ← 你自己' : ''}</p>
+        ${(isSuperAccount || isSelf) ? '' : `
+          <button onclick="resetAdminPassword(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:#64748b;">重置密码</button>
+          <button class="btn-reject" onclick="deleteAdmin(${id})">删除</button>`}
+      </div>
+    `;
+  }).join('') : '<p class="sub">加载中…</p>';
+
+  // ---- 公告列表（所有管理员都能发）----
+  const annRows = settingsCache.announcements.length ? settingsCache.announcements.map(a => {
+    const id = safeInt(a.id);
+    const active = safeInt(a.is_active) === 1;
+    return `
+      <div class="card">
+        <h3>${escapeHtml(a.title)}${active ? '' : ' <span style="color:#e11d48;font-size:12px;">（已下架）</span>'}</h3>
+        <p style="white-space:pre-wrap;">${escapeHtml(a.content)}</p>
+        <p>${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
+        <div class="actions">
+          <button onclick="editAnnouncement(${id})" style="background:#64748b;">编辑</button>
+          <button class="${active ? 'btn-reject' : 'btn-pass'}" onclick="toggleAnnouncement(${id}, ${active ? 0 : 1})">${active ? '下架' : '上架'}</button>
+          <button class="btn-reject" onclick="deleteAnnouncement(${id})">删除</button>
+        </div>
+      </div>
+    `;
+  }).join('') : '<p class="sub">还没有发布过公告</p>';
+
+  // 动态口令 / 管理员账号 / 班级口令 / 分类权重：高级管理员专属
+  const superSections = isSuper ? `
+    <div class="card">
+      <h3>生成动态口令</h3>
+      <p>把口令（或带口令的注册链接）发给别人，对方打开注册页填入即可成为<b>普通管理员</b>。<br>
+         <b style="color:#b45309;">口令明文只显示这一次</b>，生成后请立刻复制保存。</p>
+      <input id="inviteNote" placeholder="备注（选填，例如：给高二年级组）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="inviteUses" type="number" min="1" max="50" value="1" placeholder="可用次数" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="inviteDays" type="number" min="1" max="90" value="7" placeholder="有效天数" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="createInvite()" style="font-size:14px;padding:10px;">生成动态口令</button>
+      <div id="inviteResult"></div>
+      <div style="height:12px;"></div>
+      ${inviteRows}
+    </div>
+
+    <div class="card">
+      <h3>管理员账号</h3>
+      <p>通过动态口令注册的都是普通管理员：可以审核歌单、维护黑名单、发公告，
+         但<b>不能管理其他管理员</b>，也不能改班级口令和分类权重。</p>
+      ${adminRows}
+    </div>
+
     <div class="card">
       <h3>添加班级口令</h3>
       <input id="newClassName" placeholder="班级名称（如：高一(3)班）" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="newClassPw" placeholder="该班级口令（至少 6 位）" style="font-size:14px;padding:10px;margin:8px 0;">
       <button onclick="addClass()" style="font-size:14px;padding:10px;">添加</button>
     </div>
+
+    <div class="card">
+      <h3>一键批量生成班级口令</h3>
+      <p>按序号挨个创建，不用一个个手动加。例如前缀填「高一」、序号 1 到 20，
+         就会一次生成 高一(1)班 … 高一(20)班。</p>
+      <input id="bulkPrefix" placeholder="班级名称前缀" value="高一" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bulkStart" type="number" min="1" max="99" value="1" placeholder="起始序号" style="font-size:14px;padding:10px;margin:8px 0;">
+      <input id="bulkEnd" type="number" min="1" max="99" value="10" placeholder="结束序号" style="font-size:14px;padding:10px;margin:8px 0;">
+      <select id="bulkMode" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+        <option value="random">每班一个随机口令（推荐，更安全）</option>
+        <option value="shared">所有班共用一个口令（简单，但泄露一个等于全泄露）</option>
+      </select>
+      <input id="bulkSharedPw" placeholder="统一口令（选了「共用」才需要填，至少 6 位）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <button onclick="bulkGenerate()" style="font-size:14px;padding:10px;">开始生成</button>
+      <div id="bulkResult"></div>
+    </div>
+
     <div class="card">
       <h3>班级口令列表</h3>
       ${classRows}
     </div>
+
     <div class="card">
       <h3>分类权重</h3>
+      <p>权重越大，该分类的歌曲在正式榜排得越靠前；同权重内再按票数排序。</p>
       ${weightRows}
     </div>
+  ` : `
+    <div class="card">
+      <h3>权限说明</h3>
+      <p>您是<b>普通管理员</b>：可以审核歌单、维护黑名单、发布公告。<br>
+         班级口令、分类权重、动态口令与管理员管理属于<b>高级管理员</b>专属。</p>
+    </div>
+  `;
+
+  box.innerHTML = `
+    <div class="card">
+      <h3>安全状态</h3>
+      ${pepperNote}
+      <p>当前身份：<b>${isSuper ? '高级管理员' : '普通管理员'}</b></p>
+    </div>
+
     <div class="card">
       <h3>修改管理员密码</h3>
       <input id="curAdminPw" type="password" placeholder="当前密码" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="newAdminPw" type="password" placeholder="新密码（至少 8 位）" style="font-size:14px;padding:10px;margin:8px 0;">
       <button onclick="changeAdminPassword()" style="font-size:14px;padding:10px;">保存新密码</button>
-      ${pepperNote}
     </div>
+
+    ${superSections}
+
+    <div class="card">
+      <h3>发布公告</h3>
+      <p>公告会显示在主页最上方，学生一进主页就能看到。</p>
+      <input id="annTitle" placeholder="公告标题" maxlength="40" style="font-size:14px;padding:10px;margin:8px 0;">
+      <textarea id="annContent" rows="4" maxlength="500" placeholder="公告内容（可以换行）"
+        style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);font-family:inherit;"></textarea>
+      <button onclick="createAnnouncement()" style="font-size:14px;padding:10px;">发布公告</button>
+      <div style="height:12px;"></div>
+      ${annRows}
+    </div>
+
     <div class="card">
       <h3>添加违禁名单</h3>
+      <p><b>黑名单和回收站不是一回事</b>：黑名单是「禁止再提交某个歌手 / 某个歌名」的规则，
+         不会删除已有歌曲；回收站要在「回收站」页签里单独管理。</p>
       <select id="bannedType" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
         <option value="artist">违禁歌手</option>
         <option value="title">违禁歌名</option>
@@ -229,9 +394,7 @@ function renderSettings(){
         <option value="365">一年后自动解禁</option>
       </select>
       <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
-    </div>
-    <div class="card">
-      <h3>当前黑名单</h3>
+      <div style="height:12px;"></div>
       <div id="bannedList">${bannedHtml}</div>
     </div>
   `;
@@ -308,9 +471,17 @@ async function deleteBanned(id){
   settingsPost({action:'delete_banned', id: safeInt(id)}, '已删除');
 }
 
+const ACTION_META = {
+  approve: { text: '通过', msg: '确认通过这首歌吗？通过后会进入正式榜。' },
+  reject: { text: '拒绝', msg: '确认拒绝这首歌吗？它会进入回收站，之后还能恢复。' },
+  restore: { text: '恢复', msg: '确认把这首歌恢复到待审核队列吗？' },
+  clear_report: { text: '清除举报标记', msg: '确认清除这首歌的举报标记吗？' },
+  delete: { text: '彻底删除', msg: '确认彻底删除这首歌吗？\n\n它会从数据库里永久消失、无法恢复。\n注意这和"加入黑名单"是两回事：黑名单是禁止再提交某个歌手/歌名，不会删除已有歌曲。' }
+};
+
 async function action(id, type){
-  const typeText = type === 'approve' ? '通过' : (type === 'reject' ? '拒绝' : (type === 'restore' ? '恢复' : '清除举报标记'));
-  if(!confirm('确认要执行【' + typeText + '】操作吗？')) return;
+  const meta = ACTION_META[type] || { text: '操作', msg: '确认执行该操作吗？' };
+  if(!confirm('【' + meta.text + '】\n' + meta.msg)) return;
   const r = await fetch('/api/admin-action', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -318,6 +489,19 @@ async function action(id, type){
   });
   const d = await r.json().catch(() => ({}));
   if(r.ok){ loadList(); } else { alert(d.error || '操作失败'); }
+}
+
+/** 清空回收站：只删 status='rejected' 的歌曲，完全不碰黑名单。 */
+async function emptyRecycle(){
+  if(!confirm('确认清空回收站吗？\n\n回收站里的歌曲会被永久删除、无法恢复。\n（只清空回收站，不会动到黑名单）')) return;
+  const r = await fetch('/api/admin-action', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type:'empty_recycle'})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert('已清空回收站，共删除 ' + safeInt(d.deleted) + ' 首'); loadList(); }
+  else alert(d.error || '清空失败');
 }
 
 async function updateCategory(id, catId){
@@ -333,6 +517,233 @@ async function updateCategory(id, catId){
 async function logout(){
   try { await fetch('/api/logout', {method:'POST'}); } catch(e) {}
   showLogin();
+}
+
+/* ---------------- 动态口令（邀请码）---------------- */
+
+async function createInvite(){
+  const note = document.getElementById('inviteNote').value.trim();
+  const maxUses = safeInt(document.getElementById('inviteUses').value) || 1;
+  const days = safeInt(document.getElementById('inviteDays').value) || 7;
+
+  if(!confirm('确认生成一个动态口令吗？\n\n可用次数：' + maxUses + ' 次\n有效期：' + days + ' 天\n\n生成后明文只显示这一次。')) return;
+
+  const r = await fetch('/api/admin-invites', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'create', note: note, max_uses: maxUses, expires_days: days})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(!r.ok){ alert(d.error || '生成失败'); return; }
+
+  const link = location.origin + '/register.html?code=' + encodeURIComponent(d.formatted);
+  document.getElementById('inviteResult').innerHTML = `
+    <div class="card" style="background:rgba(5,150,105,0.08);border-color:rgba(5,150,105,0.35);">
+      <h3>已生成（只显示这一次，请立刻复制）</h3>
+      <p style="font-size:22px;font-weight:bold;color:#065f46;letter-spacing:2px;margin:10px 0;">${escapeHtml(d.formatted)}</p>
+      <p>可用次数：${safeInt(d.max_uses)} 次　有效期至：${escapeHtml(d.expires_at)}（UTC）</p>
+      <p>把下面这条链接发给对方，他打开就自动带好口令：</p>
+      <p style="word-break:break-all;color:#0284c7;">${escapeHtml(link)}</p>
+      <button onclick="copyText('${escapeHtml(d.formatted)}')" style="font-size:14px;padding:10px;background:#64748b;">复制口令</button>
+      <button onclick="copyText('${escapeHtml(link)}')" style="font-size:14px;padding:10px;background:#64748b;">复制注册链接</button>
+    </div>
+  `;
+}
+
+async function revokeInvite(id){
+  if(!confirm('确认作废这个动态口令吗？作废后别人就无法再用它注册。')) return;
+  const r = await fetch('/api/admin-invites', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'revoke', id: safeInt(id)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert('已作废'); loadSettings(); } else alert(d.error || '操作失败');
+}
+
+function copyText(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(
+      () => alert('已复制到剪贴板'),
+      () => prompt('复制失败，请手动复制：', text)
+    );
+  } else {
+    prompt('请手动复制：', text);
+  }
+}
+
+/* ---------------- 管理员账号 ---------------- */
+
+async function deleteAdmin(id){
+  if(!confirm('确认删除这个管理员吗？\n删除后他的登录状态会立即失效。')) return;
+  const r = await fetch('/api/admin-accounts', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'delete', id: safeInt(id)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已删除'); loadSettings(); } else alert(d.error || '删除失败');
+}
+
+async function resetAdminPassword(id){
+  const pw = prompt('请输入该管理员的新密码（至少 8 位）');
+  if(pw === null) return;
+  if(pw.trim().length < 8){ alert('密码至少 8 位'); return; }
+  if(!confirm('确认重置吗？对方所有在线登录会立即失效。')) return;
+  const r = await fetch('/api/admin-accounts', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'reset_password', id: safeInt(id), new_password: pw.trim()})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已重置'); loadSettings(); } else alert(d.error || '重置失败');
+}
+
+/* ---------------- 一键批量生成班级口令 ---------------- */
+
+// 与后端邀请码同一套字母表：去掉 0/O、1/I/L 等易混字符，方便手抄和口头转达。
+const PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function randomPassword(length){
+  const bytes = new Uint8Array(length);
+  if(window.crypto && window.crypto.getRandomValues){
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for(let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let out = '';
+  for(let i = 0; i < length; i++) out += PASSWORD_ALPHABET[bytes[i] % PASSWORD_ALPHABET.length];
+  return out;
+}
+
+/**
+ * 批量生成。
+ *
+ * 这里刻意由前端**逐个**调用 add_class，而不是让后端一次循环建 20 个：
+ * 服务端每个班级要跑一次 PBKDF2（约 2.8ms CPU），一次建 20 个就是 56ms，
+ * 会直接撞上 Cloudflare 免费套餐"单次请求 10ms CPU"的上限而被掐断。
+ * 拆成 20 个请求后，每个请求都在预算内，总耗时只是多了几次网络往返。
+ */
+async function bulkGenerate(){
+  const prefix = document.getElementById('bulkPrefix').value.trim();
+  const start = safeInt(document.getElementById('bulkStart').value);
+  const end = safeInt(document.getElementById('bulkEnd').value);
+  const mode = document.getElementById('bulkMode').value;
+  const sharedPw = document.getElementById('bulkSharedPw').value.trim();
+  const resultBox = document.getElementById('bulkResult');
+
+  if(!prefix){ alert('请填写班级名称前缀，例如「高一」'); return; }
+  if(!start || !end || end < start){ alert('序号范围不对，结束序号要大于等于起始序号'); return; }
+  if(end - start + 1 > 60){ alert('一次最多生成 60 个班级，请分批'); return; }
+  if(mode === 'shared' && sharedPw.length < 6){ alert('统一口令至少 6 位'); return; }
+
+  const count = end - start + 1;
+  const modeText = mode === 'random' ? '每班一个随机口令' : '所有班共用一个口令';
+  const warn = mode === 'random' ? '\n\n⚠️ 随机口令只显示这一次，生成后请立刻复制保存。' : '';
+  if(!confirm('确认生成 ' + count + ' 个班级吗？\n\n名称：' + prefix + '(' + start + ')班 ~ ' + prefix + '(' + end + ')班\n方式：' + modeText + warn)) return;
+
+  const created = [];
+  const failed = [];
+  resultBox.innerHTML = '<p class="sub">正在生成… 0/' + count + '</p>';
+
+  for(let n = start; n <= end; n++){
+    const name = prefix + '(' + n + ')班';
+    const password = mode === 'shared' ? sharedPw : randomPassword(6);
+    resultBox.innerHTML = '<p class="sub">正在生成… ' + (n - start + 1) + '/' + count + '（' + escapeHtml(name) + '）</p>';
+
+    try {
+      const r = await fetch('/api/admin-settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({action:'add_class', name: name, password: password})
+      });
+      const d = await r.json().catch(() => ({}));
+      if(r.ok) created.push({ name: name, password: password });
+      else failed.push(name + '：' + (d.error || '失败'));
+    } catch(e) {
+      failed.push(name + '：网络错误');
+    }
+  }
+
+  const lines = created.map(c => c.name + '\t' + c.password).join('\n');
+  resultBox.innerHTML = `
+    <div class="card" style="background:rgba(5,150,105,0.08);border-color:rgba(5,150,105,0.35);">
+      <h3>生成完成：成功 ${created.length} 个${failed.length ? '，失败 ' + failed.length + ' 个' : ''}</h3>
+      ${created.length ? `
+        <p>${mode === 'random' ? '⚠️ 这些口令只显示这一次，请立刻复制保存（可贴到班级群里分发）。' : '所有班级共用同一个口令。'}</p>
+        <textarea id="bulkOutput" readonly rows="${Math.min(20, created.length + 2)}"
+          style="font-size:13px;padding:10px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.95);font-family:monospace;">${escapeHtml(lines)}</textarea>
+        <button onclick="copyBulk()" style="font-size:14px;padding:10px;background:#64748b;">复制全部口令</button>
+        <p class="sub">班级列表会在下次进入「系统设置」时刷新。</p>
+      ` : ''}
+      ${failed.length ? '<p style="color:#e11d48;font-size:13px;">失败明细：<br>' + failed.map(escapeHtml).join('<br>') + '</p>' : ''}
+    </div>
+  `;
+}
+
+function copyBulk(){
+  const el = document.getElementById('bulkOutput');
+  if(!el) return;
+  copyText(el.value);
+}
+
+/* ---------------- 公告 ---------------- */
+
+async function createAnnouncement(){
+  const title = document.getElementById('annTitle').value.trim();
+  const content = document.getElementById('annContent').value.trim();
+  if(!title || !content){ alert('公告标题和内容都要填'); return; }
+  if(!confirm('确认发布公告「' + title + '」吗？学生一进主页就能看到。')) return;
+
+  const r = await fetch('/api/announcements', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'create', title: title, content: content})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert('公告已发布'); loadSettings(); } else alert(d.error || '发布失败');
+}
+
+async function editAnnouncement(id){
+  const item = settingsCache.announcements.find(a => safeInt(a.id) === safeInt(id));
+  if(!item) return;
+
+  const title = prompt('修改公告标题', item.title);
+  if(title === null) return;
+  const content = prompt('修改公告内容（可以换行）', item.content);
+  if(content === null) return;
+  if(!title.trim() || !content.trim()){ alert('标题和内容都不能为空'); return; }
+  if(!confirm('确认保存这次修改吗？')) return;
+
+  const r = await fetch('/api/announcements', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'update', id: safeInt(id), title: title.trim(), content: content.trim()})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert('已更新'); loadSettings(); } else alert(d.error || '更新失败');
+}
+
+async function toggleAnnouncement(id, active){
+  if(!confirm(active ? '确认把这条公告上架吗？' : '确认下架这条公告吗？下架后学生看不到。')) return;
+  const r = await fetch('/api/announcements', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'toggle', id: safeInt(id), is_active: safeInt(active)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert(d.message || '已更新'); loadSettings(); } else alert(d.error || '操作失败');
+}
+
+async function deleteAnnouncement(id){
+  if(!confirm('确认删除这条公告吗？删除后无法恢复。')) return;
+  const r = await fetch('/api/announcements', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'delete', id: safeInt(id)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ alert('已删除'); loadSettings(); } else alert(d.error || '删除失败');
 }
 
 // 启动：用一次探测请求判断会话是否有效，有效就直奔后台。

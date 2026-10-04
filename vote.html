@@ -29,10 +29,15 @@
     <option value="4">小语种</option>
   </select>
   <button onclick="vote()">提交点歌</button>
+  <button onclick="auditionInput()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">▶ 先试听一下</button>
   <p id="msg"></p>
+  <div id="auditionBox"></div>
 </div>
 <button class="back" onclick="location.href='/'">返回主页</button>
 <script>
+// 试听结果来自外部音源接口，属于不可信内容，必须转义后才能拼进 innerHTML。
+function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
+
 // 设备指纹：用于"每人每周一次"的去重，替代旧版可被"换个 User-Agent"绕过的方案。
 // 刻意不使用 localStorage / Cookie，这样清缓存不会把限制重置；
 // 采集的是设备与浏览器本身的稳定特征（屏幕、时区、CPU 核数、Canvas / WebGL 差异）。
@@ -115,6 +120,73 @@ async function vote(){
       msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
     }
   } catch(e) { msg.style.color = '#e11d48'; msg.textContent = '网络错误'; }
+}
+
+/* ---------------- 试听 ---------------- */
+
+// 用当前填写的歌名 / 歌手去搜。后端已做三级降级：
+// 歌名+歌手 → 只按歌名 → 模糊搜索，所以输入不全时也能找到。
+async function auditionInput(){
+  const box = document.getElementById('auditionBox');
+  const title = document.getElementById('title').value.trim();
+  const artist = document.getElementById('artist').value.trim();
+
+  // 再点一次收起
+  if(box.dataset.open === '1'){
+    box.dataset.open = '0';
+    box.innerHTML = '';
+    return;
+  }
+  if(!title){ alert('请先填写歌名，再点试听'); return; }
+
+  box.dataset.open = '1';
+  box.innerHTML = '<p class="sub">正在搜索音源…</p>';
+
+  try {
+    let url = '/api/music?q=' + encodeURIComponent(title);
+    if(artist) url += '&artist=' + encodeURIComponent(artist);
+    const r = await fetch(url);
+    const d = await r.json();
+    if(!r.ok){
+      box.innerHTML = '<p class="sub" style="color:#e11d48;">' + escapeHtml(d.error || '搜索失败') + '</p>';
+      return;
+    }
+    const list = Array.isArray(d.results) ? d.results : [];
+    if(!list.length){
+      box.innerHTML = '<p class="sub">没找到可试听的版本，换个写法再试试</p>';
+      return;
+    }
+    box.innerHTML = list.map(s => `
+      <div style="background:rgba(255,255,255,0.9);border-radius:10px;padding:10px 12px;margin:8px 0;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-size:14px;font-weight:600;color:#1e293b;word-break:break-word;">${escapeHtml(s.name)}</div>
+          <div style="font-size:12px;color:#64748b;word-break:break-word;">${escapeHtml(s.artist)}　<span style="color:#0284c7;">${escapeHtml(s.source || '')}</span></div>
+        </div>
+        <button data-track="${escapeHtml(s.id)}" onclick="playFromButton(this)" style="width:auto;padding:8px 12px;font-size:13px;margin:0;">播放</button>
+      </div>
+    `).join('');
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
+  }
+}
+
+// 用 data-* 传参，避免把外部返回的文本拼进 onclick 的 JS 字符串里。
+function playFromButton(button){
+  const box = document.getElementById('auditionBox');
+  const trackId = button.dataset.track;
+  if(!box || !trackId) return;
+
+  const old = box.querySelector('audio');
+  if(old) old.remove();
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = '/api/music?play=' + encodeURIComponent(trackId);
+  audio.style.width = '100%';
+  audio.style.marginTop = '8px';
+  box.appendChild(audio);
+  audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 
 // 进页面先确认会话仍有效（替代旧版读取 sessionStorage 里保存的口令）。

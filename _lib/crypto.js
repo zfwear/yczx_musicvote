@@ -139,6 +139,33 @@ export function randomToken(byteLength = 32) {
   return bytesToB64url(crypto.getRandomValues(new Uint8Array(byteLength)));
 }
 
+/**
+ * 生成"人类可读"的随机码，用于管理员邀请口令。
+ *
+ * 字母表刻意剔除了 0/O、1/I/L 等易混字符 —— 邀请码是要靠嘴念、靠手抄
+ * 转达给别人的，31 个符号取 12 位约等于 2^59 种组合，足够抗爆破。
+ */
+const READABLE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+export function randomReadableCode(length = 12) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += READABLE_ALPHABET[bytes[i] % READABLE_ALPHABET.length];
+  }
+  return out;
+}
+
+/** 归一化用户输入的邀请码：忽略大小写、空格与分隔符。 */
+export function normalizeInviteCode(value) {
+  return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/** 把 12 位邀请码排成 XXXX-XXXX-XXXX，便于抄写。 */
+export function formatInviteCode(code) {
+  return String(code ?? '').replace(/(.{4})(?=.)/g, '$1-');
+}
+
 /** SHA-256 十六进制摘要。用于把会话令牌变成不可逆的存储值。 */
 export async function sha256Hex(input) {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(input));

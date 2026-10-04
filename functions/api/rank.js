@@ -8,14 +8,14 @@ import { parseEnum } from '../../_lib/validate.js';
  *   待审核榜 (pending)：按票数从高到低，前端可投票；返回 votes 与 is_reported。
  *   正式榜   (approved)：先按分类权重（纯音乐100 > 中文歌80 > 英文歌50 > 小语种30），
  *                        再按票数从高到低。**响应里完全不含 votes 字段**——
- *                        票数在服务端就不下发，F12 看 Network 也拿不到，
- *                        比"前端隐藏"可靠得多。
+ *                        票数在服务端就不下发，F12 看 Network 也拿不到。
  *
- * 同时修掉旧版三个问题：
- *  1. 口令放在 URL 查询串里 → 现在用会话 Cookie，URL 中不再有凭证。
- *  2. 只校验"口令存在"、不校验它属于哪个班级 → class_id 直接取自会话，
- *     客户端传什么都被忽略，跨班级读取被彻底挡住。
- *  3. status 未做白名单 → 传 rejected 会泄露回收站，现在只允许 approved/pending。
+ * ⚠️ 关于"多班级口令"的语义（这里踩过一次坑，记下来）：
+ *    多个班级口令是**多把进同一系统的钥匙**，不是多租户。
+ *    全校共用同一份榜单，所以查询**不按 class_id 过滤**。
+ *    早期版本按会话里的 class_id 过滤，导致"新加一个班级口令后用它登录，
+ *    榜单是空的"——因为所有历史歌曲都属于第一个班级。
+ *    歌曲记录里的 class_id 只用于标注"是哪个班点的"，不参与可见性判断。
  *
  * 数值列一律 CAST 成 INTEGER：SQLite 是动态类型，数值列理论上可能存进文本，
  * 而这些值会被拼进 HTML 与 JS 调用，强制转整数可从根上断掉此类注入。
@@ -23,6 +23,7 @@ import { parseEnum } from '../../_lib/validate.js';
 export async function onRequestGet(context) {
   const { request, env } = context;
 
+  // 会话只用来证明"你是通过口令进来的学生"，不参与数据过滤。
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
 
@@ -33,8 +34,6 @@ export async function onRequestGet(context) {
     { field: 'status' }
   );
   if (!status.ok) return error(status.error, 400);
-
-  const classId = auth.session.subject_id;
 
   if (status.value === 'pending') {
     const { results } = await env.DB.prepare(
@@ -47,10 +46,10 @@ export async function onRequestGet(context) {
               c.name AS category_name
          FROM songs s
          JOIN categories c ON s.category_id = c.id
-        WHERE s.status = 'pending' AND s.class_id = ?
+        WHERE s.status = 'pending'
         ORDER BY CAST(s.votes AS INTEGER) DESC, s.id DESC
         LIMIT 50`
-    ).bind(classId).all();
+    ).all();
 
     return json(results || []);
   }
@@ -65,12 +64,12 @@ export async function onRequestGet(context) {
             CAST(c.weight AS INTEGER) AS category_weight
        FROM songs s
        JOIN categories c ON s.category_id = c.id
-      WHERE s.status = 'approved' AND s.class_id = ?
+      WHERE s.status = 'approved'
       ORDER BY CAST(c.weight AS INTEGER) DESC,
                CAST(s.votes AS INTEGER) DESC,
                s.id ASC
       LIMIT 50`
-  ).bind(classId).all();
+  ).all();
 
   return json(results || []);
 }

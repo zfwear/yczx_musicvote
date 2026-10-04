@@ -166,6 +166,19 @@ export async function requireAdmin(env, request, allowedRoles = null) {
   return result;
 }
 
+/**
+ * 高级管理员专属操作。
+ * 只有高级管理员能生成邀请口令、管理其他管理员、改班级口令与分类权重。
+ */
+export async function requireSuper(env, request) {
+  return requireAdmin(env, request, ['super']);
+}
+
+/** 普通管理员及以上（审核歌单、黑名单、发公告）。 */
+export async function requireStaff(env, request) {
+  return requireAdmin(env, request, ['super', 'admin']);
+}
+
 /** 撤销当前会话（退出登录）。 */
 export async function revokeSession(env, request) {
   const token = presentedToken(request);

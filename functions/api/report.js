@@ -37,9 +37,10 @@ export async function onRequestPost(context) {
     reason = parsedReason.value;
   }
 
+  // 全校共用一份榜单：只要歌在待审核池里就能举报，不限于"自己班"点的。
   const song = await env.DB.prepare(
-    "SELECT id FROM songs WHERE id = ? AND status = 'pending' AND class_id = ?"
-  ).bind(songId.value, classId).first();
+    "SELECT id FROM songs WHERE id = ? AND status = 'pending'"
+  ).bind(songId.value).first();
   if (!song) return error('这首歌不在待审核列表中', 404);
 
   // 原子占位：并发或重复举报都只会成功一次。

@@ -1,5 +1,7 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireAdmin, classPasswordLookup, authPepper, DEFAULT_PEPPER } from '../../_lib/auth.js';
+import {
+  requireStaff, requireSuper, classPasswordLookup, authPepper, DEFAULT_PEPPER,
+} from '../../_lib/auth.js';
 import { sanitizeText, parsePositiveInt, parseEnum, parseSecret } from '../../_lib/validate.js';
 import { hashPassword, verifyPassword } from '../../_lib/crypto.js';
 import { changedRows } from '../../_lib/db.js';
@@ -24,7 +26,7 @@ function isUniqueViolation(err) {
 export async function onRequestGet(context) {
   const { request, env } = context;
 
-  const auth = await requireAdmin(env, request);
+  const auth = await requireStaff(env, request);
   if (!auth.ok) return auth.response;
 
   const classes = await env.DB.prepare(
@@ -44,7 +46,9 @@ export async function onRequestGet(context) {
     security: {
       // 提示运维是否配置了 AUTH_PEPPER。没配置功能照常，但少一层保护。
       pepperConfigured: authPepper(env) !== DEFAULT_PEPPER,
-      adminUsername: null,
+      // 前端据此决定是否显示"高级管理员专属"的几块设置。
+      role: auth.session.role,
+      isSuper: auth.session.role === 'super',
     },
   });
 }
@@ -52,12 +56,17 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  const auth = await requireAdmin(env, request);
-  if (!auth.ok) return auth.response;
-
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
+
+  // 权限分级：普通管理员只被允许维护黑名单；
+  // 班级口令、分类权重、管理员改密都属于高级管理员专属。
+  const STAFF_ACTIONS = new Set(['add_banned', 'delete_banned']);
+  const auth = STAFF_ACTIONS.has(data.action)
+    ? await requireStaff(env, request)
+    : await requireSuper(env, request);
+  if (!auth.ok) return auth.response;
 
   switch (data.action) {
     case 'add_class':
@@ -87,6 +96,11 @@ async function addClass(env, data) {
 
   const password = parseSecret(data.password, { min: 6, max: 128, field: '班级口令' });
   if (!password.ok) return error(password.error, 400);
+
+  // 批量生成时很容易撞名，先查一下给出可读提示，而不是默默建一堆同名班级。
+  const duplicate = await env.DB.prepare('SELECT id FROM classes WHERE name = ?')
+    .bind(name.value).first();
+  if (duplicate) return error(`班级「${name.value}」已经存在了`, 409);
 
   // 加盐哈希无法用等值查询定位，所以额外存一列 HMAC 查找索引。
   const lookup = await classPasswordLookup(env, password.value);

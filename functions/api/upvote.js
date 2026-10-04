@@ -1,15 +1,17 @@
-import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession } from '../../_lib/auth.js';
-import { parsePositiveInt } from '../../_lib/validate.js';
+import { readJson, error, json, clientIp } from '../../_lib/http.js';
+import { requireSession, rateLimit } from '../../_lib/auth.js';
+import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
 
 /**
  * 给"待审核"的歌曲投票。
  *
- * 说明：这个接口在交接前**根本不存在**（仓库里没有 functions/api/upvote.js），
- * 但 index.html 一直在调用 /api/upvote，所以主页的"投票"按钮实际是 404。
- * 这里按原有业务语义补上，并顺手补了防重复投票：
- * 旧设计没有做任何限制，连点一百次就是一百票。
+ * 两个语义要点：
+ *  1. 全校共用一份榜单 —— 只要歌在待审核池里，任何班级口令登录的学生都能投，
+ *     不限于"自己班点的那首"。
+ *  2. 去重按**设备指纹**，不是按班级口令。旧实现用 (class_id, song_id) 唯一约束，
+ *     在只有一个班级口令时会退化成"全校每首歌只能投一票"，显然不对；
+ *     改成按设备后才是"每人一票"的本意。
  */
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -18,26 +20,30 @@ export async function onRequestPost(context) {
   if (!auth.ok) return auth.response;
   const classId = auth.session.subject_id;
 
+  const ip = clientIp(request);
+  const flood = await rateLimit(env, `upvote:${ip}`, 200, 3600);
+  if (!flood.allowed) return error('投票过于频繁，请稍后再试', 429);
+
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);
 
-  // 只能投本班待审核的歌。
+  const fingerprint = parseFingerprint(parsed.value.fingerprint);
+  if (!fingerprint.ok) return error(fingerprint.error, 400);
+
   const song = await env.DB.prepare(
-    "SELECT id FROM songs WHERE id = ? AND status = 'pending' AND class_id = ?"
-  ).bind(songId.value, classId).first();
+    "SELECT id FROM songs WHERE id = ? AND status = 'pending'"
+  ).bind(songId.value).first();
   if (!song) return error('这首歌不在待审核列表中', 404);
 
-  // 同一班级对同一首歌只能投一次，靠唯一索引原子保证（并发也只能成功一次）。
+  // 原子占位：同一设备对同一首歌只能投一次，并发也只能成功一次。
   const claim = await env.DB.prepare(
-    'INSERT OR IGNORE INTO upvote_logs (class_id, song_id) VALUES (?, ?)'
-  ).bind(classId, songId.value).run();
+    'INSERT OR IGNORE INTO upvote_logs (class_id, song_id, fingerprint) VALUES (?, ?, ?)'
+  ).bind(classId, songId.value, fingerprint.value).run();
 
-  if (changedRows(claim) !== 1) {
-    return error('你已经给这首歌投过票啦', 429);
-  }
+  if (changedRows(claim) !== 1) return error('你已经给这首歌投过票啦', 429);
 
   await env.DB.prepare(
     "UPDATE songs SET votes = votes + 1 WHERE id = ? AND status = 'pending'"

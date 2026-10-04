@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理员注册</title>
+<style>
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;background:linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);min-height:100vh;color:#1e293b;}
+  input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
+  button{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;cursor:pointer;font-weight:bold;box-shadow:0 4px 14px rgba(14,165,233,0.3);transition:transform 0.2s;}
+  button:active{transform:scale(0.97);}
+  button:disabled{opacity:0.6;cursor:not-allowed;}
+  .card{background:rgba(255,255,255,0.85);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);}
+  .card h3{margin:0 0 6px 0;font-size:15px;color:#1e293b;}
+  .card p{margin:0 0 10px 0;font-size:13px;color:#64748b;}
+  .hidden{display:none;}
+  .msg{text-align:center;font-size:14px;min-height:20px;color:#e11d48;}
+  .sub{color:#94a3b8;font-size:12px;text-align:center;}
+  .login-box{background:rgba(255,255,255,0.8);backdrop-filter:blur(10px);padding:24px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.05);margin-top:40px;}
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h2 style="text-align:center;color:#0f172a;margin-top:0;">管理员注册</h2>
+  <p class="sub">请向高级管理员索取「动态口令」，填写后即可成为普通管理员</p>
+  <input id="username" placeholder="登录账号（中文/字母/数字，2-24 位）" value="">
+  <input id="password" type="password" placeholder="登录密码（至少 8 位）">
+  <input id="password2" type="password" placeholder="再输一次密码">
+  <input id="inviteCode" placeholder="动态口令（如 ABCD-EFGH-JKLM）">
+  <button id="regBtn" onclick="doRegister()">注册</button>
+  <p id="regMsg" class="msg"></p>
+  <p class="sub" style="margin-bottom:0;">已经有账号了？<a href="/admin.html" style="color:#0284c7;text-decoration:none;">去登录</a></p>
+</div>
+
+<script>
+// 普通管理员能做什么：审核歌单、维护黑名单、发公告。
+// 不能管理其他管理员，也不能改班级口令与分类权重 —— 那些只有高级管理员能做。
+
+function setMsg(text, color){
+  const el = document.getElementById('regMsg');
+  el.textContent = text || '';
+  el.style.color = color || '#e11d48';
+}
+
+async function doRegister(){
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const password2 = document.getElementById('password2').value;
+  const code = document.getElementById('inviteCode').value.trim();
+
+  if(!username || !password){ setMsg('账号和密码都要填'); return; }
+  if(password.length < 8){ setMsg('密码至少 8 位'); return; }
+  if(password !== password2){ setMsg('两次输入的密码不一致'); return; }
+  if(!code){ setMsg('请填写高级管理员给你的动态口令'); return; }
+
+  const button = document.getElementById('regBtn');
+  button.disabled = true;
+  setMsg('提交中...', '#0284c7');
+
+  try {
+    const r = await fetch('/api/admin-register', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username: username, password: password, invite_code: code})
+    });
+    const d = await r.json();
+    if(r.ok){
+      setMsg('注册成功！3 秒后跳转到登录页…', '#059669');
+      setTimeout(() => { location.href = '/admin.html'; }, 3000);
+      return;
+    }
+    setMsg(d.error || '注册失败');
+  } catch(e) {
+    setMsg('网络错误');
+  }
+  button.disabled = false;
+}
+
+// 支持高级管理员直接把带口令的链接发给别人：/register.html?code=XXXX-XXXX-XXXX
+(function boot(){
+  try {
+    const preset = new URLSearchParams(location.search).get('code');
+    if(preset){ document.getElementById('inviteCode').value = preset; }
+  } catch(e) { /* 忽略 */ }
+
+  ['username','password','password2','inviteCode'].forEach((id) => {
+    document.getElementById(id).addEventListener('keydown', (event) => {
+      if(event.key === 'Enter') doRegister();
+    });
+  });
+})();
+</script>
+</body>
+</html>

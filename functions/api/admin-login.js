@@ -39,7 +39,7 @@ export async function onRequestPost(context) {
   if (!username || username.length > 32 || !password.ok) return denied();
 
   const admin = await env.DB.prepare(
-    'SELECT id, username, password, role, login_token, token_expires_at FROM admins WHERE username = ?'
+    'SELECT id, username, password, role FROM admins WHERE username = ?'
   ).bind(username).first();
 
   if (!admin) {
@@ -51,16 +51,8 @@ export async function onRequestPost(context) {
   const verdict = await verifyPassword(admin.password, password.value);
   if (!verdict.ok) return denied();
 
-  // 保留了原有的动态口令语义：配置了就要求登录时一并提供。
-  if (admin.login_token) {
-    const provided = typeof data.token === 'string' ? data.token.trim() : '';
-    if (admin.token_expires_at && new Date(admin.token_expires_at) < new Date()) {
-      return error('动态口令已过期', 401);
-    }
-    if (provided !== admin.login_token) {
-      return error('动态口令错误', 401);
-    }
-  }
+  // 动态口令已从登录流程移除：它现在只用于「注册新管理员」，
+  // 见 functions/api/admin-register.js 与 register.html。
 
   if (verdict.needsRehash) {
     const hashed = await hashPassword(password.value);

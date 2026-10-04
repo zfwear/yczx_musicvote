@@ -40,6 +40,7 @@
     <img src="/assets/school-badge.png" alt="校徽" class="badge">
   </div>
   <a href="/vote.html" class="btn">➕ 去点歌投票</a>
+  <div id="announceBox"></div>
   <div id="rankList">
     <div id="pendingList"><p style="text-align:center;color:#94a3b8;padding:20px 0;">加载中...</p></div>
     <div id="approvedList"></div>
@@ -64,6 +65,66 @@ function showApp(){
   document.getElementById('app').style.display = 'block';
 }
 
+/**
+ * 设备指纹 —— 投票去重用。
+ * 按"设备"而不是"班级口令"去重：同一个口令是全年级共用的，
+ * 若按口令去重会退化成"每个口令对每首歌只能投一票"。
+ * 刻意不使用 localStorage / Cookie，清缓存不会把限制重置。
+ */
+let cachedFingerprint = null;
+async function deviceFingerprint(){
+  if(cachedFingerprint) return cachedFingerprint;
+
+  const nav = navigator, scr = window.screen || {};
+  let canvasSig = 'no-canvas';
+  try {
+    const c = document.createElement('canvas');
+    c.width = 220; c.height = 44;
+    const ctx = c.getContext('2d');
+    if(ctx){
+      ctx.textBaseline = 'top'; ctx.font = '14px "Arial"';
+      ctx.fillStyle = '#f60'; ctx.fillRect(0, 0, 110, 22);
+      ctx.fillStyle = '#069'; ctx.fillText('盐中之声 yczx', 2, 3);
+      ctx.strokeStyle = 'rgba(102,204,0,.7)';
+      ctx.beginPath(); ctx.arc(58, 22, 15, 0, Math.PI * 2); ctx.stroke();
+      canvasSig = c.toDataURL();
+    }
+  } catch(e) {}
+  let glSig = 'no-webgl';
+  try {
+    const c2 = document.createElement('canvas');
+    const gl = c2.getContext('webgl') || c2.getContext('experimental-webgl');
+    if(gl){
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      glSig = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    }
+  } catch(e) {}
+  let tz = '';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e) {}
+
+  const raw = [nav.userAgent || '', nav.platform || '', nav.language || '', (nav.languages || []).join(','),
+    nav.hardwareConcurrency || '', nav.maxTouchPoints || '',
+    (scr.width || 0) + 'x' + (scr.height || 0) + 'x' + (scr.colorDepth || 0),
+    window.devicePixelRatio || 0, tz, canvasSig, glSig].join('|');
+
+  if(window.crypto && window.crypto.subtle){
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+      cachedFingerprint = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return cachedFingerprint;
+    } catch(e) {}
+  }
+
+  let out = '';
+  for(let seed = 0; seed < 4; seed++){
+    let h = (0x811c9dc5 ^ (seed * 0x9e3779b1)) >>> 0;
+    for(let i = 0; i < raw.length; i++){ h ^= raw.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    out += h.toString(16).padStart(8, '0');
+  }
+  cachedFingerprint = out;
+  return cachedFingerprint;
+}
+
 async function checkPw(){
   const pw = document.getElementById('pw').value.trim();
   const msg = document.getElementById('gateMsg');
@@ -79,6 +140,7 @@ async function checkPw(){
       document.getElementById('pw').value = '';
       msg.textContent = '';
       showApp();
+      loadAnnouncements();
       loadPending();
       loadApproved();
     } else { msg.textContent = d.error || '口令错误'; }
@@ -103,12 +165,20 @@ async function loadPending(){
     if(res.status === 401){ showGate(); return; }
     const list = await res.json();
     if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无待审核歌曲</p>'; return; }
-    box.innerHTML = list.map(s => `
+    box.innerHTML = list.map(s => {
+      const id = safeInt(s.id);
+      return `
       <div class="rank-card">
         <div class="rank-info"><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
-        <div style="display:flex;align-items:center;"><span class="rank-votes">${safeInt(s.votes)}票</span><button class="btn-upvote" onclick="upvote(${safeInt(s.id)})">投票</button></div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="rank-votes">${safeInt(s.votes)}票</span>
+          <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="auditionFromButton(this)">试听</button>
+          <button class="btn-upvote" onclick="upvote(${id})">投票</button>
+        </div>
       </div>
-    `).join('');
+      <div id="audition-${id}"></div>
+    `;
+    }).join('');
   } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
 
@@ -121,18 +191,117 @@ async function loadApproved(){
     if(res.status === 401){ showGate(); return; }
     const list = await res.json();
     if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无已通过歌曲</p>'; return; }
-    box.innerHTML = list.map((s, i) => `
+    box.innerHTML = list.map((s, i) => {
+      const id = safeInt(s.id);
+      return `
       <div class="rank-card">
         <div class="rank-info"><h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
+        <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="auditionFromButton(this)">试听</button>
+      </div>
+      <div id="audition-${id}"></div>
+    `;
+    }).join('');
+  } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
+}
+
+/* ---------------- 公告 ---------------- */
+
+async function loadAnnouncements(){
+  const box = document.getElementById('announceBox');
+  if(!box) return;
+  try {
+    const res = await fetch('/api/announcements');
+    if(!res.ok){ box.innerHTML = ''; return; }
+    const data = await res.json();
+    const list = Array.isArray(data.announcements) ? data.announcements : [];
+    if(!list.length){ box.innerHTML = ''; return; }
+    box.innerHTML = list.map(a => `
+      <div class="rank-card" style="display:block;background:rgba(2,132,199,0.10);border-color:rgba(2,132,199,0.28);">
+        <div class="rank-info">
+          <h3 style="color:#075985;">📢 ${escapeHtml(a.title)}</h3>
+          <p style="white-space:pre-wrap;color:#334155;">${escapeHtml(a.content)}</p>
+          <p style="font-size:11px;color:#94a3b8;margin-top:6px;">${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
+        </div>
       </div>
     `).join('');
-  } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
+  } catch(e) { box.innerHTML = ''; }
+}
+
+/* ---------------- 试听 ---------------- */
+
+// 用 data-* 传参而不是把歌名拼进 onclick 的 JS 字符串里：
+// 歌名里若出现反斜杠等字符，拼字符串可能把引号转义掉造成注入。
+// data 属性由浏览器解码，天然安全。
+function auditionFromButton(button){
+  audition(button.dataset.audition, button.dataset.title, button.dataset.artist);
+}
+
+async function audition(songId, title, artist){
+  const host = document.getElementById('audition-' + safeInt(songId));
+  if(!host) return;
+
+  // 再点一次收起
+  if(host.dataset.open === '1'){
+    host.dataset.open = '0';
+    host.innerHTML = '';
+    return;
+  }
+  host.dataset.open = '1';
+  host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">正在搜索音源…</p>';
+
+  try {
+    let url = '/api/music?q=' + encodeURIComponent(title || '');
+    if(artist) url += '&artist=' + encodeURIComponent(artist);
+    const r = await fetch(url);
+    const d = await r.json();
+    if(!r.ok){
+      host.innerHTML = '<p style="text-align:center;color:#e11d48;font-size:13px;margin:8px 0;">' + escapeHtml(d.error || '搜索失败') + '</p>';
+      return;
+    }
+    const list = Array.isArray(d.results) ? d.results : [];
+    if(!list.length){
+      host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">没找到可试听的版本</p>';
+      return;
+    }
+    host.innerHTML = list.map(s => `
+      <div style="background:rgba(255,255,255,0.85);border-radius:12px;padding:10px 12px;margin:8px 0;border:1px solid rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-size:14px;font-weight:600;color:#1e293b;word-break:break-word;">${escapeHtml(s.name)}</div>
+          <div style="font-size:12px;color:#64748b;word-break:break-word;">${escapeHtml(s.artist)}　<span style="color:#0284c7;">${escapeHtml(s.source || '')}</span></div>
+        </div>
+        <button class="btn-upvote" data-track="${escapeHtml(s.id)}" data-song="${safeInt(songId)}" onclick="playFromButton(this)">播放</button>
+      </div>
+    `).join('');
+  } catch(e) {
+    host.innerHTML = '<p style="text-align:center;color:#e11d48;font-size:13px;margin:8px 0;">网络错误</p>';
+  }
+}
+
+function playFromButton(button){
+  playTrack(button.dataset.track, button.dataset.song);
+}
+
+function playTrack(trackId, songId){
+  const host = document.getElementById('audition-' + safeInt(songId));
+  if(!host || !trackId) return;
+  const old = host.querySelector('audio');
+  if(old) old.remove();
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = '/api/music?play=' + encodeURIComponent(trackId);
+  audio.style.width = '100%';
+  audio.style.marginTop = '8px';
+  host.appendChild(audio);
+  audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 
 async function upvote(id){
   if(!confirm('确认给这首歌投一票吗？')) return;
   try {
-    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id)})});
+    const fingerprint = await deviceFingerprint();
+    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id), fingerprint: fingerprint})});
     const d = await r.json();
     if(r.ok){ alert('投票成功！'); loadPending(); }
     else { alert(d.error || '操作失败'); }
@@ -143,7 +312,7 @@ async function upvote(id){
 (async function boot(){
   try {
     const r = await fetch('/api/rank?status=pending');
-    if(r.ok){ showApp(); loadPending(); loadApproved(); }
+    if(r.ok){ showApp(); loadAnnouncements(); loadPending(); loadApproved(); }
     else { showGate(); }
   } catch(e) { showGate(); }
 })();

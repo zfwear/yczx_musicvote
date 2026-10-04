@@ -67,9 +67,10 @@ export async function onRequestPost(context) {
   if (banned) return error(`该歌曲或歌手已被过滤：${banned.reason || '违规'}`, 403);
 
   // ---- 友好的重复提示（非原子，只为文案）----
+  // 全校共用一份榜单，所以查重是**全校范围**的：不同班级点同一首歌也算重复。
   const existing = await env.DB.prepare(
-    'SELECT status FROM songs WHERE title = ? AND artist = ? AND class_id = ?'
-  ).bind(title.value, artist.value, classId).first();
+    'SELECT status FROM songs WHERE title = ? AND artist = ?'
+  ).bind(title.value, artist.value).first();
   if (existing) {
     if (existing.status === 'pending') return error('这首歌已经在待审核队列里啦', 400);
     if (existing.status === 'approved') return error('这首歌已经进曲库啦，快去投票吧', 400);
@@ -100,13 +101,14 @@ export async function onRequestPost(context) {
   }
 
   // ---- 原子插歌：同一首歌的并发重复提交由 NOT EXISTS 拦下 ----
+  // class_id 只用于标注"这是哪个班点的"，不参与查重与可见性判断。
   const inserted = await env.DB.prepare(
     `INSERT INTO songs (class_id, title, artist, category_id, status)
      SELECT ?, ?, ?, ?, 'pending'
       WHERE NOT EXISTS (
-            SELECT 1 FROM songs WHERE class_id = ? AND title = ? AND artist = ?
+            SELECT 1 FROM songs WHERE title = ? AND artist = ?
       )`
-  ).bind(classId, title.value, artist.value, category.value, classId, title.value, artist.value).run();
+  ).bind(classId, title.value, artist.value, category.value, title.value, artist.value).run();
 
   if (changedRows(inserted) !== 1) {
     // 没插进去就把刚占掉的名额还回去，否则用户白白浪费一周。

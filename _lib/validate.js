@@ -67,3 +67,27 @@ export function parseSecret(input, { min = 6, max = 128, field = '口令' } = {}
   if (value.length > max) return { ok: false, error: `${field}最多 ${max} 位` };
   return { ok: true, value };
 }
+
+/**
+ * 多行文本（公告内容用）。
+ * 与 sanitizeText 的区别是**保留换行**，只把每行内部的多余空白压掉，
+ * 并且限制连续空行不超过两行。同样拒绝 < 与 >。
+ */
+export function sanitizeMultiline(input, { maxLength = 500, field = '内容' } = {}) {
+  if (typeof input !== 'string') return { ok: false, error: `${field}格式不正确` };
+
+  const value = input
+    .replace(/\r\n?/g, '\n')
+    // 只保留换行与制表符，其余控制字符一律去掉
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (!value) return { ok: false, error: `${field}不能为空` };
+  if (value.length > maxLength) return { ok: false, error: `${field}太长了（最多 ${maxLength} 个字符）` };
+  if (TAG_START.test(value)) return { ok: false, error: `${field}不能包含 < 或 >` };
+  return { ok: true, value };
+}
