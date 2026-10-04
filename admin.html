@@ -284,14 +284,42 @@ async function loadSettings(){
     }
 
     renderSettings();
-  } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
+  } catch(e) {
+    // 不要把错误吞掉：曾经因为 renderSettings 里的暂时性死区（TDZ）
+    // 只显示一句"加载失败"，排查了很久。这里把原因一起显示出来。
+    console.error('loadSettings 失败', e);
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败：'
+      + escapeHtml(String((e && e.message) || e))
+      + '<br><span style="color:#94a3b8;">（详细信息见浏览器控制台）</span></p>';
+  }
 }
 
 function renderSettings(){
   const box = document.getElementById('listBox');
 
-  const canViewPasswords = settingsCache.security.canViewPasswords !== false;
-  const hasClassMeta = settingsCache.security.hasClassMeta !== false;
+  // 先把缓存补全成完整形状：任何一个字段缺失都不该让整个设置页崩掉。
+  const cache = settingsCache || {};
+  settingsCache = {
+    classes: Array.isArray(cache.classes) ? cache.classes : [],
+    banned: Array.isArray(cache.banned) ? cache.banned : [],
+    categories: Array.isArray(cache.categories) ? cache.categories : [],
+    security: cache.security || {},
+    vote: cache.vote || {},
+    report: cache.report || {},
+    announcements: Array.isArray(cache.announcements) ? cache.announcements : [],
+    invites: Array.isArray(cache.invites) ? cache.invites : [],
+    admins: Array.isArray(cache.admins) ? cache.admins : [],
+    currentAdminId: safeInt(cache.currentAdminId),
+  };
+
+  // ⚠️ isSuper 必须在这里先声明：下面的 buildClassCard / classRows 会用到它，
+  // 而 const 存在"暂时性死区"，声明在使用之后就只剩 ReferenceError
+  // （曾经导致"系统设置加载失败"）。
+  const isSuper = currentRole === 'super';
+
+  const security = settingsCache.security;
+  const canViewPasswords = security.canViewPasswords !== false;
+  const hasClassMeta = security.hasClassMeta !== false;
 
   /** 单个班级的卡片（列表里会按年级分组复用） */
   const buildClassCard = (c) => {
@@ -380,7 +408,7 @@ function renderSettings(){
     ? '<p class="sub" style="color:#059669;">已配置 AUTH_PEPPER，班级口令索引受服务端私钥保护</p>'
     : '<p class="sub" style="color:#b45309;">建议在 Pages 环境变量里配置 AUTH_PEPPER（随机字符串），用于保护班级口令索引</p>';
 
-  const isSuper = currentRole === 'super';
+  // （isSuper 已在函数开头声明，这里不再重复声明）
 
   // ---- 动态口令列表（仅高级管理员可见）----
   const inviteRows = settingsCache.invites.length ? settingsCache.invites.map(v => {

@@ -20,8 +20,8 @@
 <div class="box">
   <h2>点歌投票</h2>
   <p class="sub">每人每周只能点一次，请慎重提交哦</p>
-  <input id="title" placeholder="点下面「搜索歌曲」选一首" readonly style="background:#f1f5f9;color:#334155;">
-  <input id="artist" placeholder="选中后自动填入" readonly style="background:#f1f5f9;color:#334155;">
+  <input id="title" placeholder="输入歌名或歌手，回车搜索" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();searchSongs();}">
+  <input id="artist" placeholder="从搜索结果里选一首，歌手会自动填入" readonly style="background:#f1f5f9;color:#334155;">
   <input id="trackId" type="hidden" value="">
   <p id="picked" class="sub" style="color:#0284c7;min-height:16px;margin:2px 0 6px;"></p>
   <select id="category">
@@ -30,7 +30,7 @@
     <option value="1">纯音乐</option>
     <option value="4">小语种</option>
   </select>
-  <button onclick="searchSongs()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">🔍 搜索歌曲（只输一部分歌名或歌手也行）</button>
+  <button onclick="searchSongs()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">🔍 搜索歌曲</button>
   <div id="searchBox"></div>
   <button onclick="vote()">提交点歌</button>
   <button onclick="auditionInput()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">▶ 先试听一下</button>
@@ -99,11 +99,31 @@ async function vote(){
   const trackId = document.getElementById('trackId').value.trim();
   const msg = document.getElementById('msg');
 
-  // 必须从搜索结果里选一首：歌名歌手是只读的，而且要有锁定的音源 id。
+  // 必须从搜索结果里选一首，把音源 id 一起提交 ——
   // 这样这首歌上榜后，任何人点「试听」直接播当初选的那一版。
-  if(!trackId || !title || !artist){
+  if(!trackId){
+    // 区分两种情况，别再说"请先输入歌名"（框里明明有字，用户会困惑）：
+    //   框里有字 → 那是搜索关键词，还没选歌
+    //   框里没字 → 真的什么都没输入
     msg.style.color = '#e11d48';
-    msg.textContent = '请先点「搜索歌曲」，从列表里选一首歌再提交';
+    msg.textContent = title
+      ? '「' + title + '」还只是搜索关键词，请在搜索结果里点一下「选这首」'
+      : '请在上面输入歌名或歌手，搜索后从结果里选一首';
+    return;
+  }
+
+  if(!title || !artist){
+    msg.style.color = '#e11d48';
+    msg.textContent = '选中的歌曲信息不完整，请重新搜索并选一首';
+    return;
+  }
+
+  // 选完之后又手动改了框里的字：此时 trackId 还指向原来那首，
+  // 直接提交会出现"显示的是一首、实际锁定的音源是另一首"。
+  const picked = document.getElementById('picked').textContent || '';
+  if(picked && !picked.includes(title)){
+    msg.style.color = '#e11d48';
+    msg.textContent = '你改动了歌名，请重新搜索并点「选这首」确认一次，避免锁定到错误的音源';
     return;
   }
 
@@ -150,11 +170,12 @@ function clearPicked(){
 
 /* ---------------- 试听 ---------------- */
 
-// 用当前填写的歌名 / 歌手去搜。后端已做三级降级：
-// 歌名+歌手 → 只按歌名 → 模糊搜索，所以输入不全时也能找到。
+// 「先试听一下」：直接用歌名框里的关键词搜一遍，本质上和「搜索歌曲」同一个来源。
+// 区别只是结果面板不同（这里的面板不含「选这首」也行——其实也带了）。
+// 后端已做三级降级：歌名+歌手 → 只按歌名 → 模糊搜索，输入不全时也能找到。
 async function auditionInput(){
   const box = document.getElementById('auditionBox');
-  const title = document.getElementById('title').value.trim();
+  const keyword = document.getElementById('title').value.trim();
   const artist = document.getElementById('artist').value.trim();
 
   // 再点一次收起
@@ -163,14 +184,22 @@ async function auditionInput(){
     box.innerHTML = '';
     return;
   }
-  if(!title){ alert('请先填写歌名，再点试听'); return; }
+  if(!keyword){
+    box.dataset.open = '1';
+    box.innerHTML = '<p class="sub" style="color:#b45309;">请在上面那个框里输入歌名或歌手（输一部分就行），再试听。</p>';
+    document.getElementById('title').focus();
+    return;
+  }
 
   box.dataset.open = '1';
   box.innerHTML = '<p class="sub">正在搜索音源…</p>';
 
   try {
-    let url = '/api/music?q=' + encodeURIComponent(title);
-    if(artist) url += '&artist=' + encodeURIComponent(artist);
+    let url = '/api/music?q=' + encodeURIComponent(keyword);
+    // 只有真的选定了某首歌时才带上歌手（此时 artist 是选中结果填的），
+    // 否则它只是上次选中的残留，会把搜索范围限死。
+    const hasPicked = document.getElementById('trackId').value.trim() !== '';
+    if(hasPicked && artist) url += '&artist=' + encodeURIComponent(artist);
     const r = await fetch(url);
     const d = await r.json();
     if(!r.ok){
@@ -194,23 +223,29 @@ async function auditionInput(){
 
 /* ---------------- 模糊搜索 ---------------- */
 
-// 搜到之后可以直接「选这首」把歌名歌手填进表单，避免手打错字。
-// 后端已做三级降级：歌名+歌手 → 只按歌名 → 模糊搜索，
-// 所以只输入一部分（比如「七里」）也能找到。
+/**
+ * 搜索歌曲。
+ *
+ * 歌名框本身就是搜索框：在里面输入关键词（歌名或歌手的一部分都行），
+ * 回车或点「搜索歌曲」就会搜。后端做了三级降级
+ * （歌名+歌手 → 只按歌名 → 模糊搜索），所以输「七里」也能找到「七里香」。
+ *
+ * 注意：歌手框是只读的（那是"已选中"的展示位），所以搜索只用歌名框的内容。
+ */
 async function searchSongs(){
   const box = document.getElementById('searchBox');
-  const title = document.getElementById('title').value.trim();
-  const artist = document.getElementById('artist').value.trim();
+  const keyword = document.getElementById('title').value.trim();
 
-  if(!title && !artist){ alert('请先输入歌名或歌手，再点搜索'); return; }
+  if(!keyword){
+    box.innerHTML = '<p class="sub" style="color:#b45309;">请在上面那个框里输入歌名或歌手（输一部分就行），再搜索。</p>';
+    document.getElementById('title').focus();
+    return;
+  }
 
   box.innerHTML = '<p class="sub">正在搜索…</p>';
 
   try {
-    let url = '/api/music?q=' + encodeURIComponent(title || artist);
-    if(title && artist) url += '&artist=' + encodeURIComponent(artist);
-
-    const r = await fetch(url);
+    const r = await fetch('/api/music?q=' + encodeURIComponent(keyword));
     const d = await r.json();
     if(!r.ok){
       box.innerHTML = '<p class="sub" style="color:#e11d48;">' + escapeHtml(d.error || '搜索失败') + '</p>';
@@ -252,6 +287,8 @@ function pickSong(button){
   const artist = button.dataset.artist || '';
   const track = button.dataset.track || '';
 
+  // 歌名框同时也是搜索框，选中后就把完整歌名写回去 ——
+  // 这样用户看到的"框里的字"始终等于"将要提交的歌"。
   document.getElementById('title').value = name;
   document.getElementById('artist').value = artist;
   document.getElementById('trackId').value = track;
@@ -268,7 +305,8 @@ function pickSong(button){
   const box = document.getElementById(button.dataset.clear || 'searchBox');
   if(!box) return;
   delete box.dataset.open;
-  box.innerHTML = '<p class="sub" style="color:#059669;">已把「' + escapeHtml(name) + '」填进上面的表单，确认无误后点「提交点歌」</p>';
+  box.innerHTML = '<p class="sub" style="color:#059669;">已选中「' + escapeHtml(name) + '」</p>'
+    + '<p class="sub" style="color:#94a3b8;">想换一首的话，直接改上面框里的关键词重新搜即可。</p>';
 }
 
 /**
