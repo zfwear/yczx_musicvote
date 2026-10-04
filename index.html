@@ -21,7 +21,6 @@
 </style>
 </head>
 <body>
-
 <div class="header">
   <div>
     <h1>每日点歌榜</h1>
@@ -29,20 +28,15 @@
   </div>
   <img src="/assets/school-badge.png" alt="校徽" class="badge">
 </div>
-
 <a href="/vote.html" class="btn">➕ 去点歌投票</a>
-
 <div id="rankList"><p style="text-align:center;color:#888;">加载中...</p></div>
-
 <footer>
   <img src="/assets/radio-logo.png" alt="盐中之声">
   <p>江苏省盐城中学 · 盐中之声广播站</p>
 </footer>
-
 <script>
 async function loadRank(){
   try {
-    // 注意：这里先默认展示 1 班的榜单
     const res = await fetch('/api/rank?class_id=1');
     const list = await res.json();
     const box = document.getElementById('rankList');
@@ -54,7 +48,7 @@ async function loadRank(){
       <div class="rank-card">
         <div class="rank-info">
           <h3>${i+1}. ${s.title}</h3>
-          <p>${s.artist}</p>
+          <p>${s.artist} · <span style="color:#2563eb;">${s.category_name}</span></p>
         </div>
         <div class="rank-votes">${s.votes}票</div>
       </div>
