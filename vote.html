@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>点歌</title>
+<style>
+  body{font-family:system-ui;max-width:520px;margin:40px auto;padding:0 16px;background:#f7f7f7;}
+  input,select,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px;border:1px solid #ddd;}
+  button{background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:bold;}
+  #msg{min-height:24px;font-size:14px;text-align:center;margin-top:12px;}
+  .back{background:#6b7280;margin-top:20px;}
+</style>
+</head>
+<body>
+<h2 style="text-align:center;color:#1e3a8a;">点歌投票</h2>
+<p style="text-align:center;color:#888;font-size:13px;">输入你想听的歌，管理员审核后就会出现在榜单上</p>
+<input id="title" placeholder="歌名">
+<input id="artist" placeholder="歌手">
+<select id="category" style="background:#fff;">
+  <option value="2">中文歌</option>
+  <option value="3">英文歌</option>
+  <option value="1">纯音乐</option>
+  <option value="4">小语种</option>
+</select>
+<button onclick="vote()">提交点歌</button>
+<p id="msg"></p>
+<button class="back" onclick="location.href='/'">返回主页</button>
+<script>
+async function vote(){
+  const title = document.getElementById('title').value.trim();
+  const artist = document.getElementById('artist').value.trim();
+  const category = document.getElementById('category').value;
+  const msg = document.getElementById('msg');
+  const pw = sessionStorage.getItem('pw') || 'yczx2026';
+  if(!title || !artist){ msg.style.color = '#e11d48'; msg.textContent = '歌名和歌手都要填哦'; return; }
+  msg.style.color = '#2563eb'; msg.textContent = '提交中...';
+  try {
+    const r = await fetch('/api/vote', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, artist, category_id: category, password: pw, class_id: 1})
+    });
+    const d = await r.json();
+    if(r.ok){
+      msg.style.color = '#059669'; msg.textContent = '✅ 点歌成功！等待管理员审核';
+      document.getElementById('title').value = '';
+      document.getElementById('artist').value = '';
+    } else {
+      msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
+    }
+  } catch(e) {
+    msg.style.color = '#e11d48'; msg.textContent = '网络错误，请重试';
+  }
+}
+</script>
+</body>
+</html>
