@@ -1,4 +1,4 @@
-﻿export async function onRequestPost(context) {
+export async function onRequestPost(context) {
   const { request, env } = context;
   const data = await request.json();
   const title  = (data.title || '').trim();
