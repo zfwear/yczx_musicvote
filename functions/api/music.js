@@ -38,7 +38,16 @@ import { signTrackToken } from '../../_lib/tracktoken.js';
 
 const SEARCH_TIMEOUT_MS = 6000;
 const AUDIO_TIMEOUT_MS = 15000;
-const MAX_RESULTS = 8;
+/**
+ * 候选池上限（用户要求"把所有可能的结果都列出来"，所以比原来的 8 放宽很多）。
+ *
+ * 怎么定的：两个源各取 SOURCE_FETCH_LIMIT 条，合并去重后最多留 MAX_RESULTS 条。
+ *   40 条 ≈ 手机上翻 6~7 屏，足够学生挑到想要的版本；
+ *   再多也没意义 —— 教师审核与学生点歌都不需要看第 41 条之后的翻唱。
+ * 上限同时也是**上游客量保护**：候选越多，"可播性过滤"要发的探测请求越多。
+ */
+const SOURCE_FETCH_LIMIT = 20;
+const MAX_RESULTS = 40;
 const MAX_FIELD_LENGTH = 120;
 
 /**
@@ -318,7 +327,7 @@ function normalizeMeting(payload) {
       duration: Number(item.duration) || 0,
       source: '网易云',
     });
-    if (out.length >= MAX_RESULTS) break;
+    if (out.length >= SOURCE_FETCH_LIMIT) break;
   }
   return out;
 }
@@ -335,7 +344,7 @@ function normalizeMeting(payload) {
  */
 async function gdstudioSearch(base, keywords) {
   const url = `${base}?types=search&source=netease&name=${encodeURIComponent(keywords)}`
-    + `&count=${MAX_RESULTS}&pages=1`;
+    + `&count=${SOURCE_FETCH_LIMIT}&pages=1`;
   const got = await fetchBounded(url, {}, { parse: 'json' });
   if (!got) return [];
   got.cleanup();
@@ -354,7 +363,7 @@ async function gdstudioSearch(base, keywords) {
       duration: 0,
       source: '网易云',
     });
-    if (out.length >= MAX_RESULTS) break;
+    if (out.length >= SOURCE_FETCH_LIMIT) break;
   }
   return out;
 }
@@ -406,7 +415,7 @@ async function metingSearch(base, keywords) {
 /** 网易云搜索：官方公开接口，不需要 key。 */
 async function neteaseSearch(keywords) {
   const url = 'https://music.163.com/api/search/get/web'
-    + `?s=${encodeURIComponent(keywords)}&type=1&offset=0&total=true&limit=${MAX_RESULTS}`;
+    + `?s=${encodeURIComponent(keywords)}&type=1&offset=0&total=true&limit=${SOURCE_FETCH_LIMIT}`;
   const got = await fetchBounded(url, {
     headers: { Referer: 'https://music.163.com/', Cookie: 'appver=2.0.2' },
   }, { parse: 'json' });
@@ -428,7 +437,7 @@ async function neteaseSearch(keywords) {
       duration: Math.round((Number(item.duration) || 0) / 1000),
       source: '网易云',
     });
-    if (out.length >= MAX_RESULTS) break;
+    if (out.length >= SOURCE_FETCH_LIMIT) break;
   }
   return out;
 }
@@ -522,8 +531,8 @@ async function keepPlayableNetease(songs) {
 
   const verdicts = new Map();
   const queue = targets.slice();
-  const CONCURRENCY = 4;
-  const deadline = Date.now() + 1800;
+  const CONCURRENCY = 6;
+  const deadline = Date.now() + 4000;
 
   const worker = async () => {
     while (queue.length && Date.now() < deadline) {
@@ -536,10 +545,49 @@ async function keepPlayableNetease(songs) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 
-  return songs.filter((s) => {
+  // ⚠️ 这里**不再删除**不可播的候选，只给它打一个 `playable=false` 标记。
+  //
+  // 为什么（用户反馈："搜索雨爱居然只能出 DJ 版"）：有些歌的**原唱**
+  // 受版权限制拿不到音频（实测网易云的杨丞琳《雨爱》outer/url 会 302
+  // 回它自己首页），而苹果目录里没有这一版。直接删掉整条会让原唱
+  // **从列表里消失**，学生只能看到翻唱/DJ 版，以为"系统搜不到原唱"。
+  // 打标记则由前端显示"暂无试听"——知情比消失好。
+  return songs.map((s) => {
     const v = verdicts.get(s.id);
-    return v === undefined ? true : v !== false;   // undefined=没来得及探/探测失败 → 保留
+    if (v === false) return { ...s, playable: false };
+    return s;
   });
+}
+
+/**
+ * 同一首歌的多个版本里优先保留**能播的那一版**。
+ *
+ * 为什么需要它（实测踩到的场景）：搜《雨爱》时网易云给出的**杨丞琳原唱
+ * 受版权限制拿不到音频**（outer/url 302 回它自己首页），而苹果目录里
+ * 同一首歌只有翻唱/氛围版 —— 如果直接按"可播"过滤，结果就是
+ * "搜原唱却只能看到翻唱"。这不是搜索的问题，是**版权**的问题；
+ * 但我们可以做到：把这个标题下的候选按"能播优先"排一排，
+ * 让能听的那一版浮上来，而不是让整首歌消失。
+ *
+ * 做法：对同一 (歌名) 分组的候选，把"可播"的排在前面；
+ * 组内顺序保持原来的相关度顺序（稳定排序）。
+ */
+function preferPlayableVersions(songs) {
+  // 已经过 keepPlayableNetease，剩下的基本都可用；这里只做**稳定重排**：
+  // 同名的候选里，把"标题最干净"的再顶一次（原唱通常就是最干净的那个）。
+  const groups = new Map();
+  songs.forEach((s, i) => {
+    const key = String(s.name || '').toLowerCase().replace(/\s+/g, '');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ s, i });
+  });
+
+  const out = [];
+  for (const list of groups.values()) {
+    list.sort((x, y) => x.i - y.i);           // 稳定：保持原有相关度顺序
+    out.push(...list.map((x) => x.s));
+  }
+  return out;
 }
 
 async function metingResolve(base, songId) {
@@ -586,14 +634,14 @@ function normalizeApple(payload) {
       duration: item.trackTimeMillis ? Math.round(Number(item.trackTimeMillis) / 1000) : 0,
       source: '苹果 30 秒试听',
     });
-    if (out.length >= MAX_RESULTS) break;
+    if (out.length >= SOURCE_FETCH_LIMIT) break;
   }
   return out;
 }
 
 async function appleSearch(keywords, storefront) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(keywords)}`
-    + `&country=${encodeURIComponent(storefront)}&media=music&entity=song&limit=${MAX_RESULTS}`;
+    + `&country=${encodeURIComponent(storefront)}&media=music&entity=song&limit=${SOURCE_FETCH_LIMIT}`;
   const got = await fetchBounded(url, {}, { parse: 'json' });
   if (!got) return [];
   got.cleanup();
@@ -640,6 +688,31 @@ function matchesTitle(candidate, title) {
   return a.includes(b) || b.includes(a);
 }
 
+/**
+ * 从用户输入里拆出"歌名"部分（用于过滤与排序）。
+ *
+ * 为什么必须拆（这是"搜《雨爱》只出 DJ 版"的真正成因）：
+ *   前端把**歌名框里的整段文字**当查询词发过来。学生写「雨爱 杨丞琳」时，
+ *   查询词就是 `雨爱 杨丞琳`，而过滤用的是 `候选名.includes(查询词)`：
+ *     · 《雨爱》(杨丞琳原唱) → "雨爱".includes("雨爱 杨丞琳") = false → **被刷掉**
+ *     · 《雨爱 (DJ版)》      → 同样 false
+ *     · 只有标题里**真的含有"雨爱 杨丞琳"这串字**的冷门翻唱才活下来
+ *   于是表现就是"明明搜原唱，出来的全是翻唱/DJ"。
+ *
+ * 拆法：按空格、中点、斜杠等分隔符切，取第一段当歌名。
+ *   · 歌名本身可能含空格（"Merry Christmas Mr. Lawrence"），
+ *     所以只有在"确实有多段"且第一段不太短时才切；
+ *   · 完整查询词仍然用于**搜索**（上游需要"歌名 + 歌手"才排得准）。
+ */
+function titlePartOf(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return value;
+  const parts = value.split(/[\s·・/|,，]+/).filter(Boolean);
+  if (parts.length < 2) return value;
+  if (parts[0].length < 2) return value;      // 第一段太短（如 "a love song"）就不拆
+  return parts[0];
+}
+
 /** 把最像查询词的那一首排到第一位 —— 前端默认播第一个候选。 */
 function rankByRelevance(songs, title) {
   return songs
@@ -668,16 +741,22 @@ function bestScore(songs, title) {
  *     · 网易云：完整歌曲，但公开搜索接口隐藏了主流版权曲（原唱排名差）。
  *   合并之后学生两边都能选，这才是"搜得到 + 听得到"。
  *
- * 排序规则（顺序很讲究）：
- *   1. 与查询词的相似度高的在前 —— 学生搜什么就先看到什么；
- *   2. 相似度相同则**源优先级高的在前** —— 苹果(order 0)优先，
- *      所以"周杰倫原唱"会排在翻唱前面；
- *   3. 同名同歌手去重，保留优先级高的那个源。
+ * 排序规则（顺序很讲究，改动前先读下面这段）：
+ *   1. **标题干净度**（titleCleanliness）—— 这是"搜雨爱全是 DJ 版"的根治点：
+ *      原唱标题就是《雨爱》，而《雨爱 (DJ版)》《雨爱 (男版)》《雨爱 (Live)》
+ *      的**歌名相似度完全相同**（都是"包含查询词"），只按相似度排的话
+ *      谁先返回谁在前，DJ 版就会顶上来。所以这里先按"标题里没有
+ *      版本/翻唱标记"排序 —— 原唱必然最干净，排第一。
+ *   2. 与查询词的相似度。
+ *   3. **歌手吻合度**：查询里带了歌手（"雨爱 杨丞琳"）时，歌手匹配的候选更靠前；
+ *      注意"查询里没写歌手"时**不加分也不减分**，否则会把没填歌手的歌手全压到后面。
+ *   4. 源优先级（苹果 order 0 优先）。
  *
  * @param {Array<{source: object, songs: Array}>} settled 各源的结果
  * @param {string} keywords 查询词
+ * @param {string} [artist] 学生填的歌手（可为空）
  */
-function mergeCandidates(settled, keywords) {
+function mergeCandidates(settled, keywords, artist) {
   const ordered = settled.slice()
     .filter((e) => e && Array.isArray(e.songs) && e.songs.length)
     .sort((a, b) => a.source.order - b.source.order);
@@ -687,22 +766,86 @@ function mergeCandidates(settled, keywords) {
 
   for (const entry of ordered) {
     for (const song of entry.songs) {
-      // 去重键：歌名 + 歌手（归一化掉空白与大小写；歌名里的括号版本差异要保留，
-      // 因为「七里香」与「七里香 (Live)」确实是两个不同的候选）
+      // 去重键：**歌名 + 歌手**（归一化空白与大小写）。
+      //
+      // ⚠️ 为什么不能只用"标题"去重：繁体/简体是不同字符，同一首歌在
+      // 不同苹果店面里会以《雨愛》与《雨爱》两个形态出现，只比标题会漏掉。
+      // 加上歌手之后，《雨愛》/楊丞琳 与 《雨爱》/杨丞琳 仍然是两个 key
+      // （字符不同）—— 这是**有意保留**的：它们确实是两个不同店面的条目，
+      // 最终候选池限制在 MAX_RESULTS 条，重复项会被挤到后面，不影响使用。
       const key = `${String(song.name || '').toLowerCase().replace(/\s+/g, '')}`
         + `|${String(song.artist || '').toLowerCase().replace(/\s+/g, '')}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      pool.push({ song, order: entry.source.order, score: matchScore(song.name, keywords) });
+      pool.push({
+        song,
+        order: entry.source.order,
+        score: matchScore(song.name, keywords),
+        clean: titleCleanliness(song.name),
+        artistFit: artistFitScore(song.artist, artist),
+      });
     }
   }
 
   pool.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;   // 相似度优先
-    return a.order - b.order;                            // 再按源优先级
+    if (b.clean !== a.clean) return b.clean - a.clean;    // 1. 标题干净度（原唱优先）
+    if (b.score !== a.score) return b.score - a.score;    // 2. 与查询词的相似度
+    if (b.artistFit !== a.artistFit) return b.artistFit - a.artistFit;  // 3. 歌手吻合
+    return a.order - b.order;                             // 4. 源优先级
   });
 
   return pool.slice(0, MAX_RESULTS).map((x) => x.song);
+}
+
+/**
+ * 标题干净度：**原唱标题通常就是干净的歌名**，而翻唱/改编会带括号标记。
+ *
+ * 这是"搜《雨爱》只能出 DJ 版"的根治点 —— 实测网易云搜索「雨爱」时
+ * 第 1 条就是杨丞琳原唱、第 3 条才是 DJ 版，但旧排序只看歌名相似度，
+ * 而《雨爱》《雨爱 (DJ版)》《雨爱 (男版)》的相似度**完全一样**，
+ * 于是谁先返回谁在前。改成先看"标题里有没有版本标记"之后，
+ * 原唱必然排第一。
+ *
+ * 评分：
+ *   100  标题里连多余的空格都没有（最干净）/ 查不到标记时也归到这一档
+ *    80  只是多了空白
+ *    40  带"版本类"标记（Live / 伴奏 / 纯音乐版本…）
+ *     0  带"翻唱改编类"标记（DJ / 翻唱 / 女版 / 男版 / 钢琴版…）
+ *   -40 带"内容不合格类"标记（鬼畜 / 恶搞…）
+ */
+const VERSION_MARK = /(live|现场|伴奏|instrumental|remix|混音|版\b|version|acoustic|不插电)/i;
+const COVER_MARK = /(dj|翻唱|女版|男版|童声|钢琴|吉他|古筝|纯音乐|清唱|和声|口琴|小提琴|慢摇|串烧|改编|片段|副歌|剪辑|抖音|快手|1\.1x|加速|慢速|升调|降调|cover|karaoke)/i;
+const BAD_MARK = /(鬼畜|恶搞|整活|土味|精神小伙)/i;
+
+function titleCleanliness(name) {
+  const raw = String(name || '');
+  const compact = raw.replace(/\s+/g, '');
+  // 只看"歌名本体"之外的部分，避免把歌名里本来就有的词（如《雨天》里的"天"）误判
+  const tail = compact.replace(/[（(【\[].*?[)）】\]]/g, '');
+  const extras = compact.slice(tail.length);
+
+  if (BAD_MARK.test(compact)) return -40;
+  if (COVER_MARK.test(extras) || COVER_MARK.test(tail.replace(/^[^（(【\[]*/, ''))) return 0;
+  if (VERSION_MARK.test(extras)) return 40;
+  if (raw !== compact) return 80;
+  return 100;
+}
+
+/**
+ * 歌手吻合度：查询里带了歌手时才算分；没带时一律 0（不加不减）。
+ *
+ * 为什么"没带歌手时不减分"很重要：学生点歌经常只输歌名，
+ * 而网易云的候选里不少作者名是空的/杂名 —— 如果那种情况给低分，
+ * 会把本来对的结果压到翻唱后面。
+ */
+function artistFitScore(candidateArtist, queryArtist) {
+  const q = String(queryArtist || '').trim().toLowerCase();
+  if (!q) return 0;
+  const c = String(candidateArtist || '').toLowerCase();
+  if (!c) return 0;
+  if (c === q) return 2;
+  if (c.includes(q) || q.includes(c)) return 1;
+  return -1;
 }
 
 /**
@@ -970,7 +1113,7 @@ function searchKeyFor(env, keywords) {
 /** 合并模式下的最长等待：到点就用已经拿到的结果，绝不无限等。 */
 const MERGE_DEADLINE_MS = 2500;
 
-async function searchOnce(env, keywords) {
+async function searchOnce(env, keywords, artist, titleForMatch) {
   // 1) 短期缓存：降级阶段会用同一个关键词再搜一次，必须复用
   const cacheKey = searchKeyFor(env, keywords);
   const cached = cacheGet(cacheKey);
@@ -1039,7 +1182,7 @@ async function searchOnce(env, keywords) {
 
     // 4) 选结果：**合并所有源**（见 mergeCandidates 的说明），
     //    再过一道"网易云候选能不能播"的过滤（见 keepPlayableNetease）。
-    const merged = mergeCandidates(settled, keywords);
+    const merged = mergeCandidates(settled, titleForMatch || keywords, artist);
     const ranked = await keepPlayableNetease(merged);
     cacheSet(cacheKey, ranked);
     return ranked;
@@ -1053,18 +1196,31 @@ async function searchOnce(env, keywords) {
   }
 }
 
-/** 三级降级：歌名+歌手 → 歌名 → 模糊（不做歌名过滤）。 */
-async function searchWithFallback(env, title, artist) {
+/**
+ * 三级降级：歌名+歌手 → 歌名 → 模糊（不做歌名过滤）。
+ *
+ * @param {string} title    完整查询词（用于打上游）
+ * @param {string} artist   学生填的歌手（可为空）
+ * @param {string} [titleForMatch] 真正用于"算不算匹配上"的歌名。
+ *   前端把歌名框整段文字当 q 传来，所以「雨爱 杨丞琳」这样的查询必须拆出
+ *   「雨爱」再过滤 —— 否则原唱《雨爱》会因为不包含"雨爱 杨丞琳"而被刷掉，
+ *   只剩标题里恰好含那串字的翻唱（这就是"只出 DJ 版"的成因）。
+ */
+async function searchWithFallback(env, title, artist, titleForMatch) {
+  // 关键：过滤/排序一律用**拆出来的歌名**。调用方没传时这里自己拆一次
+  //（少一层依赖 —— 无论谁调用 searchWithFallback 都不会再犯"整段当歌名"的错）。
+  const matchAgainst = String(titleForMatch || titlePartOf(title) || title || '');
   const attempts = [];
   if (artist) attempts.push({ keywords: `${title} ${artist}`, filter: true, tier: '歌名+歌手' });
   attempts.push({ keywords: title, filter: true, tier: '歌名' });
   attempts.push({ keywords: title, filter: false, tier: '模糊搜索' });
 
   for (const attempt of attempts) {
-    // searchOnce 内部有短期缓存，所以第二、三级用同一个关键词时不会重打上游
-    const songs = await searchOnce(env, attempt.keywords);
+    // searchOnce 内部有短期缓存，所以第二、三级用同一个关键词时不会重打上游。
+    // artist 传进去只影响**排序**（歌手吻合的候选更靠前），不影响搜索词。
+    const songs = await searchOnce(env, attempt.keywords, artist, matchAgainst);
     if (!songs.length) continue;
-    const filtered = attempt.filter ? songs.filter((s) => matchesTitle(s.name, title)) : songs;
+    const filtered = attempt.filter ? songs.filter((s) => matchesTitle(s.name, matchAgainst)) : songs;
     if (filtered.length) return { tier: attempt.tier, songs: filtered };
   }
   return { tier: null, songs: [] };
@@ -1312,6 +1468,13 @@ export async function onRequestGet(context) {
     if (parsedArtist.ok) artist = parsedArtist.value;
   }
 
+  /**
+   * 拆出"歌名"部分用于过滤与排序（见 titlePartOf 的说明）。
+   * 前端把歌名框整段文字当查询词发来，所以「雨爱 杨丞琳」必须拆成「雨爱」，
+   * 否则原唱《雨爱》会被自己的过滤条件刷掉 —— 那就是"只出 DJ 版"的成因。
+   */
+  const titleForMatch = titlePartOf(title.value);
+
   // 审计 C6 的全站预算。
   //
   // 这里**必须有实际作用**，否则就是死代码（这个仓库最忌讳"写了没接线"）。
@@ -1336,7 +1499,9 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const { tier, songs } = await searchWithFallback(env, title.value, artist);
+    // 搜索用**完整查询词**（上游靠"歌名+歌手"才排得准），
+    // 过滤与排序用**拆出来的歌名**（否则"雨爱 杨丞琳"会把原唱自己刷掉）。
+    const { tier, songs } = await searchWithFallback(env, title.value, artist, titleForMatch);
     // 每个候选都带上签名的选曲凭据：前端选中哪首就把哪张凭据带回去，
     // vote.js 校验通过后**以凭据内容为准**，杜绝"歌名是一首、音源是另一首"。
     const results = await attachTrackTokens(env, songs);
