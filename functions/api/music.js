@@ -428,6 +428,110 @@ function neteaseResolveUrl(songId) {
   return `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(songId)}.mp3`;
 }
 
+/* ---------------- 网易云候选的"可播性"过滤 ----------------
+
+   为什么需要它（实测数据）：网易云**受版权限制的歌**（原唱居多：
+   Beyond《海阔天空》、米津玄師《Lemon》、逃跑计划《夜空中最亮的星》…）
+   的 outer/url 会 **302 回它自己的首页**，拿不到任何音频。
+   实测 21 个候选里有 5 个是这种（约 1/4）。
+
+   不滤掉的后果最糟：学生看到《海阔天空 / Beyond》很自然地选它、提交、
+   入库存下这个 id，**以后谁都播不出来** —— 用户的原话就是"点了却放不了"。
+   所以宁可少给几个候选，也不给一个点了不能用的。
+
+   做法：搜索后并发探一次（只取响应头，不读 body），能出音频的才留下。
+   · 只对网易云候选做（苹果那边给的是官方 previewUrl，一定有音频）；
+   · 并发 4 路 + 总超时 1.8 秒，避免把搜索拖慢；
+   · 结果按 id 缓存 10 分钟，翻来覆去搜同一首歌不会反复探测；
+   · 探测本身失败（超时/网络抖动）时**保留**该候选 —— 宁可偶尔给一个
+     放不出来的，也不要在网络不稳时把搜索结果清空。 */
+
+const NETEASE_PLAYABLE_TTL_MS = 10 * 60 * 1000;
+const NETEASE_PLAYABLE_MAX = 400;
+const neteasePlayable = new Map();      // id -> { ok: boolean, at: number }
+
+function neteasePlayableCached(id) {
+  const hit = neteasePlayable.get(id);
+  if (hit && Date.now() - hit.at < NETEASE_PLAYABLE_TTL_MS) return hit.ok;
+  return null;
+}
+
+function rememberPlayable(id, ok) {
+  if (neteasePlayable.size > NETEASE_PLAYABLE_MAX) {
+    // 简单的容量控制：清掉最早的一批（Worker isolate 内存有限）
+    const keys = Array.from(neteasePlayable.keys()).slice(0, 100);
+    for (const k of keys) neteasePlayable.delete(k);
+  }
+  neteasePlayable.set(id, { ok, at: Date.now() });
+}
+
+/** 探一次"这个 id 到底能不能出音频"。返回 true=能播，false=拿不到音频，null=探测失败（不确定）。 */
+async function probeNeteasePlayable(songId) {
+  const cached = neteasePlayableCached(songId);
+  if (cached !== null) return cached;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3500);
+  try {
+    // 第 1 跳：outer/url（看它把我们导向哪）
+    const first = await fetch(neteaseResolveUrl(songId), {
+      redirect: 'manual',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'yczx-musicvote/1.0', Referer: 'https://music.163.com/', Cookie: 'appver=2.0.2' },
+    });
+    const location = first.headers.get('Location') || '';
+    try { await first.body?.cancel(); } catch { /* 重定向响应没有 body */ }
+
+    // 关键判据：受版权限制时它跳回自己首页（含 404 / music.163.com/song 之类），
+    // 而不是跳到 m*.music.126.net 这种 CDN。
+    if (!location) { rememberPlayable(songId, false); return false; }
+    const target = new URL(location, neteaseResolveUrl(songId)).href;
+    let host = '';
+    try { host = new URL(target).host; } catch { /* 非法 Location */ }
+    if (!/(^|\.)music\.126\.net$/.test(host)) {
+      rememberPlayable(songId, false);
+      return false;
+    }
+    rememberPlayable(songId, true);
+    return true;
+  } catch {
+    // 超时/网络问题：不确定，交给调用方保留候选
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 并发过滤网易云候选：只留下"确认能播"的。
+ * 探测失败的（不确定）保留，避免网络抖动时把结果清空。
+ */
+async function keepPlayableNetease(songs) {
+  const targets = songs.filter((s) => /^mt-\d+$/.test(String(s.id || '')));
+  if (!targets.length) return songs;
+
+  const verdicts = new Map();
+  const queue = targets.slice();
+  const CONCURRENCY = 4;
+  const deadline = Date.now() + 1800;
+
+  const worker = async () => {
+    while (queue.length && Date.now() < deadline) {
+      const song = queue.shift();
+      const id = String(song.id).slice(3);
+      // eslint-disable-next-line no-await-in-loop
+      const ok = await probeNeteasePlayable(id);
+      verdicts.set(song.id, ok);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+
+  return songs.filter((s) => {
+    const v = verdicts.get(s.id);
+    return v === undefined ? true : v !== false;   // undefined=没来得及探/探测失败 → 保留
+  });
+}
+
 async function metingResolve(base, songId) {
   if (isGdStudio(base)) return gdstudioResolve(base, songId);
   const url = `${base}?server=netease&type=url&id=${encodeURIComponent(songId)}`;
@@ -923,14 +1027,10 @@ async function searchOnce(env, keywords) {
       deadlineTimer = setTimeout(finish, MERGE_DEADLINE_MS);
     });
 
-    // 4) 选结果：现在改成**合并所有源**（见 mergeCandidates 的说明）。
-    //    旧逻辑是"第一个过线的源就定胜负"，苹果总是最快，于是网易云的
-    //    完整歌曲永远进不了候选 —— 学生只能听 30 秒片段。
-    //
-    //    代价与取舍：合并要等其它源（最多到 MERGE_DEADLINE_MS）才算完，
-    //    所以首字节会比"抢跑"慢一点。但候选只有 8 条、等待窗口很短，
-    //    而换来的是"原唱 + 完整版都能选"，值。
-    const ranked = mergeCandidates(settled, keywords);
+    // 4) 选结果：**合并所有源**（见 mergeCandidates 的说明），
+    //    再过一道"网易云候选能不能播"的过滤（见 keepPlayableNetease）。
+    const merged = mergeCandidates(settled, keywords);
+    const ranked = await keepPlayableNetease(merged);
     cacheSet(cacheKey, ranked);
     return ranked;
   })();
