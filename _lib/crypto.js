@@ -32,9 +32,16 @@ const encoder = new TextEncoder();
  * 首次登录迁移旧明文也要两次），总耗时也只有约 4 ms，不到预算的一半。
  * 文档说明超额只是"偶发容忍"，一旦持续超限就会被终止，所以必须留足余量。
  *
- * 📌 升级到付费套餐后，把这里改成 210000（OWASP 建议值）即可：
- *    迭代次数写在每条哈希字符串里，旧口令下次登录会自动按新成本重新哈希，
- *    不需要重置任何人的密码。
+ * ⚠️ 成本取舍要说清楚：Cloudflare 免费套餐单次请求只有 10ms CPU，
+ *    而 OWASP 对 PBKDF2-HMAC-SHA256 的当前推荐是 **600,000 次**迭代，
+ *    在本平台上跑一次就会超时（实测 10,000 次 ≈ 2.9ms）。
+ *    所以这里刻意取了一个平台能承受的值，**不要**把它宣传成"充分保护"。
+ *    真要达到 OWASP 强度，得调整架构（例如把口令校验放到有更高 CPU
+ *    预算的独立服务里），**而不是**在这里把数字改大 ——
+ *    改大会直接触发 Error 1102。
+ *
+ * 这个常量只作为"目标迭代数"：低于它的旧记录会在登录成功后升级，
+ * **高于它的记录不会被降级**（见 verifyPassword 的 needsRehash）。
  */
 export const PBKDF2_ITERATIONS = 10000;
 
@@ -128,7 +135,7 @@ export async function verifyPassword(stored, password) {
     }
     const actual = await pbkdf2(password, salt, iterations);
     const ok = timingSafeEqualBytes(actual, expected);
-    return { ok, needsRehash: ok && iterations !== PBKDF2_ITERATIONS };
+    return { ok, needsRehash: ok && iterations < PBKDF2_ITERATIONS };
   }
 
   return fail;

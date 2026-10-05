@@ -1,6 +1,7 @@
 import { readJson, error, json } from '../../_lib/http.js';
 import {
-  requireStaff, requireSuper, classPasswordLookup, authPepper, DEFAULT_PEPPER,
+  requireStaff, requireSuper, classPasswordLookup, authPepper, DEFAULT_PEPPER, hasPrivatePepper,
+  isDebugSession, revokeDebugSessions,
 } from '../../_lib/auth.js';
 import { sanitizeText, parsePositiveInt, parseSecret, parseBannedKeyword } from '../../_lib/validate.js';
 import { hashPassword, verifyPassword, encryptSecret, decryptSecret } from '../../_lib/crypto.js';
@@ -16,6 +17,32 @@ const EXPIRY_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 /** 判断是否为唯一索引冲突（用于给出"口令重复"这种可读提示）。 */
 function isUniqueViolation(err) {
   return /unique|constraint/i.test(String((err && err.message) || ''));
+}
+
+/**
+ * 库里是否已经有 password_lookup 列（001 迁移是否跑过）。
+ *
+ * 极端情况下（只跑了 base schema、没跑 001）这张表还没有查找索引列，
+ * 那时"共用口令"本来也无法成立，但预检查的 SQL 会因为缺列直接抛错。
+ * 探一下，把这种部署交回给 writeClassSecret 的旧逻辑处理，
+ * 而不是让添加班级变成一个 500。
+ */
+async function classLookupColumnExists(env) {
+  try {
+    await env.DB.prepare('SELECT password_lookup FROM classes LIMIT 1').first();
+    return true;
+  } catch (err) {
+    return !/no such column|has no column named/i.test(String((err && err.message) || ''));
+  }
+}
+
+/** 「所有班共用一个口令」为什么不能成立的统一说法（前端会直接显示）。 */
+function sharedPasswordMessage(ownerName, password) {
+  return `口令「${password}」${ownerName ? `已经被班级「${ownerName}」占用` : '已被其他班级占用'}，不能再用。\n\n`
+    + '批量生成里的「所有班共用一个口令」因此无法成立：班级口令在库里存的是'
+    + '「口令 → 查找值」这类唯一索引，同一个口令只能对应一个班，'
+    + '否则登录时无法判断该算哪个班。\n\n'
+    + '请改用「每班一个随机口令」，或把每班口令改成互不相同的值。';
 }
 
 /**
@@ -53,7 +80,10 @@ export async function onRequestGet(context) {
     try {
       const res = await env.DB.prepare(attempt.sql).all();
       classRows = res.results || [];
-      canViewPasswords = attempt.vault;
+      // 审计报告 A2：只有真的配了私有 AUTH_PEPPER 才允许解密查看口令。
+      // 否则密文是用**公开的**占位密钥加的，能解开等于没加密 ——
+      // 与其给出虚假的安全感，不如整个禁用这个功能。
+      canViewPasswords = attempt.vault && hasPrivatePepper(env);
       hasClassMeta = attempt.meta;
       break;
     } catch (err) {
@@ -98,6 +128,12 @@ export async function onRequestGet(context) {
     classes,
     banned: banned.results || [],
     categories: categories.results || [],
+    // 当前登录管理员自己的 ID。
+    // 前端本来是从 /api/admin-accounts（仅高级管理员可读）里取这个值的，
+    // 于是普通管理员拿不到它、也就分不出"这一行是不是我自己"。
+    // 改密对普通管理员开放之后（审计报告 B1），这个 ID 必须随手可得，
+    // 所以在这里一并下发：它本来就在调用者自己的会话里，不泄露任何新信息。
+    currentAdminId: auth.session.subject_id,
     vote: {
       cap: voteCap,                 // 0 表示不限制
       capConfigured: voteCap > 0,
@@ -109,10 +145,17 @@ export async function onRequestGet(context) {
       defaultThreshold: DEFAULT_REPORT_THRESHOLD,
     },
     security: {
-      // 提示运维是否配置了 AUTH_PEPPER。没配置功能照常，但少一层保护。
+      // 是否配置了私有的 AUTH_PEPPER。
       pepperConfigured: pepper !== DEFAULT_PEPPER,
-      // 是否已执行 005（能查看口令）；未执行时只能看到"无法查看"
+      // 是否允许"查看班级口令"。
+      // 审计报告 A2：没配私有密钥时，密文是用公开占位密钥加的，
+      // 能解开等于没加密 —— 所以直接禁用，而不是给一个虚假的安全感。
       canViewPasswords,
+      canViewPasswordsReason: canViewPasswords
+        ? ''
+        : (pepper === DEFAULT_PEPPER
+          ? '未配置 AUTH_PEPPER（正在使用公开的占位密钥），为避免"看起来加密、实际可被任何人解开"，查看口令功能已禁用。'
+          : '数据库缺少 password_encrypted 列，请先执行 sql/005_class_password_vault.sql。'),
       // 是否已执行 007（年级 / 人数 / 投票上限）
       hasClassMeta,
       // 前端据此决定是否显示"高级管理员专属"的几块设置。
@@ -129,9 +172,17 @@ export async function onRequestPost(context) {
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
 
-  // 权限分级：普通管理员只被允许维护黑名单；
-  // 班级口令、分类权重、管理员改密都属于高级管理员专属。
-  const STAFF_ACTIONS = new Set(['add_banned', 'delete_banned']);
+  // 权限分级：
+  //   · 普通管理员：维护黑名单，以及**改自己的密码**（审计报告 B1 ——
+  //     前端对所有管理员都显示改密表单，后端却只放给高级管理员，
+  //     等于普通管理员根本无法自行轮换凭证）。
+  //   · 高级管理员：班级口令、分类权重、投票上限、重置他人的密码。
+  //
+  // 注意 `change_admin_password` 只作用于**会话本人**（函数内部用
+  // session.subject_id 定位账号，不接受前端传 ID），所以开放给普通
+  // 管理员不会带来越权；重置别人的密码仍然只有高级管理员能做，
+  // 走的是另一个接口 admin-accounts.js 的 reset_password。
+  const STAFF_ACTIONS = new Set(['add_banned', 'delete_banned', 'change_admin_password']);
   const auth = STAFF_ACTIONS.has(data.action)
     ? await requireStaff(env, request)
     : await requireSuper(env, request);
@@ -225,9 +276,33 @@ async function addClass(env, data) {
     .bind(name.value).first();
   if (duplicate) return error(`班级「${name.value}」已经存在了`, 409);
 
+  // 审计报告 B2：「所有班共用一个口令」在数据库层根本立不住 ——
+  // 口令索引列 password_lookup = HMAC(私钥, 口令) 上建了**唯一索引**
+  // （见 sql/001_security_upgrade.sql 里的 idx_classes_lookup）：同一个口令
+  // 必然算出同一个查找值，第二个班插入时就会撞唯一索引。
+  //
+  // 更糟的是原实现会把它翻译成"该口令已被其他班级使用，请换一个"，
+  // 让按"共用口令"批量生成的人以为是偶发冲突，于是一个个改成随机口令。
+  // 这里改成**写入前主动拒绝**，并且把"为什么不行"直接说清楚：
+  // 这不是可以绕过的限制，而是"口令即身份"的必然结果。
+  const hasLookupColumn = await classLookupColumnExists(env);
+  if (hasLookupColumn) {
+    const lookup = await classPasswordLookup(env, password.value);
+    const sameLookup = await env.DB.prepare(
+      'SELECT name FROM classes WHERE password_lookup = ? LIMIT 1'
+    ).bind(lookup).first();
+    if (sameLookup) {
+      return error(sharedPasswordMessage(sameLookup.name, password.value), 409);
+    }
+  }
+
   const result = await writeClassSecret(env, { name: name.value, plain: password.value });
   if (!result.ok) {
-    if (isUniqueViolation(result.err)) return error('该口令已被其他班级使用，请换一个', 409);
+    // 走到这里说明是并发插入撞上了唯一索引（上面的预检查漏过去了），
+    // 兜底文案与上面一致，避免两处说法不一样。
+    if (isUniqueViolation(result.err)) {
+      return error(sharedPasswordMessage(null, password.value), 409);
+    }
     return error('添加失败：数据库结构可能尚未迁移', 500);
   }
 
@@ -467,6 +542,17 @@ async function deleteBanned(env, data) {
 
 /* ------------------------- 管理员改密 ------------------------- */
 
+/**
+ * 改密。
+ *
+ * 审计报告 B1：这里**只改会话本人的密码**（下方按 session.subject_id 定位
+ * 账号，前端传什么 id 都没用），因此普通管理员也能用 —— 前端本来就给
+ * 所有人显示改密表单。重置**他人**密码是另一条路（admin-accounts.js
+ * 的 reset_password），仍然只允许高级管理员。
+ *
+ * 必须验证当前密码：会话 Cookie 被 XSS/借用的设备捡到时，
+ * 不应该能直接把账号锁死。
+ */
 async function changeAdminPassword(env, session, data) {
   const current = parseSecret(data.current_password, { min: 1, max: 128, field: '当前密码' });
   if (!current.ok) return error(current.error, 400);
@@ -491,6 +577,14 @@ async function changeAdminPassword(env, session, data) {
   await env.DB.prepare(
     "DELETE FROM sessions WHERE subject = 'admin' AND subject_id = ? AND id <> ?"
   ).bind(admin.id, session.id).run();
+
+  // 审计报告 A5：还要撤掉这个管理员换出去的**调试会话**。
+  // 调试会话在学生端（subject='class'），上面那条 DELETE 碰不到它；
+  // 一个调试会话能在 2 小时内不限次数、不查重地往真实歌曲表写记录，
+  // 改完密码却留着它，等于密码白改。
+  await revokeDebugSessions(env, admin.id, {
+    exceptSessionId: isDebugSession(session) ? session.id : null,
+  }).catch(() => { /* 013 未执行等情况不影响改密本身 */ });
 
   return json({ ok: true, message: '密码已更新，其它设备上的登录已失效' });
 }

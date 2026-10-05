@@ -1,7 +1,8 @@
 import { error, json } from '../../_lib/http.js';
 import { requireSession } from '../../_lib/auth.js';
 import { parseEnum } from '../../_lib/validate.js';
-import { getVoteCap, applyVoteCap } from '../../_lib/settings.js';
+import { getVoteCap, applyVoteCap, effectiveVotesExpr } from '../../_lib/settings.js';
+import { isMissingColumn } from '../../_lib/db.js';
 
 /**
  * 榜单查询（学生端）—— 双榜单分离。
@@ -10,6 +11,9 @@ import { getVoteCap, applyVoteCap } from '../../_lib/settings.js';
  *   正式榜   (approved)：先按分类权重（纯音乐100 > 中文歌80 > 英文歌50 > 小语种30），
  *                        再按票数从高到低。**响应里完全不含 votes 字段**——
  *                        票数在服务端就不下发，F12 看 Network 也拿不到。
+ *
+ * ⚠️ 票数一律用「有效票数」= MIN(votes, 投票上限)（上限为 0 表示不限）。
+ *    排序、截取、显示三处必须是同一个值，否则封顶就只是遮数字（A6）。
  *
  * ⚠️ 关于"多班级口令"的语义（这里踩过一次坑，记下来）：
  *    多个班级口令是**多把进同一系统的钥匙**，不是多租户。
@@ -36,10 +40,35 @@ export async function onRequestGet(context) {
   );
   if (!status.ok) return error(status.error, 400);
 
+  // 投票上限：票数封顶必须**参与排序与截取**（A6）。
+  //
+  // 旧实现先按原始票数排好序、截了前 50 条，再把显示票数改成封顶值 ——
+  // 刷到 9999 票的歌照样霸榜，封顶只是个显示层的假象。
+  // 现在排序键直接用「有效票数」= MIN(votes, cap)，cap=0 表示不限。
+  //
+  // 代价说明：这里多一次 system_settings 的主键查询（getVoteCap）。
+  // 它是单行等值查询，比"榜单被刷票结果带偏"划算得多；
+  // 免费套餐的 CPU 预算主要花在 PBKDF2 上，这一条查询不构成压力。
+  const cap = await getVoteCap(env);
+  const effectiveVotes = effectiveVotesExpr(cap);
+
+  // 学生榜不该显示调试模式提交的歌（审计 A5）：
+  // 调试会话能不限次、不查重地写真实歌曲表，那些歌只是拿来压测的，
+  // 混进学生榜单会让人以为真有人投了。
+  // 006 迁移没跑时没有 is_debug 列，所以先探一下再决定要不要加这个条件。
+  let notDebugClause = '';
+  try {
+    await env.DB.prepare('SELECT is_debug FROM songs LIMIT 1').first();
+    notDebugClause = 'AND (s.is_debug IS NULL OR CAST(s.is_debug AS INTEGER) = 0)';
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err;
+    // 没有这一列：老库照常工作，只是没法过滤调试歌
+  }
+
   if (status.value === 'pending') {
     // 待审核榜排序：**票数为主，分类权重为辅**。
     //
-    // 综合分 = 票数 × (100 + 分类权重)
+    // 综合分 = 有效票数 × (100 + 分类权重)
     //   （整数乘法，避免浮点误差；等价于「票数 × (1 + 权重/100)」）
     //
     // 效果：
@@ -60,19 +89,21 @@ export async function onRequestGet(context) {
               c.name AS category_name
          FROM songs s
          JOIN categories c ON s.category_id = c.id
-        WHERE s.status = 'pending'
-        ORDER BY (CAST(s.votes AS INTEGER) * (100 + CAST(c.weight AS INTEGER))) DESC,
-                 CAST(s.votes AS INTEGER) DESC,
+        WHERE s.status = 'pending' ${notDebugClause}
+        ORDER BY (${effectiveVotes} * (100 + CAST(c.weight AS INTEGER))) DESC,
+                 ${effectiveVotes} DESC,
                  s.id DESC
         LIMIT 50`
     ).all();
 
-    // 超过上限的票不计入票数：票照收，但显示与排序都用封顶后的值。
-    const cap = await getVoteCap(env);
+    // 显示层仍然走 applyVoteCap：票数封顶后还要带出 votes_raw / votes_capped
+    // 供后台与学生端排查（前端依赖这两个字段）。排序已经在 SQL 里用掉了
+    // 有效票数，这里只是把"超限"这件事如实标注出来。
     return json(applyVoteCap(results || [], cap));
   }
 
-  // 正式榜：不含 votes
+  // 正式榜：不含 votes。
+  // 排序同样用有效票数 —— 否则"票数封顶"在正式榜上完全没有意义。
   const { results } = await env.DB.prepare(
     `SELECT s.id,
             s.title,
@@ -83,9 +114,9 @@ export async function onRequestGet(context) {
             CAST(c.weight AS INTEGER) AS category_weight
        FROM songs s
        JOIN categories c ON s.category_id = c.id
-      WHERE s.status = 'approved'
+      WHERE s.status = 'approved' ${notDebugClause}
       ORDER BY CAST(c.weight AS INTEGER) DESC,
-               CAST(s.votes AS INTEGER) DESC,
+               ${effectiveVotes} DESC,
                s.id ASC
       LIMIT 50`
   ).all();

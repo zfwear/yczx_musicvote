@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>每周歌单</title>
+<style>
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .header h1{font-size:19px;margin:0;color:#0f172a;letter-spacing:0.5px;}
+  .sub{color:#64748b;font-size:13px;}
+  .card{background:rgba(255,255,255,0.9);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);transition:box-shadow .25s ease;}
+  .card:hover{box-shadow:0 8px 24px -8px rgba(15,23,42,0.2);}
+  .card h3{margin:0 0 2px 0;font-size:15px;color:#0f172a;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;}
+  .card h3 .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(14,165,233,0.14);color:#075985;}
+  .card h3 .range{font-size:12px;color:#94a3b8;font-weight:400;}
+  .period{font-size:12px;font-weight:700;color:#075985;margin:12px 0 4px;padding-left:8px;border-left:3px solid #0ea5e9;}
+  .slot{display:flex;align-items:baseline;gap:8px;font-size:14px;line-height:1.8;color:#334155;padding:2px 0;flex-wrap:wrap;}
+  .slot .idx{flex:0 0 auto;color:#94a3b8;font-size:12px;}
+  .slot .meta{color:#94a3b8;font-size:12px;}
+  .slot .empty{color:#cbd5e1;}
+  .back,.more{display:block;width:100%;box-sizing:border-box;margin:12px 0 0;padding:14px;border-radius:12px;font-size:15px;font-weight:600;text-align:center;cursor:pointer;transition:transform .14s cubic-bezier(.2,.9,.3,1.2),box-shadow .2s;}
+  .back{text-decoration:none;border:1px solid #dbe3ec;background:linear-gradient(180deg,#fff,#eef2f7);color:#475569;box-shadow:0 4px 12px -4px rgba(15,23,42,0.16),inset 0 1px 0 rgba(255,255,255,0.9);}
+  .more{border:1px solid #bae6fd;background:linear-gradient(180deg,#fff,#f0f9ff);color:#075985;box-shadow:0 4px 12px -4px rgba(14,165,233,0.3),inset 0 1px 0 rgba(255,255,255,0.9);}
+  .back:active,.more:active{transform:translateY(1px);}
+  .back:hover,.more:hover{box-shadow:0 8px 18px -6px rgba(15,23,42,0.22),inset 0 1px 0 rgba(255,255,255,0.9);}
+  @keyframes fadeInUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  .card{animation:fadeInUp .34s cubic-bezier(.2,.8,.3,1) both;}
+  /* ---------- 第四档：与其它页面同一套令牌、字号与焦点样式 ---------- */
+  :root{
+    --brand:#0284c7;--brand-strong:#0369a1;--brand-soft:#e0f2fe;--brand-line:#bae6fd;
+    --ink:#0f172a;--ink-2:#334155;--ink-3:#64748b;--ink-4:#94a3b8;
+    --line:#e2e8f0;--line-soft:#eef2f7;--surface:#fff;--surface-2:#f8fafc;
+    --danger:#e11d48;--danger-soft:#fff1f2;--success:#059669;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+    --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
+  }
+  /* 辅助文字统一 12-13px，颜色不再是"很淡的小字" */
+  .sub{font-size:13px;color:var(--ink-3);}
+  .card h3 .range{font-size:12px;color:var(--ink-4);}
+  .slot{font-size:14px;}
+  .slot .idx,.slot .meta{font-size:12px;color:var(--ink-4);}
+  /* 这一页是"只读清单"，卡片不再各自浮起，只有需要分离的元素才有阴影 */
+  .card{background:var(--surface);border:1px solid var(--line);box-shadow:none;}
+  .card:hover{box-shadow:none;border-color:var(--brand-line);}
+  .back:hover,.more:hover{box-shadow:none;border-color:var(--brand);}
+  button:focus-visible,a:focus-visible{outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
+  @media(prefers-reduced-motion:reduce){.card{animation:none;}*{transition:none !important;}}
+</style>
+</head>
+<body>
+<div class="header"><h1>每周歌单</h1></div>
+<p class="sub" style="text-align:center;">一周 6 首 · 整周每天播放同一批<br>中午放学 3 首含歌词的音乐，下午上学 3 首纯音乐</p>
+<div id="scheduleBox"><p class="sub" style="text-align:center;">加载中…</p></div>
+<button class="more" id="moreBtn" onclick="loadMore()" style="display:none;">继续往后看</button>
+<a class="back" href="/">返回主页</a>
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有</div>
+  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:#cbd5e1;">|</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
+        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
+      </svg>
+      <span id="beianGonganText">苏公网安备32090302000745号</span>
+    </a>
+  </div>
+  <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
+</div>
+<script>
+(async function applyBeian(){
+  const year = document.getElementById('beianYear');
+  if(year) year.textContent = new Date().getFullYear();
+  try {
+    const r = await fetch('/api/config');
+    if(!r.ok) return;
+    const b = (await r.json()).beian;
+    if(!b) return;
+    const holder = document.getElementById('beianHolder');
+    if(holder && b.holder) holder.textContent = b.holder;
+    const icp = document.getElementById('beianIcp');
+    if(icp && b.icp){ icp.textContent = b.icp; icp.href = 'https://beian.miit.gov.cn/'; }
+    const gongan = document.getElementById('beianGongan');
+    const gonganText = document.getElementById('beianGonganText');
+    if(gongan && b.gongan && gonganText){
+      gonganText.textContent = b.gongan;
+      const code = String(b.gongan).replace(/[^0-9]/g, '');
+      gongan.href = 'https://beian.mps.gov.cn/#/query/webSearch?code=' + encodeURIComponent(code);
+    }
+  } catch(e) { /* 取不到就用页面里写死的值 */ }
+})();
+</script>
+<script>
+function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
+function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
+
+const PERIOD_LABELS = { noon: '中午放学（含歌词）', afternoon: '下午上学（纯音乐）' };
+const PERIOD_ORDER = ['noon', 'afternoon'];
+const PAGE_WEEKS = 4;          // 一次往后看 4 周
+
+let startWeek = null;
+let loadedWeeks = 0;
+
+function todayStr(){
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+function mondayOf(dateStr){
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const dow = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+  return d.toISOString().slice(0, 10);
+}
+function addWeeks(monday, n){
+  const d = new Date(monday + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 一周的卡片：本周 / 下周 / 后面继续。 */
+function weekCard(w, thisMonday){
+  const isThis = w.weekStart === thisMonday;
+  const isNext = w.weekStart === addWeeks(thisMonday, 1);
+  const tag = isThis ? '<span class="tag">本周</span>'
+    : isNext ? '<span class="tag">下周</span>' : '';
+
+  const grouped = new Map();
+  for(const s of (w.slots || [])){
+    if(!grouped.has(s.period)) grouped.set(s.period, []);
+    grouped.get(s.period).push(s);
+  }
+
+  const body = PERIOD_ORDER.map(period => {
+    const list = (grouped.get(period) || []).sort((a, b) => safeInt(a.position) - safeInt(b.position));
+    const rows = [];
+    for(let pos = 1; pos <= 3; pos++){
+      const hit = list.find(x => safeInt(x.position) === pos);
+      rows.push(`<div class="slot">
+        <span class="idx">${pos}.</span>
+        ${hit && hit.title
+          ? `<span>${escapeHtml(hit.title)}</span><span class="meta">${escapeHtml(hit.artist || '')} · ${escapeHtml(hit.category_name || '')}</span>`
+          : '<span class="empty">（待排）</span>'}
+      </div>`);
+    }
+    return `<div class="period">${PERIOD_LABELS[period] || period}</div>${rows.join('')}`;
+  }).join('');
+
+  return `<div class="card">
+    <h3>${escapeHtml(w.weekStart)} ~ ${escapeHtml(w.weekEnd)} ${tag}<span class="range">整周循环播放</span></h3>
+    ${body}
+  </div>`;
+}
+
+async function loadMore(){
+  const box = document.getElementById('scheduleBox');
+  const btn = document.getElementById('moreBtn');
+
+  const from = addWeeks(startWeek, loadedWeeks);
+  btn.disabled = true;
+  btn.textContent = '加载中…';
+
+  try {
+    const r = await fetch('/api/schedule?week_start=' + encodeURIComponent(from) + '&weeks=' + PAGE_WEEKS);
+    if(r.status === 401){ alert('请先回主页输入口令登录！'); location.href = '/'; return; }
+    const d = await r.json();
+    if(!r.ok){
+      if(loadedWeeks === 0) box.innerHTML = '<p class="sub" style="text-align:center;">' + escapeHtml(d.error || '加载失败') + '</p>';
+      return;
+    }
+
+    const thisMonday = mondayOf(todayStr());
+    const html = (d.weeklies || []).map(w => weekCard(w, thisMonday)).join('');
+    if(loadedWeeks === 0) box.innerHTML = html;
+    else box.insertAdjacentHTML('beforeend', html);
+
+    loadedWeeks += PAGE_WEEKS;
+    btn.style.display = 'block';
+  } catch(e) {
+    if(loadedWeeks === 0) box.innerHTML = '<p class="sub" style="text-align:center;">网络错误</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '继续往后看';
+  }
+}
+
+(async function boot(){
+  startWeek = mondayOf(todayStr());
+  try {
+    const r = await fetch('/api/rank?status=approved');
+    if(r.status === 401){ alert('请先回主页输入口令登录！'); location.href = '/'; return; }
+  } catch(e) { /* 网络错误也照常试一次 */ }
+  loadMore();
+})();
+</script>
+</body>
+</html>

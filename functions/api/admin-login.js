@@ -4,6 +4,7 @@ import {
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword } from '../../_lib/crypto.js';
+import { isSeedAdminPassword, allowSeedCredentials } from '../../_lib/defaults.js';
 
 /**
  * 管理员登录。
@@ -50,6 +51,16 @@ export async function onRequestPost(context) {
 
   const verdict = await verifyPassword(admin.password, password.value);
   if (!verdict.ok) return denied();
+
+  // 公开仓库防线：示例口令是全世界都知道的，不能拿来登录真站点。
+  // 默认拒绝，只有显式配置 ALLOW_DEFAULT_ADMIN_PASSWORD 才放行（本地测试用）。
+  if (isSeedAdminPassword(password.value) && !allowSeedCredentials(env)) {
+    return error(
+      '这是公开仓库里的示例口令，任何人都知道，已被拒绝登录。'
+      + '请先按 README 的「部署后必做」设置你自己的管理员密码（一条 SQL 即可），然后再登录。',
+      403
+    );
+  }
 
   // 动态口令已从登录流程移除：它现在只用于「注册新管理员」，
   // 见 functions/api/admin-register.js 与 register.html。

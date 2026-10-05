@@ -3,9 +3,13 @@
  *
  * 目前只有一个键：投票上限（vote_cap）。
  *
- * 语义：**超过上限的那部分票不计入票数** —— 票照收，但学生端显示与
- * 正式榜排序都用封顶后的值。这样即使有人刷票，数字也不会离谱到
- * 超过"全校人数"这种不可能的数值。
+ * 语义：**超过上限的那部分票不计入票数** —— 票照收，但学生端显示、
+ * 待审核榜排序、正式榜排序都用封顶后的值（即"有效票数"）。
+ * 这样即使有人刷票，数字也不会离谱到超过"全校人数"这种不可能的数值，
+ * 榜单顺序也不会被刷票量主导。
+ *
+ * 排序用的表达式见 effectiveVotesExpr()：它必须出现在 ORDER BY 与
+ * LIMIT 之前，而不是等取完数据再在应用层改数字（A6 修的就是这个）。
  */
 
 import { isMissingTable } from './db.js';
@@ -42,6 +46,30 @@ export async function getVoteCap(env) {
   const raw = await getSetting(env, SETTING_VOTE_CAP, '');
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/**
+ * 「有效票数」的 SQL 表达式 —— 票数封顶必须参与**排序与截取**。
+ *
+ * 为什么需要它（审计遗留问题 A6）：
+ *   旧实现是"先按原始票数排序、截取前 50 条，再把显示票数改成封顶值"。
+ *   结果是刷到 9999 票的歌**照样占据榜单前几位**，封顶只改了数字，
+ *   排序结果仍然由刷票量决定 —— 等于封顶形同虚设。
+ *   所以排序表达式、截取前的排序键都必须用 MIN(votes, cap)。
+ *
+ * cap <= 0 表示不限制，直接用原始票数。
+ *
+ * cap 直接内联进 SQL 而不是占一个 `?`：它已经由 getVoteCap() 收敛成
+ * 0 或正整数（非法值一律当 0），内联可以避免每个查询都要数一遍
+ * 绑定参数的先后顺序 —— 那种错位非常难排查，而这里没有任何注入面。
+ *
+ * CAST 成 INTEGER 是老规矩：SQLite 是动态类型，数值列理论上可能存进文本，
+ * 而这些值会被拼进 HTML 与 JS 调用，强制转整数从根上断掉此类问题。
+ */
+export function effectiveVotesExpr(cap) {
+  const raw = 'CAST(s.votes AS INTEGER)';
+  if (!Number.isInteger(cap) || cap <= 0) return raw;
+  return `MIN(${raw}, ${cap})`;
 }
 
 /** 把一组带 votes 的行按上限封顶（票照收，但不作数）。 */

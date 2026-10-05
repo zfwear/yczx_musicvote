@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireSuper } from '../../_lib/auth.js';
+import { requireSuper, revokeDebugSessions } from '../../_lib/auth.js';
 import { parsePositiveInt, parseSecret } from '../../_lib/validate.js';
 import { hashPassword } from '../../_lib/crypto.js';
 import { changedRows } from '../../_lib/db.js';
@@ -66,6 +66,11 @@ async function deleteAdmin(env, session, data) {
   // 顺手注销他所有在线会话，避免删了账号还能继续操作。
   await env.DB.prepare("DELETE FROM sessions WHERE subject = 'admin' AND subject_id = ?")
     .bind(target.id).run();
+  // 还要撤销他换来的**调试会话**（审计 A5）。
+  // 调试会话走的是 subject='class' 那一侧，上面那条按 subject='admin' 的删除够不着它；
+  // 不显式清理的话，被删掉的管理员留下的调试身份还能继续写真实数据，
+  // 直到 2 小时自然过期。requireAdmin 里虽有兜底，但这里清掉更干净、也更早。
+  await revokeDebugSessions(env, target.id);
 
   return json({ ok: true, message: `已删除管理员「${target.username}」` });
 }
@@ -87,6 +92,8 @@ async function resetPassword(env, data) {
 
   await env.DB.prepare("DELETE FROM sessions WHERE subject = 'admin' AND subject_id = ?")
     .bind(target.id).run();
+  // 改密后同理：调试会话也要跟着失效（审计 A5）
+  await revokeDebugSessions(env, target.id);
 
   return json({ ok: true, message: `已重置「${target.username}」的密码，其登录状态已失效` });
 }

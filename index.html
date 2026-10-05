@@ -5,7 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>盐中之声音乐投稿（北校区）</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
+  /* ============================================================
+     设计令牌（四个页面各自内联一份完全相同的副本）
+     —— 不能引外部 CSS 文件（CSP default-src 'none'，且要能离线用），
+        所以这里把"同一个值"写四遍。改的时候四处一起改。
+     间距节奏 8 / 12 / 16 / 24 / 32；圆角常规一档、大容器大一档。
+     ============================================================ */
+  :root{
+    --brand:#0284c7;--brand-strong:#0369a1;--brand-soft:#e0f2fe;--brand-line:#bae6fd;
+    --ink:#0f172a;--ink-2:#334155;--ink-3:#64748b;--ink-4:#94a3b8;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --surface:#ffffff;--surface-2:#f8fafc;
+    --danger:#e11d48;--danger-soft:#fff1f2;--success:#059669;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+    --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
+  }
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
   .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
   .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
@@ -39,14 +54,139 @@
     .col{display:block;}
     .col-title{margin-top:0;}
   }
+  /* ============================================================
+     视觉重构 · 第一档：手机歌曲卡片与行内按钮尺寸
+     —— 只追加，不动上面任何一条原有规则。
+
+     为什么要改：
+       原版卡片是**单行 flex**：左边 .rank-info、右边「票数 + 试听 + 举报 + 投票」。
+       在 390px 下实测（_harness/layout-audit.mjs，按真实字宽算）：
+         · 右侧那组（票数 33px + 三个 60px 按钮 + 3×6px 间隔）固有宽度 249px
+         · 卡片内容区只有 318px → 分给 .rank-info 只剩 68.7px
+         · 歌名「起风了（Live 版）」固有 132.8px → 被折成 3 行，歌手行再折 2 行
+         · 票数「128票」中的数字与「票」之间没有不断行保护 → 断成两行
+         · 行内按钮继承全局 input,button{padding:14px}，被压窄时文字折行
+
+     怎么改：
+       卡片改成**上下两层**：
+         上层 = 歌曲信息（可收缩，最少让歌名放得下） + 票数（flex:none，锁在一行）
+         下层 = 操作区（试听 / 举报 / 投票，允许换行，按钮文字永不折行）
+       这样"挤"发生在该让步的地方（歌曲信息允许换行），
+       而不是所有元素一起被压扁。
+     ============================================================ */
+  .rank-card{flex-direction:column;align-items:stretch;gap:12px;padding:14px 16px;}
+  .rank-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+  /* min-width:0 是这里的关键：flex 项默认 min-width:auto，会被内容顶住不肯收缩，
+     于是"两个都不让"就变成两边一起溢出。允许收缩之后，宽度分配才有意义。 */
+  .song-main{min-width:0;flex:1 1 auto;}
+  .song-main h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;line-height:1.4;overflow-wrap:anywhere;}
+  .song-main p{margin:0;font-size:13px;color:#64748b;line-height:1.5;}
+  /* 票数不参与收缩：它是这块区域里唯一"绝对不能断行"的内容 */
+  .song-votes{flex:0 0 auto;display:inline-flex;align-items:baseline;gap:2px;padding:2px 8px;border-radius:999px;background:rgba(225,29,72,0.08);}
+  .song-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+  /* 行内按钮的尺寸规则：原版只有全局 input,button{width:100%;padding:14px}，
+     没有给小按钮的规则，所以这里的 width:auto + 固定最小高度是必需的。
+     min-height 44px = 触控目标下限；white-space:nowrap = 文字永不折行。 */
+  .song-acts button{width:auto;flex:0 0 auto;min-height:44px;margin:0;padding:9px 14px;font-size:14px;font-weight:600;
+    border-radius:10px;white-space:nowrap;line-height:1.35;box-shadow:none;}
+  .song-acts .act-secondary{background:rgba(255,255,255,0.9);color:#0c4a6e;border:1px solid #bae6fd;}
+  .song-acts .act-quiet{background:transparent;color:#64748b;border:1px solid #e2e8f0;}
+  .song-acts .act-primary{background:#0284c7;color:#fff;border:1px solid #0284c7;font-weight:700;}
+
+  /* ============================================================
+     视觉重构 · 第二档：统一「主要 / 次要 / 危险」三层按钮
+
+     问题：原来同一屏里所有按钮都是"饱和蓝渐变 + 投影"，
+     局部再各自覆盖成红/绿/灰 —— 主要与次要长得一模一样，
+     谁也看不出该先点哪个；主按钮的投影还偏重。
+
+     三层：
+       主要 = 实心品牌蓝、几乎无阴影（一个页面通常只有一个：
+              进入 / 去投稿 / 提交点歌 / 投票 / 保存）
+       次要 = 浅底或描边（试听 / 搜索 / 退出 / 编辑 / 取消…）
+       危险 = 红色文字或轻量红描边（删除 / 清空 / 拒绝）
+     —— 举报归到"安静"层，刻意不与投票抢注意力。
+     ============================================================ */
+  .btn-primary,.btn-secondary,.btn-quiet,.btn-danger{
+    width:auto;box-sizing:border-box;font-family:inherit;font-weight:600;
+    border-radius:var(--r-md);cursor:pointer;transition:background-color .16s,color .16s,border-color .16s,box-shadow .16s;
+  }
+  .btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);box-shadow:none;}
+  .btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
+  .btn-secondary{background:#fff;color:#0c4a6e;border:1px solid var(--brand-line);box-shadow:none;}
+  .btn-secondary:hover{background:var(--brand-soft);}
+  .btn-quiet{background:transparent;color:var(--ink-3);border:1px solid var(--line);box-shadow:none;}
+  .btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid #fecdd3;box-shadow:none;}
+  .btn-danger:hover{background:var(--danger-soft);}
+  .btn-sm{padding:9px 14px;font-size:13px;}
+  .btn-block{display:block;width:100%;text-align:center;padding:14px 16px;font-size:16px;border-radius:var(--r-lg);text-decoration:none;}
+  /* 站内大按钮：主次要拉开 —— 去投稿是实心，其余是浅底 */
+  .btn{padding:15px 16px;font-size:17px;letter-spacing:.5px;margin-bottom:var(--s3);}
+  .btn.btn-primary{background:var(--brand);border:1px solid var(--brand);}
+  .btn.btn-secondary{background:rgba(255,255,255,0.86);color:#075985;border:1px solid var(--brand-line);box-shadow:none;}
+  /* 手机切换页签的选中态：原版是"渐变 + 投影"，统一成实心品牌蓝（与后台页签一致） */
+  .mobile-tabs button.active{background:var(--brand);box-shadow:none;}
+  /* 首页两个入口链接的主次（不改标记，用属性选择器定位，避免动到被逐字钉住的 DOM）：
+     「去投稿」= 主要（实心蓝、无投影），「查看每周排期」= 次要（浅底描边） */
+  a.btn[href="/vote.html"]{background:var(--brand);border:1px solid var(--brand);box-shadow:none;}
+  a.btn[href="/schedule.html"]{background:rgba(255,255,255,0.86);color:#075985;border:1px solid var(--brand-line);box-shadow:none;}
+  .gate-enter{padding:14px 16px;font-size:16px;border-radius:var(--r-md);background:var(--brand);box-shadow:none;}
+  #rulesBox .rules-toggle{background:transparent;border:0;box-shadow:none;color:var(--brand);font-size:13px;padding:2px 4px;margin:0;min-height:44px;display:inline-flex;align-items:center;}
+  #rulesBox .rules-toggle:hover{color:var(--brand-strong);}
+
+  /* ============================================================
+     视觉重构 · 第三档：降低背景、阴影、毛玻璃的存在感
+
+     评审原话：「缺的不是更多效果，而是"安静的地方"」。
+     做法：
+       · 背景从"蓝紫青粉四团光斑"改成**一处**品牌蓝渐变 + 线性基色
+       · 歌曲列表从"每首歌一个浮起的大盒子"改成
+         **一个白色列表容器 + 内部轻分隔线**（更像音乐产品，也更紧凑）
+       · 阴影只留给真正需要与背景分离的元素：
+         悬浮的试听播放器、候选面板、弹窗、登录卡
+     ============================================================ */
+  /* 列表容器：唯一的"白底 + 圆角 + 边框"，内部不再有盒子 */
+  .list-panel{margin-bottom:var(--s3);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
+  /* 面板：公告、投稿须知这类"独立成块"的内容（与列表行区分开） */
+  .panel{margin-bottom:var(--s3);padding:var(--s4) var(--s4);border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);}
+  /* 覆盖第一档给 .rank-card 的圆角与投影：行不再是"卡片"，而是列表项。
+     padding 左右 16px 与卡片内容宽度一致，所以第一档的宽度预算不变。 */
+  .rank-card{margin-bottom:0;border:0;border-radius:0;background:var(--surface);box-shadow:none;backdrop-filter:none;}
+  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
+  /* 悬浮元素才配拥有明显阴影：试听播放器与候选面板 */
+  #auditionBox audio{display:block;width:100%;}
+
+  /* ============================================================
+     视觉重构 · 第四档：统一字体 / 间距 / 圆角，并补上无障碍
+
+     评审原话：「说明文字太多，而且有些太淡、太小」。
+     要减少的是说明的**数量**，而不是把它一律缩小变淡。
+     所以：辅助文字最低 12px、颜色从 #94a3b8 提到 #64748b；
+     间距统一走 --s1..--s6 的节奏；键盘焦点必须看得见。
+     ============================================================ */
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
+  .header{margin-bottom:var(--s5);}
+  .col-title{margin-bottom:var(--s3);padding-left:var(--s3);}
+  .mobile-tabs{gap:var(--s2);margin-bottom:var(--s4);}
+  .mobile-tabs button{min-height:44px;border-radius:var(--r-md);}
+  /* 持久标签：口令输入框原来只有 placeholder，一输入就没了提示 */
+  .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
+  /* 无障碍：系统开了"减少动态效果"就全部静态化 */
+  @media(prefers-reduced-motion:reduce){
+    .rank-card{animation:none;opacity:1;transform:none;}
+    *{transition:none !important;animation:none !important;}
+  }
 </style>
 </head>
 <body>
 <div id="gate">
-  <h2 style="text-align:center;color:#0f172a;margin-top:0;">盐中之声</h2>
+  <h2 style="text-align:center;color:#0f172a;margin-top:0;font-size:19px;line-height:1.45;">盐中之声音乐投稿（北校区）</h2>
   <p style="color:#64748b;font-size:13px;text-align:center;">请输入班级口令</p>
+  <label class="field-label" for="pw">班级口令</label>
   <input id="pw" type="password" placeholder="口令" onkeydown="if(event.key==='Enter')checkPw()">
-  <button onclick="checkPw()" style="background:#0284c7;color:#fff;border:0;font-weight:bold;cursor:pointer;">进入</button>
+  <button class="gate-enter" onclick="checkPw()">进入</button>
   <p id="gateMsg" class="err"></p>
   <div id="gateAnnounceBox"></div>
 </div>
@@ -56,6 +196,7 @@
     <img src="/assets/school-badge.png" alt="校徽" class="badge">
   </div>
   <a href="/vote.html" class="btn">去投稿</a>
+  <a href="/schedule.html" class="btn" style="background:rgba(255,255,255,0.85);color:#075985;box-shadow:none;border:1px solid #bae6fd;">查看每周排期</a>
   <button onclick="logoutUser()" style="background:rgba(255,255,255,0.85);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;font-weight:600;">退出登录</button>
   <div id="rulesBox"></div>
   <div id="announceBox"></div>
@@ -79,6 +220,61 @@
     <div id="disclaimerBox"></div>
   </footer>
 </div>
+
+
+
+
+
+
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有</div>
+  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:#cbd5e1;">|</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
+        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
+      </svg>
+      <span id="beianGonganText">苏公网安备32090302000745号</span>
+    </a>
+  </div>
+  <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
+</div>
+<script>
+/* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
+   就用它覆盖页面里写死的这组 —— 改内容不必改代码、也不用重新部署。 */
+(async function applyBeian(){
+  const year = document.getElementById('beianYear');
+  if(year) year.textContent = new Date().getFullYear();
+
+  try {
+    const r = await fetch('/api/config');
+    if(!r.ok) return;
+    const b = (await r.json()).beian;
+    if(!b) return;
+
+    const holder = document.getElementById('beianHolder');
+    if(holder && b.holder) holder.textContent = b.holder;
+
+    const icp = document.getElementById('beianIcp');
+    if(icp && b.icp){
+      icp.textContent = b.icp;
+      icp.href = 'https://beian.miit.gov.cn/';
+    }
+
+    const gongan = document.getElementById('beianGongan');
+    const gonganText = document.getElementById('beianGonganText');
+    if(gongan && b.gongan && gonganText){
+      gonganText.textContent = b.gongan;
+      // 公安备案查询页要求的 code 就是备案号里的数字部分
+      const code = String(b.gongan).replace(/[^0-9]/g, '');
+      gongan.href = 'https://beian.mps.gov.cn/#/query/webSearch?code=' + encodeURIComponent(code);
+    }
+  } catch(e) { /* 取不到就用页面里写死的值 */ }
+})();
+</script>
 <script>
 // 所有来自后端的数据必须经这里转义后才能拼进 innerHTML，
 // 否则歌名里的 <img src=x onerror=...> 会被浏览器当代码执行。
@@ -440,19 +636,31 @@ async function loadPending(){
     if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无待审核歌曲</p>'; return; }
     box.innerHTML = list.map(s => {
       const id = safeInt(s.id);
+      // 两层结构（见样式块「视觉重构 · 第一档」）：
+      //   上层：歌名 / 歌手·分类（可换行收缩）+ 票数（固定，锁一行）
+      //   下层：试听（次要）· 举报（安静）· 投票（主要）
+      // 举报刻意做得最不显眼 —— 它不该和「投票」抢注意力。
       return `
       <div class="rank-card">
-        <div class="rank-info"><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span class="rank-votes">${safeInt(s.votes)}票</span>
-          <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
-          <button class="btn-upvote" data-report="${id}" onclick="reportFromButton(this)">举报</button>
-          <button class="btn-upvote" onclick="upvote(${id})">投票</button>
+        <div class="rank-top">
+          <div class="song-main">
+            <h3>${escapeHtml(s.title)}</h3>
+            <p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p>
+          </div>
+          <span class="song-votes" title="当前票数"><b class="rank-votes">${safeInt(s.votes)}</b><span style="font-size:12px;color:#94a3b8;">票</span></span>
+        </div>
+        <div class="song-acts">
+          <button class="btn-upvote act-secondary" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
+          <button class="btn-upvote act-quiet" data-report="${id}" onclick="reportFromButton(this)">举报</button>
+          <button class="btn-upvote act-primary" onclick="upvote(${id})">投票</button>
         </div>
       </div>
       <div id="audition-${id}"></div>
     `;
     }).join('');
+    // 外层套一个白色列表容器：整个列表只有一个圆角与一条边框，行与行之间用
+    // 轻分隔线区分（第三档）—— 比"每首歌一个浮起的大盒子"更紧凑、更像音乐列表。
+    box.innerHTML = '<div class="list-panel">' + box.innerHTML + '</div>';
   } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
 
@@ -467,14 +675,25 @@ async function loadApproved(){
     if(!Array.isArray(list) || !list.length){ box.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">暂无已通过歌曲</p>'; return; }
     box.innerHTML = list.map((s, i) => {
       const id = safeInt(s.id);
+      // 正式榜不放票数（后端查询里根本不带 votes 字段）。
+      // 结构改成两层之后，操作区只剩一个「试听」，和左边的信息形成主次，
+      // 不再出现"一个按钮孤零零挤在右边"的样子。
       return `
       <div class="rank-card">
-        <div class="rank-info"><h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p></div>
-        <button class="btn-upvote" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
+        <div class="rank-top">
+          <div class="song-main">
+            <h3><span style="color:#94a3b8;font-weight:700;">${i+1}</span> ${escapeHtml(s.title)}</h3>
+            <p>${escapeHtml(s.artist)} · <span style="color:#0284c7;">${escapeHtml(s.category_name)}</span></p>
+          </div>
+        </div>
+        <div class="song-acts">
+          <button class="btn-upvote act-secondary" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
+        </div>
       </div>
       <div id="audition-${id}"></div>
     `;
     }).join('');
+    box.innerHTML = '<div class="list-panel">' + box.innerHTML + '</div>';
   } catch(e) { box.innerHTML = '<p style="text-align:center;color:#e11d48;">网络错误</p>'; }
 }
 
@@ -538,11 +757,11 @@ async function loadAnnouncements(){
     const list = Array.isArray(data.announcements) ? data.announcements : [];
     if(!list.length){ box.innerHTML = ''; return; }
     box.innerHTML = list.map(a => `
-      <div class="rank-card" style="display:block;background:rgba(2,132,199,0.10);border-color:rgba(2,132,199,0.28);">
+      <div class="panel" style="background:rgba(2,132,199,0.06);border-color:rgba(2,132,199,0.22);">
         <div class="rank-info">
-          <h3 style="color:#075985;">${escapeHtml(a.title)}</h3>
-          <p style="white-space:pre-wrap;color:#334155;">${escapeHtml(a.content)}</p>
-          <p style="font-size:11px;color:#94a3b8;margin-top:6px;">${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
+          <h3 style="color:#075985;margin:0 0 6px;font-size:15px;">${escapeHtml(a.title)}</h3>
+          <p style="margin:0;white-space:pre-wrap;color:#334155;font-size:13px;line-height:1.7;">${escapeHtml(a.content)}</p>
+          <p style="font-size:12px;color:#94a3b8;margin:6px 0 0;">${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
         </div>
       </div>
     `).join('');
@@ -579,7 +798,10 @@ async function audition(songId, title, artist, trackId){
     return;
   }
 
-  host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">正在搜索音源…</p>';
+  // 历史数据（009 迁移之前提交的歌）没有锁定音源，只能退回"搜索 + 候选列表"。
+  // 这句话必须说清楚"现在听到的不一定就是收录的那一版"，
+  // 否则学生会以为搜出来的第一个候选就是榜上记录的那一首。
+  host.innerHTML = '<p style="text-align:center;color:#94a3b8;font-size:13px;margin:8px 0;">这首歌没有锁定音源，正在按歌名搜索…</p>';
 
   try {
     let url = '/api/music?q=' + encodeURIComponent(title || '');
@@ -702,7 +924,7 @@ function auditionPanelHtml(songId, list){
 
   const rows = list.map((s, index) => `
     <div data-track-row="${escapeHtml(s.id)}"
-         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);flex-wrap:wrap;">
       <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
       <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
         <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
@@ -771,16 +993,15 @@ function playTrack(trackId, songId){
    ============================================================ */
 
 const RULES = [
-  '投稿必须从搜索结果里选歌，锁定准确的歌名、歌手与音源；信息不符的将被退回。',
-  '每人每周限投稿一首（按设备去重），提交前请确认无误。',
-  '已在待审核队列或已入库的歌曲不可重复投稿。',
-  '禁止投稿含违规内容的歌曲，包括但不限于：脏话辱骂、人身攻击、政治敏感、色情低俗、暴力恐怖。',
-  '违禁词机制：歌名或歌手命中黑名单违禁词会被直接拦下，且不能靠更换写法绕过。',
-  '每首歌的票数上限为全校总人数，超出部分不计入票数。',
-  '审核综合票数、分类权重与播出适宜性，广播站保留最终取舍权。',
-  '被多个班级举报并经核实的歌曲会被移出，情节严重的封禁对应投稿口令。',
-  '投稿一经采用，广播站可在校园广播中播放；请勿投稿不适合校园环境的内容。',
-  '本规定为审核依据，最终解释权归盐中之声广播站所有。',
+  '中午放学播放 3 首含歌词的音乐，下午上学播放 3 首纯音乐。',
+  '不出现含有日语或韩语的歌曲，尽量避免小语种歌曲；英语歌曲可以投稿，但播放比例较小。',
+  '歌词积极向上，减少情爱类型；不出现政治敏感、脏话等违规内容；不出现有特殊含义的歌曲（如校歌、国歌）。',
+  '歌手无违法犯罪行为。',
+  '不出现 rap，以及底噪、低音、高音过大的歌曲；音游、二次元相关歌曲请尽量少投稿。',
+  '投稿的歌曲将交由广播站老师和分管校长审核，审核通过后会安排在相应时间播放。学校审核较严格，如未通过请谅解。',
+  '参与投稿即表明“我已阅读投稿须知并知晓该歌曲可能无法播出”，审核不通过的歌曲将被驳回。',
+  '本系统仅提供音乐搜索与播放管理功能，不存储任何音乐文件。所有音乐内容均来自第三方音乐平台，版权归原平台及版权方所有。投稿时请遵守相关音乐平台的服务条款、尊重音乐作品版权；我们鼓励支持正版音乐，在官方平台购买和收听喜爱的作品。',
+  '最终解释权归盐中之声广播站所有。',
 ];
 
 const DISCLAIMER = [
@@ -799,32 +1020,49 @@ function rulesListHtml(){
   ).join('');
 }
 
+/**
+ * 须知面板是否展开 —— 默认展开。
+ * 声明必须放在 renderRules 之前：之前踩过"暂时性死区"的坑，
+ * 虽然后者是运行时才调用，但放前面就不必依赖调用时机。
+ */
+let rulesOpen = true;
+
 function renderRules(){
   const box = document.getElementById('rulesBox');
   if(!box) return;
 
+  // 默认**展开**（用户要求）：投稿须知是审核依据，藏着容易让人直接跳过不读。
+  // 点标题仍可收起 —— 老用户看腻了就折起来，不占地方。
+  // 另外首次进入还会弹一次确认（见 maybeShowFirstVisitNotice）。
+  const open = rulesOpen;
+
   box.innerHTML = `
-    <div class="rank-card" style="display:block;background:rgba(255,255,255,0.9);">
+    <div class="panel">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;"
            onclick="toggleRules()">
-        <h3 style="margin:0;color:#075985;">投稿与投票规定</h3>
-        <span id="rulesToggle" style="font-size:12px;color:#64748b;flex:0 0 auto;">展开</span>
+        <h3 style="margin:0;color:#075985;font-size:15px;">投稿须知</h3>
+        <button type="button" class="rules-toggle" id="rulesToggle" aria-expanded="${open ? 'true' : 'false'}" aria-controls="rulesBody">${open ? '收起' : '展开'}</button>
       </div>
-      <p style="margin:6px 0 0;font-size:12px;color:#94a3b8;">审核按此规定执行，投稿前请先过一遍</p>
-      <div id="rulesBody" style="display:none;margin-top:10px;border-top:1px dashed rgba(2,132,199,0.3);padding-top:8px;">
+      <p style="margin:6px 0 0;font-size:13px;color:var(--ink-3);">审核按此须知执行，投稿前请先过一遍</p>
+      <div id="rulesBody" style="display:${open ? 'block' : 'none'};margin-top:10px;border-top:1px solid var(--line-soft);padding-top:8px;">
         ${rulesListHtml()}
       </div>
     </div>
   `;
 }
 
+/** 展开/收起须知面板。 */
 function toggleRules(force){
   const body = document.getElementById('rulesBody');
   const label = document.getElementById('rulesToggle');
   if(!body) return;
-  const open = force === undefined ? body.style.display === 'none' : !!force;
-  body.style.display = open ? 'block' : 'none';
-  if(label) label.textContent = open ? '收起' : '展开';
+  rulesOpen = force === undefined ? body.style.display === 'none' : !!force;
+  body.style.display = rulesOpen ? 'block' : 'none';
+  if(label){
+    label.textContent = rulesOpen ? '收起' : '展开';
+    // 无障碍：折叠控件的状态要说出来，不能只靠文字变化
+    label.setAttribute('aria-expanded', rulesOpen ? 'true' : 'false');
+  }
 }
 
 function renderDisclaimer(){
@@ -849,9 +1087,9 @@ function maybeShowFirstVisitNotice(){
   if(seen) return;
 
   uiDialog({
-    title: '投稿前请先看一遍规定',
-    message: '本页是盐中之声广播站的校内投稿工具，非学校官方发布渠道。\n\n投稿每周限一首，须从搜索结果里选歌；违禁词会被直接拦下；审核按《投稿与投票规定》执行。\n\n完整规定可在首页「投稿与投票规定」里展开查看，页面底部有免责声明。',
-    okText: '我已阅读并同意',
+    title: '投稿前请先看一遍投稿须知',
+    message: '本页是盐中之声广播站的校内投稿工具，非学校官方发布渠道。\n\n投稿每周限一首，须从搜索结果里选歌；违禁词会被直接拦下；投稿将由广播站老师和分管校长审核。\n\n完整须知可在首页「投稿须知」里展开查看，页面底部有免责声明。',
+    okText: '我已阅读投稿须知并知晓该歌曲可能无法播出',
     cancelText: '',
   }).then(() => {
     try { localStorage.setItem(KEY, '1'); } catch(e) { /* 忽略 */ }

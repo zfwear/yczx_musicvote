@@ -5,7 +5,21 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>音乐投稿</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
+  /* ============================================================
+     设计令牌（四个页面各自内联一份完全相同的副本）
+     —— 不能引外部 CSS 文件（CSP default-src 'none'，且要能离线用），
+        所以这里把"同一个值"写四遍。改的时候四处一起改。
+     ============================================================ */
+  :root{
+    --brand:#0284c7;--brand-strong:#0369a1;--brand-soft:#e0f2fe;--brand-line:#bae6fd;
+    --ink:#0f172a;--ink-2:#334155;--ink-3:#64748b;--ink-4:#94a3b8;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --surface:#ffffff;--surface-2:#f8fafc;
+    --danger:#e11d48;--danger-soft:#fff1f2;--success:#059669;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+    --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
+  }
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
   .box{background:rgba(255,255,255,0.85);backdrop-filter:blur(10px);padding:24px;border-radius:16px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 4px 20px rgba(0,0,0,0.05);}
   h2{text-align:center;color:#0f172a;margin-top:0;}
   p.sub{text-align:center;color:#64748b;font-size:13px;margin-bottom:20px;}
@@ -14,16 +28,63 @@
   button:active{transform:scale(0.97);}
   #msg{min-height:24px;font-size:14px;text-align:center;margin-top:12px;}
   .back{background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;margin-top:20px;}
+
+  /* ============================================================
+     视觉重构 · 第一档 + 第二档：点歌页的三个按钮
+     实机反馈（用户红笔圈的）：「靠太近了」+「主次不分」。
+
+     为什么用属性选择器而不是加 class：
+       这三个按钮的标记被前端约束测试逐字钉着（用户逐条批准过的改动），
+       不改标记就能同时满足"间距/层级"与"结构别乱动"。
+     为什么是 24px：走间距节奏 --s5 一档；原来靠全局 button 的
+       margin-bottom:12px 堆出来，三件不同性质的事挤成一组。
+     ============================================================ */
+  .box>button[onclick="searchSongs()"],
+  .box>button[onclick="vote()"],
+  .box>button[onclick="auditionInput()"]{
+    margin:0 0 var(--s5);padding:13px 16px;font-size:15px;border-radius:var(--r-md);
+  }
+  /* 搜索与试听 = 次要（浅底描边），提交点歌 = 主要（实心蓝、几乎无阴影） */
+  .box>button[onclick="searchSongs()"],
+  .box>button[onclick="auditionInput()"]{
+    background:#fff;color:#0c4a6e;border:1px solid var(--brand-line);font-weight:600;box-shadow:none;
+  }
+  .box>button[onclick="searchSongs()"]:hover,
+  .box>button[onclick="auditionInput()"]:hover{background:var(--brand-soft);}
+  .box>button[onclick="vote()"]{
+    background:var(--brand);border:1px solid var(--brand);font-weight:700;box-shadow:none;letter-spacing:.5px;
+  }
+  .box>button[onclick="vote()"]:hover{background:var(--brand-strong);}
+  /* 候选面板与搜索框之间留出一档，不再紧贴按钮 */
+  #searchBox,#auditionBox{margin-bottom:var(--s2);}
+  /* 两个"返回/退出"是次要操作：描边、不与主操作抢注意力 */
+  .back{background:#fff;color:var(--ink-3);border:1px solid var(--line);font-weight:600;box-shadow:none;margin-top:var(--s3);padding:12px 16px;font-size:15px;}
+  .back:hover{background:var(--surface-2);color:var(--ink-2);}
+
+  /* ---------- 第四档：字体 / 间距 / 圆角统一 + 无障碍 ---------- */
+  .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{
+    outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
+  @media(prefers-reduced-motion:reduce){
+    *{transition:none !important;animation:none !important;}
+  }
 </style>
 </head>
 <body>
 <div class="box">
   <h2>音乐投稿</h2>
   <p class="sub">每人每周只能投稿一首，请慎重提交</p>
+  <label class="field-label" for="title">歌名（同时是搜索框）</label>
   <input id="title" placeholder="输入歌名或歌手，回车搜索" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();searchSongs();}">
+  <label class="field-label" for="artist">歌手（由搜索结果填入）</label>
   <input id="artist" placeholder="从搜索结果里选一首，歌手会自动填入" readonly style="background:#f1f5f9;color:#334155;">
   <input id="trackId" type="hidden" value="">
+  <!-- 选曲凭据（A7）：搜索接口为每个候选签发的服务端签名串。
+       它把「歌名 + 歌手 + 音源 id 属于同一首歌」变成服务端可验证的事实，
+       所以提交时必须一起带上；不再靠"三个字段各查各的格式"来兜底。 -->
+  <input id="trackToken" type="hidden" value="">
   <p id="picked" class="sub" style="color:#0284c7;min-height:16px;margin:2px 0 6px;"></p>
+  <label class="field-label" for="category">分类</label>
   <select id="category">
     <option value="2">中文歌</option>
     <option value="3">英文歌</option>
@@ -36,9 +97,66 @@
   <button onclick="auditionInput()" style="background:rgba(255,255,255,0.8);color:#64748b;box-shadow:none;border:1px solid #e2e8f0;">▶ 先试听一下</button>
   <p id="msg"></p>
   <div id="auditionBox"></div>
+  <!-- 这两个按钮原本在 .box 外面，宽度与卡片内的其它按钮对不齐（用户反馈"像素没对齐"）。
+       放进 .box 里之后，宽度、圆角、左右内边距都和「搜索歌曲 / 提交点歌」一致。 -->
+  <button class="back" onclick="location.href='/'">返回主页</button>
+  <button class="back" onclick="logoutUser()">退出登录</button>
 </div>
-<button class="back" onclick="location.href='/'">返回主页</button>
-<button class="back" onclick="logoutUser()" style="margin-left:8px;">退出登录</button>
+
+
+
+
+
+
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有</div>
+  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:#cbd5e1;">|</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
+        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
+      </svg>
+      <span id="beianGonganText">苏公网安备32090302000745号</span>
+    </a>
+  </div>
+  <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
+</div>
+<script>
+/* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
+   就用它覆盖页面里写死的这组 —— 改内容不必改代码、也不用重新部署。 */
+(async function applyBeian(){
+  const year = document.getElementById('beianYear');
+  if(year) year.textContent = new Date().getFullYear();
+
+  try {
+    const r = await fetch('/api/config');
+    if(!r.ok) return;
+    const b = (await r.json()).beian;
+    if(!b) return;
+
+    const holder = document.getElementById('beianHolder');
+    if(holder && b.holder) holder.textContent = b.holder;
+
+    const icp = document.getElementById('beianIcp');
+    if(icp && b.icp){
+      icp.textContent = b.icp;
+      icp.href = 'https://beian.miit.gov.cn/';
+    }
+
+    const gongan = document.getElementById('beianGongan');
+    const gonganText = document.getElementById('beianGonganText');
+    if(gongan && b.gongan && gonganText){
+      gonganText.textContent = b.gongan;
+      // 公安备案查询页要求的 code 就是备案号里的数字部分
+      const code = String(b.gongan).replace(/[^0-9]/g, '');
+      gongan.href = 'https://beian.mps.gov.cn/#/query/webSearch?code=' + encodeURIComponent(code);
+    }
+  } catch(e) { /* 取不到就用页面里写死的值 */ }
+})();
+</script>
 <script>
 // 试听结果来自外部音源接口，属于不可信内容，必须转义后才能拼进 innerHTML。
 function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
@@ -326,6 +444,8 @@ async function vote(){
   const artist = document.getElementById('artist').value.trim();
   const category = document.getElementById('category').value;
   const trackId = document.getElementById('trackId').value.trim();
+  // A7：选曲凭据与音源 id 是同时写入的一对，缺了任何一个都说明"没真的选过一首"。
+  const trackToken = document.getElementById('trackToken').value.trim();
   const msg = document.getElementById('msg');
 
   // 必须从搜索结果里选一首，把音源 id 一起提交 ——
@@ -344,6 +464,14 @@ async function vote(){
   if(!title || !artist){
     msg.style.color = '#e11d48';
     msg.textContent = '选中的歌曲信息不完整，请重新搜索并选一首';
+    return;
+  }
+
+  // 凭据缺失也要在前端就拦下并说清楚，别让用户提交完才看到服务端报错。
+  // （服务端同样强制要求凭据，这里只是提前一步给人话。）
+  if(!trackToken){
+    msg.style.color = '#e11d48';
+    msg.textContent = '选曲凭据缺失（可能是页面停留太久或列表是旧版）。请重新点「搜索歌曲」并选一首再提交';
     return;
   }
 
@@ -374,6 +502,9 @@ async function vote(){
         category_id: category,
         fingerprint,
         track_id: trackId,
+        // A7：带上服务端签发的选曲凭据。带凭据时后端**以凭据里的内容为准**，
+        // 上面那三个字段只是老版接口的兼容字段（也方便出问题时对照排查）。
+        track_token: trackToken,
         recaptcha_token: rcToken,
       })
     });
@@ -397,6 +528,7 @@ function clearPicked(){
   document.getElementById('title').value = '';
   document.getElementById('artist').value = '';
   document.getElementById('trackId').value = '';
+  document.getElementById('trackToken').value = '';
   document.getElementById('picked').textContent = '';
 }
 
@@ -532,12 +664,18 @@ function pickSong(button){
   const name = button.dataset.name || '';
   const artist = button.dataset.artist || '';
   const track = button.dataset.track || '';
+  // A7：候选自带的选曲凭据。它由搜索接口签发，里面已经绑定了
+  // "这首歌名 + 这个歌手 + 这个音源 id"，提交时一并带上，
+  // 服务端就以凭据内容为准 —— 客户端再没有机会把三者拆开重组。
+  // 后端签名失败时它是空串（老流程），此时提交会被拦下并提示重新搜索。
+  const token = button.dataset.token || '';
 
   // 歌名框同时也是搜索框，选中后就把完整歌名写回去 ——
   // 这样用户看到的"框里的字"始终等于"将要提交的歌"。
   document.getElementById('title').value = name;
   document.getElementById('artist').value = artist;
   document.getElementById('trackId').value = track;
+  document.getElementById('trackToken').value = token;
   document.getElementById('picked').textContent =
     track ? ('已选中：' + name + ' - ' + artist + '（提交后就锁定这一版音源）') : '';
 
@@ -564,7 +702,7 @@ function pickSong(button){
 function candidatePanelHtml(title, hint, list, boxId, withPick){
   const rows = list.map((s, index) => `
     <div data-track-row="${escapeHtml(s.id)}"
-         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);flex-wrap:wrap;">
       <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
       <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
         <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
@@ -572,7 +710,7 @@ function candidatePanelHtml(title, hint, list, boxId, withPick){
       </div>
       <span style="flex:0 0 auto;font-size:12px;color:#94a3b8;">${escapeHtml(formatDuration(s.duration))}</span>
       <div style="flex:0 0 auto;display:flex;gap:6px;">
-        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-clear="${boxId}" onclick="pickSong(this)"
+        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-token="${escapeHtml(s.track_token || s.token || '')}" data-clear="${boxId}" onclick="pickSong(this)"
           style="width:auto;padding:7px 12px;font-size:13px;margin:0;">选这首</button>` : ''}
         <button data-track="${escapeHtml(s.id)}" data-target="${boxId}" onclick="playFromButton(this)"
           style="width:auto;padding:7px 12px;font-size:13px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">播放</button>

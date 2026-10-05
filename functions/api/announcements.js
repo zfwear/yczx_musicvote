@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession, requireStaff } from '../../_lib/auth.js';
+import { requireSession, requireAdmin } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum, sanitizeText, sanitizeMultiline } from '../../_lib/validate.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -7,7 +7,8 @@ import { changedRows, isMissingTable } from '../../_lib/db.js';
  * 公告区。
  *
  * 读取：班级会话或管理员会话都可以（首页要给学生看）。
- *       管理员带 ?all=1 时可以拿到全部公告（含已下架的），用于后台管理。
+ *       管理员带 ?all=1 时可以拿到全部公告（含已下架的），用于后台管理；
+ *       这一条路径**明确要求管理员会话**，不参与"学生 / 管理员自动挑选"。
  * 写入：普通管理员及以上都能发公告（这是用户明确指定的权限）。
  */
 
@@ -57,28 +58,44 @@ async function handleGet(context) {
     return json({ announcements: results || [], scope: 'gate' });
   }
 
-  // subject 传 null：班级身份或管理员身份都放行。
-  const auth = await requireSession(env, request, null);
-  if (!auth.ok) return auth.response;
+  // all=1 是后台管理用的（要看到已下架的公告）。
+  //
+  // 审计报告 B3：原实现走的是 requireSession(env, request, null) ——
+  // 不限身份时会**优先挑学生会话**（见 _lib/auth.js 的 presentedTokens），
+  // 于是同时登录了学生和管理员的人打开后台，拿到的是"只含已上架"的列表，
+  // 下架的公告在管理界面里凭空消失。
+  //
+  // 所以 all=1 明确要求**管理员会话**：不看学生会话，也不需要靠自动挑选。
+  // 普通管理员即可（读公告是 staff 权限），用 requireAdmin 得到的
+  // session.role 也是数据库里的当前角色。
+  const wantsAll = url.searchParams.get('all') === '1';
 
-  const wantsAll = url.searchParams.get('all') === '1' && auth.session.subject === 'admin';
+  if (wantsAll) {
+    const admin = await requireAdmin(env, request, ['super', 'admin']);
+    if (!admin.ok) return admin.response;
 
-  const { results } = wantsAll
-    ? await env.DB.prepare(
+    const { results } = await env.DB.prepare(
       `SELECT id, title, content, created_by_name, COALESCE(scope, 'app') AS scope,
               CAST(is_active AS INTEGER) AS is_active, created_at, updated_at
          FROM announcements
         ORDER BY CAST(is_active AS INTEGER) DESC, id DESC
         LIMIT ${MAX_ADMIN_LIST}`
-    ).all()
-    : await env.DB.prepare(
-      `SELECT id, title, content, created_by_name, created_at
-         FROM announcements
-        WHERE CAST(is_active AS INTEGER) = 1
-          AND COALESCE(scope, 'app') = 'app'
-        ORDER BY id DESC
-        LIMIT ${MAX_ACTIVE_LIST}`
     ).all();
+    return json({ announcements: results || [] });
+  }
+
+  // 普通读取：班级身份或管理员身份都放行（首页要给学生看）。
+  const auth = await requireSession(env, request, null);
+  if (!auth.ok) return auth.response;
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, title, content, created_by_name, created_at
+       FROM announcements
+      WHERE CAST(is_active AS INTEGER) = 1
+        AND COALESCE(scope, 'app') = 'app'
+      ORDER BY id DESC
+      LIMIT ${MAX_ACTIVE_LIST}`
+  ).all();
 
   return json({ announcements: results || [] });
 }
@@ -86,7 +103,7 @@ async function handleGet(context) {
 async function handlePost(context) {
   const { request, env } = context;
 
-  const auth = await requireStaff(env, request);
+  const auth = await requireAdmin(env, request, ['super', 'admin']);
   if (!auth.ok) return auth.response;
 
   const parsed = await readJson(request);

@@ -5,7 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>管理员后台</title>
 <style>
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(58% 42% at 12% 6%,rgba(56,189,248,0.42) 0%,rgba(56,189,248,0) 62%),radial-gradient(52% 40% at 92% 14%,rgba(129,140,248,0.38) 0%,rgba(129,140,248,0) 64%),radial-gradient(60% 46% at 82% 92%,rgba(45,212,191,0.34) 0%,rgba(45,212,191,0) 66%),radial-gradient(48% 38% at 10% 88%,rgba(244,114,182,0.24) 0%,rgba(244,114,182,0) 68%),linear-gradient(135deg,#f0f4f8 0%,#e2e8f0 100%);background-attachment:fixed;}
+  /* ============================================================
+     设计令牌（四个页面各自内联一份完全相同的副本）
+     —— 不能引外部 CSS 文件（CSP default-src 'none'，且要能离线用），
+        所以这里把"同一个值"写四遍。改的时候四处一起改。
+     间距节奏 8 / 12 / 16 / 24 / 32；圆角常规一档、大容器大一档。
+     ============================================================ */
+  :root{
+    --brand:#0284c7;--brand-strong:#0369a1;--brand-soft:#e0f2fe;--brand-line:#bae6fd;
+    --ink:#0f172a;--ink-2:#334155;--ink-3:#64748b;--ink-4:#94a3b8;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --surface:#ffffff;--surface-2:#f8fafc;
+    --danger:#e11d48;--danger-soft:#fff1f2;--success:#059669;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+    --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
+  }
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
   input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
   button{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;cursor:pointer;font-weight:bold;box-shadow:0 4px 14px rgba(14,165,233,0.3);transition:transform 0.2s;}
   button:active{transform:scale(0.97);}
@@ -26,13 +41,108 @@
   .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
   .top-bar h2{color:#0f172a;margin:0;font-size:20px;}
   .top-bar button{width:auto;padding:8px 14px;background:#64748b;font-size:13px;box-shadow:none;}
+  /* ---- 窄屏适配（仅在手机宽度生效，桌面渲染完全不受影响）---- */
+  @media(max-width:560px){
+    /* 5 个页签在手机上会溢出（需约 364px，而 360px 手机只有约 328px 可用）：
+       允许换行，并让按钮按内容宽度收缩，而不是被全局的 width:100% 撑爆 */
+    .tabs{flex-wrap:wrap;gap:8px;}
+    .tabs button{width:auto;flex:1 1 auto;min-width:72px;padding:9px 10px;}
+    /* 卡片下方最多有 5~6 个操作按钮，同理允许换行 */
+    .card .actions{flex-wrap:wrap;}
+    .card .actions button{width:auto;flex:1 1 auto;min-width:72px;}
+    /* 顶部栏在窄屏上把标题和退出按钮排得更紧凑 */
+    .top-bar{gap:10px;}
+  }
+
+  /* ============================================================
+     视觉重构 · 第二档：统一「主要 / 次要 / 危险」三层按钮
+
+     原来后台每一个按钮都继承全局的"饱和蓝渐变 + 投影"，
+     再各自覆盖成红/绿/灰 —— 于是通过、拒绝、试听、复制、
+     往前/往后、全选/清空……**权重完全一样**，屏幕上一片彩色，
+     看不出哪一步才是当前该做的。
+
+     三层（与学生端同一套 token）：
+       主要 = 实心品牌蓝、无投影（登录、修改口令、保存）
+       次要 = 浅底或描边（试听、复制、往前/往后、编辑、取消）
+       危险 = 红色文字 + 轻量红描边（彻底删除、清空回收站）
+     ============================================================ */
+  .btn-primary,.btn-secondary,.btn-quiet,.btn-danger{
+    width:auto;box-sizing:border-box;font-family:inherit;font-weight:600;
+    border-radius:var(--r-md);cursor:pointer;transition:background-color .16s,color .16s,border-color .16s;
+  }
+  .btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);box-shadow:none;}
+  .btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
+  .btn-secondary{background:#fff;color:#0c4a6e;border:1px solid var(--brand-line);box-shadow:none;}
+  .btn-secondary:hover{background:var(--brand-soft);}
+  .btn-quiet{background:transparent;color:var(--ink-3);border:1px solid var(--line);box-shadow:none;}
+  .btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid #fecdd3;box-shadow:none;}
+  .btn-danger:hover{background:var(--danger-soft);}
+  .btn-sm{padding:9px 14px;font-size:13px;}
+  .btn-xs{padding:5px 10px;font-size:12px;}
+  /* 主要操作：比次要略大一点，看一眼就知道当前该点哪个 */
+  .btn-lg{padding:12px 18px;font-size:15px;font-weight:700;}
+  /* 审核动作是清单里唯一成对出现的"决策按钮"：保留语义色，但把投影去掉，
+     不让它比页面上的主要操作更抢眼。 */
+  .btn-pass{box-shadow:none;}
+  .btn-reject{box-shadow:none;}
+  .card .actions button{min-height:44px;box-shadow:none;}
+  /* 页签：选中态用实心品牌蓝，hover 有一档浅底反馈 */
+  .tabs button{border:1px solid transparent;}
+  .tabs button:hover:not(.active){background:#dbe4ee;color:var(--ink-2);}
+  .tabs button.active{background:var(--brand);box-shadow:none;}
+
+  /* ============================================================
+     视觉重构 · 第四 / 五档：间距节奏、字号层级、后台宽屏工作台
+
+     评审原话：「后台的问题不是丑，而是像一张越来越长的表单」。
+     窄列 520px 在电脑上两边很空、中间很挤。
+
+     做法：≥1080px 时后台变成**工作台布局** —— 左侧导航固定，
+     右侧内容区占满剩余宽度；课堂口令与管理员的密集数据用紧凑表格；
+     手机（<1080px）完全回到原来的单列卡片，不受影响。
+     学生端（index / vote / schedule）保持 520px 的"音乐列表"形态，
+     它们是消费内容的，不是干活的。
+     ============================================================ */
+  @media(min-width:1080px){
+    body{max-width:1180px;}
+    .workspace{display:grid;grid-template-columns:210px minmax(0,1fr);gap:var(--s5);align-items:start;}
+    .workspace-main{min-width:0;}
+    /* 左导航：竖排页签 */
+    .tabs{flex-direction:column;gap:var(--s1);margin-bottom:0;position:sticky;top:20px;
+      padding:var(--s3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);}
+    .tabs button{width:100%;text-align:left;padding:11px 14px;font-size:14px;min-height:44px;border-radius:var(--r-sm);}
+    .tabs button.active{background:var(--brand);color:#fff;}
+    /* 内容区更宽之后，卡片里的说明文字也跟着放宽一点，不再挤成窄条 */
+    .card{padding:var(--s4) var(--s5);}
+    /* 系统设置从"一张越来越长的表单"变成两列工作台：
+       display:contents 让分组卡片里的子卡片直接参与栅格，
+       否则"卡片里再套卡片"在宽屏上会又长又空。 */
+    .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4);align-items:start;}
+    .settings-grid>.card{margin-bottom:0;}
+  }
+
+  /* ---------- 第四档：字体 / 间距 / 圆角统一 + 无障碍 ---------- */
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{
+    outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
+  /* 辅助文字：12px 起步（原来 11px + 很浅的灰在手机上读不清） */
+  .sub{font-size:12px;color:var(--ink-3);}
+  .card p{font-size:13px;line-height:1.65;color:var(--ink-3);}
+  .tabs button{min-height:44px;}
+  .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
+  @media(prefers-reduced-motion:reduce){
+    *{transition:none !important;animation:none !important;}
+  }
 </style>
 </head>
 <body>
 <div id="loginBox" class="login-box">
   <h2 style="text-align:center;color:#0f172a;margin-top:0;">管理员登录</h2>
   <p class="sub">请输入管理员账号与密码</p>
+  <label class="field-label" for="username">管理员账号</label>
   <input id="username" placeholder="管理员账号" value="admin">
+  <label class="field-label" for="password">管理员密码</label>
   <input id="password" type="password" placeholder="管理员密码">
   <button onclick="adminLogin()">登录</button>
   <p id="loginMsg" class="msg"></p>
@@ -42,17 +152,79 @@
 <div id="adminBox" class="hidden">
   <div class="top-bar">
     <h2>管理员后台</h2>
-    <button onclick="logout()">退出</button>
+    <button onclick="logout()" class="btn-quiet">退出</button>
   </div>
-  <div class="tabs">
-  <button class="active" onclick="switchTab('pending', this)">待审核</button>
-  <button onclick="switchTab('approved', this)">已通过</button>
-  <button onclick="switchTab('rejected', this)">回收站</button>
-  <button onclick="switchTab('banned', this)">黑名单</button>
-  <button onclick="switchTab('settings', this)">系统设置</button>
+  <!-- 宽屏下这里是左侧导航栏，窄屏下就是一排可换行的页签（第五档）。
+       role=tablist/tab + aria-current 让键盘与读屏也能用。 -->
+  <div class="workspace">
+    <nav class="tabs" id="adminNav" role="tablist" aria-label="后台功能">
+      <button class="active" role="tab" aria-current="page" onclick="switchTab('pending', this)">待审核</button>
+      <button role="tab" onclick="switchTab('approved', this)">已通过</button>
+      <button role="tab" onclick="switchTab('rejected', this)">回收站</button>
+      <button role="tab" onclick="switchTab('schedule', this)">排期</button>
+      <button role="tab" onclick="switchTab('banned', this)">黑名单</button>
+      <button role="tab" onclick="switchTab('settings', this)">系统设置</button>
+    </nav>
+    <div class="workspace-main">
+      <div id="listBox" role="tabpanel"><p class="sub">加载中...</p></div>
+    </div>
+  </div>
 </div>
-  <div id="listBox"><p class="sub">加载中...</p></div>
+
+
+
+
+
+
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有</div>
+  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:#cbd5e1;">|</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
+       style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
+        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
+      </svg>
+      <span id="beianGonganText">苏公网安备32090302000745号</span>
+    </a>
+  </div>
+  <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
 </div>
+<script>
+/* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
+   就用它覆盖页面里写死的这组 —— 改内容不必改代码、也不用重新部署。 */
+(async function applyBeian(){
+  const year = document.getElementById('beianYear');
+  if(year) year.textContent = new Date().getFullYear();
+
+  try {
+    const r = await fetch('/api/config');
+    if(!r.ok) return;
+    const b = (await r.json()).beian;
+    if(!b) return;
+
+    const holder = document.getElementById('beianHolder');
+    if(holder && b.holder) holder.textContent = b.holder;
+
+    const icp = document.getElementById('beianIcp');
+    if(icp && b.icp){
+      icp.textContent = b.icp;
+      icp.href = 'https://beian.miit.gov.cn/';
+    }
+
+    const gongan = document.getElementById('beianGongan');
+    const gonganText = document.getElementById('beianGonganText');
+    if(gongan && b.gongan && gonganText){
+      gonganText.textContent = b.gongan;
+      // 公安备案查询页要求的 code 就是备案号里的数字部分
+      const code = String(b.gongan).replace(/[^0-9]/g, '');
+      gongan.href = 'https://beian.mps.gov.cn/#/query/webSearch?code=' + encodeURIComponent(code);
+    }
+  } catch(e) { /* 取不到就用页面里写死的值 */ }
+})();
+</script>
 <script>
 // 所有来自后端的数据必须经这里转义后才能拼进 innerHTML。
 function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
@@ -298,8 +470,16 @@ function showLogin(){
 
 function switchTab(status, btn){
   currentStatus = status;
-  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
+  // 页签从"一排按钮"变成"左侧导航"之后，选中态除了 .active 还要维护
+  // aria-current（读屏与键盘用户靠它知道自己在哪一页）。
+  document.querySelectorAll('.tabs button').forEach(b => {
+    b.classList.remove('active');
+    b.removeAttribute('aria-current');
+  });
+  if(btn){
+    btn.classList.add('active');
+    btn.setAttribute('aria-current', 'page');
+  }
   loadList();
 }
 
@@ -336,18 +516,40 @@ async function adminLogin(){
  * quiet=true 时不显示"加载中..."、也不清空现有内容，
  * 等新数据到了直接替换 —— 观感上不会"整页刷一下"。
  */
+/**
+ * 页签切换的"代"计数 —— 用来丢弃过期响应。
+ *
+ * loadList / loadSettings / loadBanned 都是异步的：如果前一个请求还没回来
+ * 用户就点了另一个页签，**先发的请求可能后到**，于是它的内容把后点的页签
+ * 覆盖掉 —— 表现就是"高亮的是黑名单，显示的却是系统设置"。
+ *
+ * 做法：每次开始加载就自增序号，渲染前检查自己还是不是最新一代，
+ * 不是就直接丢弃。
+ */
+let loadSeq = 0;
+const beginLoad = () => ++loadSeq;
+const isCurrentLoad = (seq) => seq === loadSeq;
+
 async function loadList(quiet){
+  const seq = beginLoad();
   const box = document.getElementById('listBox');
 
   // 黑名单与系统设置各有自己的渲染函数，不再走歌曲列表
-  if(currentStatus === 'settings') { loadSettings(); return; }
-  if(currentStatus === 'banned') { loadBanned(); return; }
+  if(currentStatus === 'settings') { loadSettings(seq); return; }
+  if(currentStatus === 'banned') { loadBanned(seq); return; }
+  if(currentStatus === 'schedule') { loadScheduleAdmin(seq); return; }
 
   if(!quiet) box.innerHTML = '<p class="sub">加载中...</p>';
   try {
+    // 待审核页签顶部还有一本举报收件箱：和歌曲列表**并发**取，
+    // 省掉一个来回（在小屏/弱网下能明显感觉出来）。
+    const inboxPromise = currentStatus === 'pending' ? loadReportInbox() : Promise.resolve('');
+
     const r = await fetch('/api/admin-list?status=' + encodeURIComponent(currentStatus));
+    if(!isCurrentLoad(seq)) return;              // 已经切到别的页签了，丢弃
     if(r.status === 401 || r.status === 403){ showLogin(); return; }
     const list = await r.json();
+    if(!isCurrentLoad(seq)) return;
 
     // 回收站顶部单独放一个"清空"入口。也顺便把回收站与黑名单的区别写清楚 ——
     // 它们是完全独立的两套数据，经常被混为一谈。
@@ -361,15 +563,17 @@ async function loadList(quiet){
            <button class="btn-reject" onclick="emptyRecycle()">清空回收站</button>
          </div>`;
     } else if (currentStatus === 'pending') {
-      // 待审核页签顶部放举报收件箱 —— 只有被多次举报的才会进来
-      header = await loadReportInbox();
+      header = await inboxPromise;
+      if(!isCurrentLoad(seq)) return;
     }
 
     if(!Array.isArray(list) || !list.length){
+      if(!isCurrentLoad(seq)) return;
       box.innerHTML = header + '<p class="sub">' + (currentStatus === 'rejected' ? '回收站是空的' : '这里空空如也') + '</p>';
       return;
     }
 
+    if(!isCurrentLoad(seq)) return;              // 渲染前最后一道守卫
     box.innerHTML = header + list.map(s => {
       const id = safeInt(s.id);
       const catId = safeInt(s.category_id);
@@ -390,19 +594,22 @@ async function loadList(quiet){
           </select>
         </div>
         <div class="actions">
-          <button data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="adminAuditionFromButton(this)" style="background:#0891b2;">试听</button>
-          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button onclick="action(${id}, 'clear_report')" style="background:#64748b;">清除举报</button>` : ''}` : ''}
+          <button data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="adminAuditionFromButton(this)" class="btn-secondary">试听</button>
+          ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button class="btn-quiet" onclick="action(${id}, 'clear_report')">清除举报</button>` : ''}` : ''}
           ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${id}, 'reject')">移入回收站</button>` : ''}
-          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button><button class="btn-reject" onclick="action(${id}, 'delete')">彻底删除</button>` : ''}
-          ${currentStatus === 'rejected' ? '' : `<button data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="banFromButton(this)" style="background:#7c3aed;">加入黑名单</button>`}
-          ${currentStatus === 'rejected' ? '' : `<button data-song="${id}" data-title="${escapeHtml(s.title)}" onclick="showSuggestions(this)" style="background:#0891b2;">建议</button>`}
+          ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button><button class="btn-danger" onclick="action(${id}, 'delete')">彻底删除</button>` : ''}
+          ${currentStatus === 'rejected' ? '' : `<button data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="banFromButton(this)" class="btn-quiet">加入黑名单</button>`}
+          ${currentStatus === 'rejected' ? '' : `<button data-song="${id}" data-title="${escapeHtml(s.title)}" onclick="showSuggestions(this)" class="btn-secondary">建议</button>`}
         </div>
         <div id="suggest-box-${id}"></div>
       </div>
       <div id="admin-audition-${id}"></div>
       </div>
     `}).join('');
-  } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
+  } catch(e) {
+    if(!isCurrentLoad(seq)) return;
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>';
+  }
 }
 
 /**
@@ -491,11 +698,11 @@ async function loadReportInbox(){
           <div id="report-detail-${songId}" style="display:none;margin:0 0 8px;">${details}</div>
 
           <div class="actions">
-            <button onclick="toggleReportDetail(${songId})" style="background:#64748b;"
+            <button onclick="toggleReportDetail(${songId})" class="btn-quiet"
               id="report-detail-btn-${songId}" data-count="${all.length} 条">查看举报详情（${all.length} 条）</button>
             <button class="btn-pass" onclick="action(${songId}, 'approve')">通过</button>
             <button class="btn-reject" onclick="action(${songId}, 'reject')">拒绝</button>
-            <button onclick="handleReport(${songId})" style="background:#64748b;">标记已处理</button>
+            <button onclick="handleReport(${songId})" class="btn-secondary">标记已处理</button>
           </div>
         </div>
       `;
@@ -542,21 +749,20 @@ async function handleReport(songId){
 }
 
 /**
- * 投稿与投票规定 —— 与首页 index.html 里的 RULES 必须**逐条一致**。
+ * 投稿须知 —— 与首页 index.html 里的 RULES 必须**逐条一致**。
  * 两处是各自内联脚本，没法共享变量，所以用测试守着不让它们走样。
  */
 function getRules(){
   return [
-    '投稿必须从搜索结果里选歌，锁定准确的歌名、歌手与音源；信息不符的将被退回。',
-    '每人每周限投稿一首（按设备去重），提交前请确认无误。',
-    '已在待审核队列或已入库的歌曲不可重复投稿。',
-    '禁止投稿含违规内容的歌曲，包括但不限于：脏话辱骂、人身攻击、政治敏感、色情低俗、暴力恐怖。',
-    '违禁词机制：歌名或歌手命中黑名单违禁词会被直接拦下，且不能靠更换写法绕过。',
-    '每首歌的票数上限为全校总人数，超出部分不计入票数。',
-    '审核综合票数、分类权重与播出适宜性，广播站保留最终取舍权。',
-    '被多个班级举报并经核实的歌曲会被移出，情节严重的封禁对应投稿口令。',
-    '投稿一经采用，广播站可在校园广播中播放；请勿投稿不适合校园环境的内容。',
-    '本规定为审核依据，最终解释权归盐中之声广播站所有。',
+    '中午放学播放 3 首含歌词的音乐，下午上学播放 3 首纯音乐。',
+    '不出现含有日语或韩语的歌曲，尽量避免小语种歌曲；英语歌曲可以投稿，但播放比例较小。',
+    '歌词积极向上，减少情爱类型；不出现政治敏感、脏话等违规内容；不出现有特殊含义的歌曲（如校歌、国歌）。',
+    '歌手无违法犯罪行为。',
+    '不出现 rap，以及底噪、低音、高音过大的歌曲；音游、二次元相关歌曲请尽量少投稿。',
+    '投稿的歌曲将交由广播站老师和分管校长审核，审核通过后会安排在相应时间播放。学校审核较严格，如未通过请谅解。',
+    '参与投稿即表明“我已阅读投稿须知并知晓该歌曲可能无法播出”，审核不通过的歌曲将被驳回。',
+    '本系统仅提供音乐搜索与播放管理功能，不存储任何音乐文件。所有音乐内容均来自第三方音乐平台，版权归原平台及版权方所有。投稿时请遵守相关音乐平台的服务条款、尊重音乐作品版权；我们鼓励支持正版音乐，在官方平台购买和收听喜爱的作品。',
+    '最终解释权归盐中之声广播站所有。',
   ];
 }
 
@@ -566,7 +772,10 @@ function getRules(){
 function switchTabByName(name){
   currentStatus = name;
   document.querySelectorAll('.tabs button').forEach((b) => {
-    b.classList.toggle('active', (b.getAttribute('onclick') || '').includes("'" + name + "'"));
+    const on = (b.getAttribute('onclick') || '').includes("'" + name + "'");
+    b.classList.toggle('active', on);
+    if(on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
   });
   loadList();
 }
@@ -575,14 +784,17 @@ function switchTabByName(name){
  * 黑名单页签。
  * 只收违禁词，不含任何歌曲记录 —— 与「回收站」是两套完全独立的数据。
  */
-async function loadBanned(){
+async function loadBanned(seq){
+  const mySeq = seq === undefined ? beginLoad() : seq;
   const box = document.getElementById('listBox');
   box.innerHTML = '<p class="sub">加载中...</p>';
 
   try {
     const r = await fetch('/api/admin-settings');
+    if(!isCurrentLoad(mySeq)) return;
     if(r.status === 401 || r.status === 403){ showLogin(); return; }
     const data = await r.json();
+    if(!isCurrentLoad(mySeq)) return;
 
     const banned = Array.isArray(data.banned) ? data.banned : [];
 
@@ -619,7 +831,7 @@ async function loadBanned(){
           <option value="90">90 天后自动解禁</option>
           <option value="365">一年后自动解禁</option>
         </select>
-        <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
+        <button onclick="addBanned()" class="btn-primary btn-sm">加入黑名单</button>
       </div>
 
       <div class="card">
@@ -628,6 +840,7 @@ async function loadBanned(){
       </div>
     `;
   } catch(e) {
+    if(!isCurrentLoad(mySeq)) return;
     box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败：' + escapeHtml(String(e && e.message || e)) + '</p>';
   }
 }
@@ -738,7 +951,7 @@ async function showSuggestions(button){
           </div>
         `).join('')}
         <div style="margin-top:8px;">
-          <button onclick="handleSuggestions(${songId})" style="width:auto;padding:7px 12px;font-size:12px;margin:0;background:#64748b;">全部标记已处理</button>
+          <button onclick="handleSuggestions(${songId})" class="btn-quiet btn-xs">全部标记已处理</button>
         </div>
       </div>
     `;
@@ -766,15 +979,156 @@ async function handleSuggestions(songId){
   }
 }
 
+/* ---------------- 每周歌单 ---------------- */
+
+const SCHEDULE_PERIODS = [['noon', '中午放学（含歌词）'], ['afternoon', '下午上学（纯音乐）']];
+const SCHEDULE_WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+let schedWeek = null;
+let schedWeeks = 4;      // 当前查看/排期的周数
+
+function schedToday(){
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function schedMonday(dateStr){
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const dow = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+  return d.toISOString().slice(0, 10);
+}
+
+function schedAddWeeks(monday, n){
+  const d = new Date(monday + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function schedShift(delta){
+  const base = schedWeek || schedMonday(schedToday());
+  if(delta === 0){ schedWeek = schedMonday(schedToday()); loadScheduleAdmin(); return; }
+  schedWeek = schedAddWeeks(base, delta * schedWeeks);
+  loadScheduleAdmin();
+}
+
+/** 排期页签：往后连着看好几周（本周、下周、后面继续）。 */
+async function loadScheduleAdmin(seq){
+  const mySeq = seq === undefined ? beginLoad() : seq;
+  const box = document.getElementById('listBox');
+  if(!schedWeek) schedWeek = schedMonday(schedToday());
+  box.innerHTML = '<p class="sub">加载中...</p>';
+
+  try {
+    const r = await fetch('/api/schedule?week_start=' + encodeURIComponent(schedWeek)
+      + '&weeks=' + schedWeeks);
+    if(!isCurrentLoad(mySeq)) return;
+    if(r.status === 401 || r.status === 403){ showLogin(); return; }
+    const d = await r.json();
+    if(!isCurrentLoad(mySeq)) return;
+
+    schedWeek = d.weekStart;
+    const thisMonday = schedMonday(schedToday());
+
+    const cards = (d.weeklies || []).map(w => {
+      const isThis = w.weekStart === thisMonday;
+      const grouped = new Map();
+      for(const s of (w.slots || [])){
+        if(!grouped.has(s.period)) grouped.set(s.period, []);
+        grouped.get(s.period).push(s);
+      }
+      const periods = SCHEDULE_PERIODS.map(([period, label]) => {
+        const list = (grouped.get(period) || []).sort((a, b) => safeInt(a.position) - safeInt(b.position));
+        const rows = [];
+        for(let pos = 1; pos <= 3; pos++){
+          const hit = list.find(x => safeInt(x.position) === pos);
+          rows.push(`<div style="font-size:13px;padding:2px 0;color:#334155;">
+            <span style="color:#94a3b8;">${pos}.</span>
+            ${hit && hit.title
+              ? escapeHtml(hit.title) + ' <span style="color:#94a3b8;font-size:12px;">'
+                + escapeHtml(hit.artist || '') + ' · ' + escapeHtml(hit.category_name || '') + '</span>'
+              : '<span style="color:#cbd5e1;">（待排）</span>'}
+          </div>`);
+        }
+        return `<div style="font-size:12px;font-weight:700;color:#075985;margin:8px 0 2px;padding-left:8px;border-left:3px solid #0ea5e9;">${label}</div>${rows.join('')}`;
+      }).join('');
+      return `<div class="card"><h3 style="margin-bottom:6px;">${escapeHtml(w.weekStart)} ~ ${escapeHtml(w.weekEnd)}${isThis ? '　<span style="font-size:12px;color:#0284c7;">本周</span>' : ''}</h3>${periods}</div>`;
+    }).join('');
+
+    box.innerHTML = `
+      <div class="card">
+        <h3>每周歌单</h3>
+        <p><b>一周 6 首，整周每天都播这 6 首</b>（不是每天换 6 首）：中午放学 3 首含歌词的音乐，下午上学 3 首纯音乐。<br>
+           一键排期按正式榜顺序（分类权重降序、票数降序）从<b>已通过</b>的歌里挑，中午优先含歌词、下午优先纯音乐，
+           <b>已经排过的歌不会再排</b>，所以连着排好几周也不会重复 —— 但也因此歌消耗得快。</p>
+        <p class="sub" style="text-align:left;">从 ${escapeHtml(d.weekStart)} 起，共 ${escapeHtml(String(d.weeks))} 周</p>
+        <div class="actions">
+          <button onclick="schedShift(-1)" class="btn-quiet">往前</button>
+          <button onclick="schedShift(0)" class="btn-quiet">回本周</button>
+          <button onclick="schedShift(1)" class="btn-quiet">往后</button>
+        </div>
+        <div class="actions">
+          <button onclick="schedAutofill(2)" class="btn-pass">排接下来 2 周</button>
+          <button onclick="schedAutofill(4)" class="btn-pass">排接下来 4 周</button>
+          <button onclick="schedClearWeek()" class="btn-reject">清空这 ${escapeHtml(String(d.weeks))} 周</button>
+        </div>
+      </div>
+      ${cards}
+    `;
+  } catch(e) {
+    if(!isCurrentLoad(mySeq)) return;
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败：' + escapeHtml(String(e && e.message || e)) + '</p>';
+  }
+}
+
+async function schedAutofill(weeks){
+  if(!await uiConfirm('确认一次排好接下来 ' + weeks + ' 周吗？\n\n每周 6 首（中午 3 + 下午 3），已排过的歌不会重复使用。'
+    + '\n会覆盖这几周已有的排期内容。')) return;
+
+  const r = await fetch('/api/schedule', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ action:'autofill', week_start: schedWeek, weeks })
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ uiAlert(d.message || '已排期'); loadScheduleAdmin(); }
+  else uiAlert(d.error || '排期失败');
+}
+
+async function schedClearWeek(){
+  if(!await uiConfirm('确认清空从 ' + schedWeek + ' 起的 ' + schedWeeks + ' 周排期吗？')) return;
+
+  const r = await fetch('/api/schedule', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ action:'clear_week', week_start: schedWeek })
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){ uiToast(d.message || '已清空', 'ok'); loadScheduleAdmin(); }
+  else uiAlert(d.error || '清空失败');
+}
+
 /* ---------------- 系统设置 ---------------- */
 
-async function loadSettings(){
+async function loadSettings(seq){
+  const mySeq = seq === undefined ? beginLoad() : seq;
   const box = document.getElementById('listBox');
   box.innerHTML = '<p class="sub">加载中...</p>';
+
   try {
-    const r = await fetch('/api/admin-settings');
-    if(r.status === 401 || r.status === 403){ showLogin(); return; }
-    const data = await r.json();
+    // 四个接口**并发**发出去，而不是一个等一个。
+    // 串行的话要来回四趟（settings → 公告 → 动态口令 → 管理员），
+    // 在手机上体感就是"点了半天才出来"。
+    const [setRes, annRes, invRes, accRes] = await Promise.all([
+      fetch('/api/admin-settings'),
+      fetch('/api/announcements?all=1').catch(() => null),
+      fetch('/api/admin-invites').catch(() => null),
+      fetch('/api/admin-accounts').catch(() => null),
+    ]);
+
+    if(!isCurrentLoad(mySeq)) return;            // 已经切到别的页签了，丢弃
+    if(setRes.status === 401 || setRes.status === 403){ showLogin(); return; }
+
+    const data = await setRes.json();
+    if(!isCurrentLoad(mySeq)) return;
+
     settingsCache.classes = Array.isArray(data.classes) ? data.classes : [];
     settingsCache.banned = Array.isArray(data.banned) ? data.banned : [];
     settingsCache.categories = Array.isArray(data.categories) ? data.categories : [];
@@ -784,31 +1138,37 @@ async function loadSettings(){
     if(data.security && data.security.role){ currentRole = data.security.role; }
 
     // 公告：所有管理员都能看和发
-    try {
-      const annRes = await fetch('/api/announcements?all=1');
-      const annData = annRes.ok ? await annRes.json() : { announcements: [] };
-      settingsCache.announcements = Array.isArray(annData.announcements) ? annData.announcements : [];
-    } catch(e) { settingsCache.announcements = []; }
-
-    // 动态口令与管理员列表：只有高级管理员能看，普通管理员请求会拿到 403，忽略即可
-    settingsCache.invites = [];
-    settingsCache.admins = [];
-    if(currentRole === 'super'){
+    settingsCache.announcements = [];
+    if(annRes && annRes.ok){
       try {
-        const invRes = await fetch('/api/admin-invites');
-        const invData = invRes.ok ? await invRes.json() : { invites: [] };
-        settingsCache.invites = Array.isArray(invData.invites) ? invData.invites : [];
-      } catch(e) { /* 忽略 */ }
-      try {
-        const accRes = await fetch('/api/admin-accounts');
-        const accData = accRes.ok ? await accRes.json() : { admins: [] };
-        settingsCache.admins = Array.isArray(accData.admins) ? accData.admins : [];
-        settingsCache.currentAdminId = safeInt(accData.currentId);
+        const annData = await annRes.json();
+        settingsCache.announcements = Array.isArray(annData.announcements) ? annData.announcements : [];
       } catch(e) { /* 忽略 */ }
     }
 
+    // 动态口令与管理员列表：只有高级管理员能看，普通管理员会拿到 403，忽略即可
+    settingsCache.invites = [];
+    settingsCache.admins = [];
+    if(currentRole === 'super'){
+      if(invRes && invRes.ok){
+        try {
+          const invData = await invRes.json();
+          settingsCache.invites = Array.isArray(invData.invites) ? invData.invites : [];
+        } catch(e) { /* 忽略 */ }
+      }
+      if(accRes && accRes.ok){
+        try {
+          const accData = await accRes.json();
+          settingsCache.admins = Array.isArray(accData.admins) ? accData.admins : [];
+          settingsCache.currentAdminId = safeInt(accData.currentId);
+        } catch(e) { /* 忽略 */ }
+      }
+    }
+
+    if(!isCurrentLoad(mySeq)) return;            // 渲染前最后一道守卫
     renderSettings();
   } catch(e) {
+    if(!isCurrentLoad(mySeq)) return;
     // 不要把错误吞掉：曾经因为 renderSettings 里的暂时性死区（TDZ）
     // 只显示一句"加载失败"，排查了很久。这里把原因一起显示出来。
     console.error('loadSettings 失败', e);
@@ -858,7 +1218,7 @@ function renderSettings(){
       pwHtml = '<span style="color:#b45309;">（尚未执行 005 迁移，暂时看不到；请先在 D1 执行 sql/005_viewable_class_passwords.sql）</span>';
     } else if(pw){
       pwHtml = `<b style="font-family:monospace;color:#065f46;letter-spacing:1px;">${escapeHtml(pw)}</b>
-                <button data-copy="${escapeHtml(pw)}" onclick="copyFromButton(this)" style="font-size:12px;padding:4px 10px;width:auto;background:#64748b;box-shadow:none;">复制</button>`;
+                <button data-copy="${escapeHtml(pw)}" onclick="copyFromButton(this)" class="btn-quiet btn-xs">复制</button>`;
     } else {
       pwHtml = '<span style="color:#b45309;">（执行 005 之前设置的旧口令，无法查看；点「修改口令」重设一次就能看到）</span>';
     }
@@ -875,9 +1235,9 @@ function renderSettings(){
           <span style="color:#94a3b8;">编号 ${id}${metaText}</span>
         </p>
         <p style="margin:0 0 8px 0;font-size:13px;">口令：${pwHtml}</p>
-        <button onclick="changeClassPassword(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:bold;">修改口令</button>
-        <button onclick="editClassInfo(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:#64748b;box-shadow:none;">改年级/人数</button>
-        <button class="btn-reject" onclick="deleteClass(${id})">删除</button>
+        <button onclick="changeClassPassword(${id})" class="btn-primary btn-sm">修改口令</button>
+        <button onclick="editClassInfo(${id})" class="btn-quiet btn-sm">改年级/人数</button>
+        <button class="btn-danger" onclick="deleteClass(${id})">删除</button>
       </div>
     `;
   };
@@ -912,7 +1272,7 @@ function renderSettings(){
       <div class="card">
         <p style="margin:0 0 6px 0;font-size:13px;">${escapeHtml(c.name)}</p>
         <input id="weight_${id}" type="number" min="0" max="1000" step="1" value="${safeInt(c.weight)}" style="font-size:14px;padding:10px;margin:8px 0;width:120px;">
-        <button onclick="saveWeight(${id})" style="font-size:14px;padding:10px;">保存权重</button>
+        <button onclick="saveWeight(${id})" class="btn-primary btn-sm">保存权重</button>
       </div>
     `;
   }).join('');
@@ -950,7 +1310,7 @@ function renderSettings(){
            ${isSuperAccount ? '<span style="color:#0284c7;">（高级管理员）</span>' : '（普通管理员）'}
            ${isSelf ? ' ← 你自己' : ''}</p>
         ${(isSuperAccount || isSelf) ? '' : `
-          <button onclick="resetAdminPassword(${id})" style="font-size:13px;padding:8px 10px;width:auto;background:#64748b;">重置密码</button>
+          <button onclick="resetAdminPassword(${id})" class="btn-secondary btn-sm">重置密码</button>
           <button class="btn-reject" onclick="deleteAdmin(${id})">删除</button>`}
       </div>
     `;
@@ -970,7 +1330,7 @@ function renderSettings(){
         <p style="white-space:pre-wrap;">${escapeHtml(a.content)}</p>
         <p>${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
         <div class="actions">
-          <button onclick="editAnnouncement(${id})" style="background:#64748b;">编辑</button>
+          <button onclick="editAnnouncement(${id})" class="btn-quiet">编辑</button>
           <button class="${active ? 'btn-reject' : 'btn-pass'}" onclick="toggleAnnouncement(${id}, ${active ? 0 : 1})">${active ? '下架' : '上架'}</button>
           <button class="btn-reject" onclick="deleteAnnouncement(${id})">删除</button>
         </div>
@@ -987,7 +1347,7 @@ function renderSettings(){
       <input id="inviteNote" placeholder="备注（选填，例如：给高二年级组）" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="inviteUses" type="number" min="1" max="50" value="1" placeholder="可用次数" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="inviteDays" type="number" min="1" max="90" value="7" placeholder="有效天数" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="createInvite()" style="font-size:14px;padding:10px;">生成动态口令</button>
+      <button onclick="createInvite()" class="btn-primary btn-sm">生成动态口令</button>
       <div id="inviteResult"></div>
       <div style="height:12px;"></div>
       ${inviteRows}
@@ -1004,7 +1364,7 @@ function renderSettings(){
       <h3>添加班级口令</h3>
       <input id="newClassName" placeholder="班级名称（如：高一(3)班）" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="newClassPw" placeholder="该班级口令（至少 6 位）" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="addClass()" style="font-size:14px;padding:10px;">添加</button>
+      <button onclick="addClass()" class="btn-primary btn-sm">添加</button>
     </div>
 
     <div class="card">
@@ -1031,7 +1391,7 @@ function renderSettings(){
           <br>优点是好记好念，缺点是别人猜到规律就能推出别班口令 —— 校园内部用一般够。
         </p>
       </div>
-      <button onclick="bulkGenerate()" style="font-size:14px;padding:10px;">开始生成</button>
+      <button onclick="bulkGenerate()" class="btn-primary btn-sm">开始生成</button>
       <div id="bulkResult"></div>
     </div>
 
@@ -1039,8 +1399,8 @@ function renderSettings(){
       <h3>班级口令列表</h3>
       <p>每个班的口令都能直接看到，点「复制」发到班级群就行。<br>
          勾选多个可以一次性删除（随机生成的那一批尤其好用）。</p>
-      <button onclick="toggleAllClassChecks(true)" style="font-size:14px;padding:10px;background:#64748b;">全选</button>
-      <button onclick="toggleAllClassChecks(false)" style="font-size:14px;padding:10px;background:#64748b;">取消全选</button>
+      <button onclick="toggleAllClassChecks(true)" class="btn-quiet btn-sm">全选</button>
+      <button onclick="toggleAllClassChecks(false)" class="btn-quiet btn-sm">取消全选</button>
       <button class="btn-reject" onclick="deleteSelectedClasses()" style="font-size:14px;padding:10px;">删除选中</button>
       <div style="height:12px;"></div>
       ${classRows}
@@ -1079,8 +1439,8 @@ function renderSettings(){
       <p class="sub" style="text-align:left;">按班级人数自动汇总：<b>${totalMembers}</b> 人
          （共 ${settingsCache.classes.length} 个班${someMissingCount ? '，其中有班级还没填人数' : ''}）</p>
       <input id="voteCapInput" type="number" min="0" max="1000000" value="${voteCap}" placeholder="0 表示不限制" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="saveVoteCap()" style="font-size:14px;padding:10px;">保存上限</button>
-      <button onclick="fillTotalMembers()" style="font-size:14px;padding:10px;background:#64748b;">填入汇总人数</button>
+      <button onclick="saveVoteCap()" class="btn-primary btn-sm">保存上限</button>
+      <button onclick="fillTotalMembers()" class="btn-secondary btn-sm">填入汇总人数</button>
       ${voteCap > 0
         ? `<p class="sub" style="color:#059669;">当前上限：${voteCap} 票</p>`
         : '<p class="sub" style="color:#b45309;">当前未设上限，票数不会被封顶</p>'}
@@ -1091,12 +1451,13 @@ function renderSettings(){
       <p>同一首歌被<b>几个不同班级</b>举报之后，才进入「待审核」页签顶部的举报收件箱。
          一个人随手举报一次不会打扰你。默认 ${reportDefault}。</p>
       <input id="reportThresholdInput" type="number" min="2" max="20" value="${reportThreshold}" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="saveReportThreshold()" style="font-size:14px;padding:10px;">保存阈值</button>
+      <button onclick="saveReportThreshold()" class="btn-primary btn-sm">保存阈值</button>
       <p class="sub">当前：被 ${reportThreshold} 个以上班级举报才进收件箱</p>
     </div>
   ` : '';
 
   box.innerHTML = `
+    <div class="settings-grid">
     <div class="card">
       <h3>安全状态</h3>
       ${pepperNote}
@@ -1107,7 +1468,7 @@ function renderSettings(){
       <h3>修改管理员密码</h3>
       <input id="curAdminPw" type="password" placeholder="当前密码" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="newAdminPw" type="password" placeholder="新密码（至少 8 位）" style="font-size:14px;padding:10px;margin:8px 0;">
-      <button onclick="changeAdminPassword()" style="font-size:14px;padding:10px;">保存新密码</button>
+      <button onclick="changeAdminPassword()" class="btn-primary btn-sm">保存新密码</button>
     </div>
 
     ${superSections}
@@ -1126,7 +1487,7 @@ function renderSettings(){
       <input id="annTitle" placeholder="公告标题" maxlength="40" style="font-size:14px;padding:10px;margin:8px 0;">
       <textarea id="annContent" rows="4" maxlength="500" placeholder="公告内容（可以换行）"
         style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);font-family:inherit;"></textarea>
-      <button onclick="createAnnouncement()" style="font-size:14px;padding:10px;">发布公告</button>
+      <button onclick="createAnnouncement()" class="btn-primary btn-sm">发布公告</button>
       <div style="height:12px;"></div>
       ${annRows}
     </div>
@@ -1134,14 +1495,15 @@ function renderSettings(){
     <div class="card">
       <h3>违禁词</h3>
       <p>违禁词的增删已移到顶部「黑名单」页签，那里有独立的表单与列表。</p>
-      <button onclick="switchTabByName('banned')" style="font-size:14px;padding:10px;background:#64748b;">去黑名单页签</button>
+      <button onclick="switchTabByName('banned')" class="btn-secondary btn-sm">去黑名单页签</button>
     </div>
 
     <div class="card">
       <h3>投稿规定</h3>
       <p>审核按这份规定执行，学生端首页也能展开查看同一份内容。</p>
-      <button onclick="toggleAdminRules()" style="font-size:14px;padding:10px;background:#64748b;">展开查看规定</button>
+      <button onclick="toggleAdminRules()" class="btn-quiet btn-sm">展开查看规定</button>
       <div id="adminRulesBox" style="display:none;margin-top:10px;border-top:1px dashed rgba(2,132,199,0.3);padding-top:8px;"></div>
+    </div>
     </div>
   `;
 
@@ -1320,10 +1682,21 @@ async function saveReportThreshold(){
 /* ---------------- 审核时试听 ---------------- */
 
 function adminAuditionFromButton(button){
-  adminAudition(button.dataset.audition, button.dataset.title, button.dataset.artist);
+  adminAudition(button.dataset.audition, button.dataset.title, button.dataset.artist, button.dataset.track);
 }
 
-async function adminAudition(songId, title, artist){
+/**
+ * 审核时试听（A7：必须听学生锁定的那一版）。
+ *
+ * 旧实现只拿"歌名 + 歌手"重新搜索，然后让管理员从候选里挑一个听 ——
+ * 于是"审核时听到的版本"和"学生提交后库里锁定的版本"可能不是同一个：
+ * 审核通过了 A，榜上点开播出来的却是 B。
+ *
+ * 现在只要这首歌带 track_id，就直接播它，一次搜索都不发。
+ * 历史数据（009 迁移之前提交的歌）没有 track_id，才退回搜索，
+ * 并且把"我在按歌名搜"这句话明确显示出来 —— 不能让人以为听到的就是锁定版。
+ */
+async function adminAudition(songId, title, artist, trackId){
   const host = document.getElementById('admin-audition-' + safeInt(songId));
   if(!host) return;
 
@@ -1335,7 +1708,15 @@ async function adminAudition(songId, title, artist){
   }
 
   host.dataset.open = '1';
-  host.innerHTML = '<p class="sub">正在搜索音源…</p>';
+
+  if(trackId){
+    host.innerHTML = adminDirectTrackPanelHtml(songId, title, artist, trackId);
+    // 复用固定的播放器容器：与候选面板同一套"播放器在面板顶部"的结构
+    adminPlayTrack(trackId, songId);
+    return;
+  }
+
+  host.innerHTML = '<p class="sub">这首歌没有锁定音源，正在按歌名搜索…</p>';
 
   try {
     let url = '/api/music?q=' + encodeURIComponent(title || '');
@@ -1356,6 +1737,48 @@ async function adminAudition(songId, title, artist){
   } catch(e) {
     host.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
   }
+}
+
+/**
+ * 「学生锁定的那一版」播放面板。
+ *
+ * 与候选面板的区别：这里没有候选列表，只有一个播放器 + 一句说明。
+ * 但仍然保留同样的视觉语言（左侧品牌色竖条 + 淡蓝底 + 收起按钮），
+ * 免得管理员分不清"这是锁定的版本"还是"这是搜出来的一堆候选"。
+ */
+function adminDirectTrackPanelHtml(songId, title, artist, trackId){
+  const id = safeInt(songId);
+
+  return `
+    <div style="margin:8px 0 14px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
+        <div style="font-size:13px;font-weight:700;color:#075985;">审核试听 · 学生锁定版</div>
+        <button onclick="closeAdminAudition(${id})"
+          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">
+        ${escapeHtml(title)}　·　${escapeHtml(artist)}　·　这是学生提交时锁定的音源，不是重新搜索的结果
+      </div>
+
+      <div id="admin-audition-player-${id}"
+           style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
+        <div class="sub">正在准备播放…</div>
+      </div>
+
+      <div style="padding:0 12px 10px;">
+        <button data-title="${escapeHtml(title)}" data-artist="${escapeHtml(artist)}" data-song="${id}" onclick="adminSearchAlternatives(this)"
+          style="width:auto;padding:7px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">这首不对？换个版本</button>
+      </div>
+    </div>
+  `;
+}
+
+/** 从"直接播放锁定版"切回"搜索候选列表"。 */
+function adminSearchAlternatives(button){
+  const songId = safeInt(button.dataset.song);
+  const host = document.getElementById('admin-audition-' + songId);
+  if(host) host.dataset.open = '0';
+  adminAudition(songId, button.dataset.title, button.dataset.artist, '');
 }
 
 /** 秒 -> m:ss */
@@ -1383,7 +1806,7 @@ function adminAuditionPanelHtml(songId, list){
 
   const rows = list.map((s, index) => `
     <div data-track-row="${escapeHtml(s.id)}"
-         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);">
+         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);flex-wrap:wrap;">
       <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
       <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
         <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
@@ -1581,8 +2004,8 @@ async function createInvite(){
       <p>可用次数：${safeInt(d.max_uses)} 次　有效期至：${escapeHtml(d.expires_at)}（UTC）</p>
       <p>把下面这条链接发给对方，他打开就自动带好口令：</p>
       <p style="word-break:break-all;color:#0284c7;">${escapeHtml(link)}</p>
-      <button onclick="copyText('${escapeHtml(d.formatted)}')" style="font-size:14px;padding:10px;background:#64748b;">复制口令</button>
-      <button onclick="copyText('${escapeHtml(link)}')" style="font-size:14px;padding:10px;background:#64748b;">复制注册链接</button>
+      <button onclick="copyText('${escapeHtml(d.formatted)}')" class="btn-secondary btn-sm">复制口令</button>
+      <button onclick="copyText('${escapeHtml(link)}')" class="btn-secondary btn-sm">复制注册链接</button>
     </div>
   `;
 }
@@ -1785,7 +2208,7 @@ async function bulkGenerate(){
         <p>${mode === 'random' ? '这些口令之后随时可以在下方「班级口令列表」里查看和复制。' : '所有班级共用同一个口令。'}</p>
         <textarea id="bulkOutput" readonly rows="${Math.min(20, created.length + 2)}"
           style="font-size:13px;padding:10px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.95);font-family:monospace;">${escapeHtml(lines)}</textarea>
-        <button onclick="copyBulk()" style="font-size:14px;padding:10px;background:#64748b;">复制全部口令</button>
+        <button onclick="copyBulk()" class="btn-secondary btn-sm">复制全部口令</button>
         <p class="sub">班级列表会在下次进入「系统设置」时刷新。</p>
       ` : ''}
       ${failed.length ? '<p style="color:#e11d48;font-size:13px;">失败明细：<br>' + failed.map(escapeHtml).join('<br>') + '</p>' : ''}

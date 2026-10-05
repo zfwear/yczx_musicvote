@@ -17,5 +17,14 @@ export async function onRequestGet(context) {
       // 前端按这个域名加载 api.js（默认 recaptcha.net，google.com 在大陆不可达）
       base: recaptchaBase(env),
     },
+
+    // 备案号与版权主体：由环境变量下发，页面上先放写死的值，取到就替换 ——
+    // 改这些不用改代码、也不用重新部署。
+    // 江苏管局要求"版权所有"的单位名称必须与备案主体一致，所以单独留了一个变量。
+    beian: {
+      icp: String((env && env.ICP_BEIAN) || '').trim(),
+      gongan: String((env && env.GONGAN_BEIAN) || '').trim(),
+      holder: String((env && env.COPYRIGHT_HOLDER) || '').trim(),
+    },
   });
 }

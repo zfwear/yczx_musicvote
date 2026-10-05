@@ -2,6 +2,7 @@ import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import {
   requireDb, createSession, rateLimit, clearRateLimit,
   classPasswordLookup, authPepper, CLASS_TTL_SECONDS,
+  debugLoginEnabled, normalizeRole,
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
@@ -72,6 +73,10 @@ export async function onRequestPost(context) {
   //    例如 admin:admin888。通过后拿到一个调试用的学生会话：
   //    点歌不限次数、不查重，提交的歌在后台标注「调试模式」。
   //    注意顺序：正常班级口令优先，口令真不对时才走这条路。
+  //
+  //    审计报告 A5：这条路必须有生产开关（DEBUG_LOGIN=1，默认关），
+  //    而且只给高级管理员用 —— 它等价于"拿管理员密码在学生端开无限点歌"，
+  //    写进真实歌曲表的东西是不能当作只读调试看的。
   if (!matched) {
     const debugResponse = await tryDebugLogin(env, request, secret.value);
     if (debugResponse) return debugResponse;
@@ -125,8 +130,22 @@ const DEBUG_TTL_SECONDS = 2 * 60 * 60;
  * 尝试按调试模式登录。
  * 解析 "账号:密码" 或 "账号 密码"，拿管理员表校验。
  * 失败返回 null（调用方统一回"口令错误"，不暴露账号是否存在）。
+ *
+ * 审计报告 A5，三道收紧：
+ *   1. **生产默认关闭**：只有 DEBUG_LOGIN=1（或 true/yes/on）才启用。
+ *      没配就是关的，"忘记配环境变量"落在安全的那一侧。
+ *   2. **只允许高级管理员（role='super'）**：普通管理员没有这个能力。
+ *   3. **会话记录归属管理员 ID**（sessions.debug_admin_id，见 sql/013），
+ *      这样改密 / 删号 / 登出时才能按管理员把调试会话一起撤销 ——
+ *      原来 subject_id 恒为 0，撤都撤不掉。
+ *
+ * 注意：本函数不返回"调试模式已关闭"这类信息，关闭时与口令错误
+ * 完全同形（都是 null → 401），避免对外暴露部署配置。
  */
 async function tryDebugLogin(env, request, raw) {
+  // 没有开关就整条路都不存在，连正则都不跑。
+  if (!debugLoginEnabled(env)) return null;
+
   // 账号里不允许出现分隔符，密码取剩余全部内容（密码里可以有冒号/空格）
   const match = String(raw).match(/^([^\s:：]{1,32})\s*[\s:：]\s*(.+)$/);
   if (!match) return null;
@@ -135,18 +154,27 @@ async function tryDebugLogin(env, request, raw) {
   const password = match[2].trim();
   if (!password) return null;
 
+  // role 一起取出来：调试身份比普通学生权限高（不限次、不查重），
+  // 只能由高级管理员换取，普通管理员即使密码正确也不放行。
   const admin = await env.DB.prepare(
-    'SELECT id, username, password FROM admins WHERE username = ?'
+    'SELECT id, username, password, role FROM admins WHERE username = ?'
   ).bind(username).first();
   if (!admin) return null;
+
+  // 角色按数据库当前值判断；空值 / 无法识别的值按最低权限处理（normalizeRole）。
+  if (normalizeRole(admin.role) !== 'super') return null;
 
   const verdict = await verifyPassword(admin.password, password);
   if (!verdict.ok) return null;
 
+  // 调试会话仍然走"班级"这一侧（学生会话 Cookie），role='debug' 是
+  // vote.js / rank.js 判断调试身份的唯一依据，不能改；
+  // 归属管理员记在独立列里，不污染 role。
   const session = await createSession(env, request, {
     subject: 'class',
     subjectId: 0,             // 0 表示"不属于任何班级"，即调试身份
     role: 'debug',
+    debugAdminId: admin.id,
     ttlSeconds: DEBUG_TTL_SECONDS,
   });
 

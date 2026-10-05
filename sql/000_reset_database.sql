@@ -91,6 +91,8 @@ INSERT INTO categories (id, name, weight) VALUES
   (3, '英文歌', 50),
   (4, '小语种', 30);
 
-INSERT INTO classes (id, name, password) VALUES (1, '默认班级', 'yczx2026');
+-- 直接种**哈希**而不是明文：这样全新库里也不会出现明文口令。
+-- 明文只在 README 里说明（部署后请立刻改掉）。
+INSERT INTO classes (id, name, password) VALUES (1, '默认班级', 'pbkdf2$sha256$10000$Ak16rPAHsG-XYirVxG0rPw$mADM-DGetFOtyRzgToJFTZh6SQ8BvZycRAegJmWKYZs');
 
-INSERT INTO admins (id, username, password, role) VALUES (1, 'admin', 'admin888', 'super');
+INSERT INTO admins (id, username, password, role) VALUES (1, 'admin', 'pbkdf2$sha256$10000$3R6Dqa5y-ybLtISqx2KExQ$3TIhWDXvQaQF1v9xFCnExFWdzwBZjW2wwEsvAIodgjQ', 'super');
