@@ -13,6 +13,8 @@ import { changedRows, isMissingTable } from '../../_lib/db.js';
 
 const MAX_ACTIVE_LIST = 20;
 const MAX_ADMIN_LIST = 100;
+// 登录页公告是给还没进来的人看的，条数不宜多，否则把口令框挤下去
+const MAX_GATE_LIST = 5;
 
 const MIGRATION_HINT =
   '数据库尚未执行 003 迁移（缺少公告表），'
@@ -38,17 +40,32 @@ export async function onRequestPost(context) {
 
 async function handleGet(context) {
   const { request, env } = context;
+  const url = new URL(request.url);
+
+  // 登录页公告（scope='gate'）必须**未登录也能读** —— 它就是给
+  // 还没进系统的人看的。所以这条路径不要求会话，但只返回 gate 那一类，
+  // 且只返回已上架的，不会泄露主页公告。
+  const wantsGate = url.searchParams.get('scope') === 'gate';
+  if (wantsGate) {
+    const { results } = await env.DB.prepare(
+      `SELECT id, title, content, created_at
+         FROM announcements
+        WHERE CAST(is_active AS INTEGER) = 1 AND scope = 'gate'
+        ORDER BY id DESC
+        LIMIT ${MAX_GATE_LIST}`
+    ).all();
+    return json({ announcements: results || [], scope: 'gate' });
+  }
 
   // subject 传 null：班级身份或管理员身份都放行。
   const auth = await requireSession(env, request, null);
   if (!auth.ok) return auth.response;
 
-  const url = new URL(request.url);
   const wantsAll = url.searchParams.get('all') === '1' && auth.session.subject === 'admin';
 
   const { results } = wantsAll
     ? await env.DB.prepare(
-      `SELECT id, title, content, created_by_name,
+      `SELECT id, title, content, created_by_name, COALESCE(scope, 'app') AS scope,
               CAST(is_active AS INTEGER) AS is_active, created_at, updated_at
          FROM announcements
         ORDER BY CAST(is_active AS INTEGER) DESC, id DESC
@@ -58,6 +75,7 @@ async function handleGet(context) {
       `SELECT id, title, content, created_by_name, created_at
          FROM announcements
         WHERE CAST(is_active AS INTEGER) = 1
+          AND COALESCE(scope, 'app') = 'app'
         ORDER BY id DESC
         LIMIT ${MAX_ACTIVE_LIST}`
     ).all();
@@ -99,15 +117,31 @@ async function createAnnouncement(env, session, data) {
   const fields = parseFields(data);
   if (fields.error) return error(fields.error, 400);
 
+  // scope：gate = 登录页（未登录可见），app = 主页（登录后可见）
+  const scope = parseEnum(data.scope, ['gate', 'app'], { field: '公告类型', fallback: 'app' });
+  if (!scope.ok) return error(scope.error, 400);
+
   const admin = await env.DB.prepare('SELECT username FROM admins WHERE id = ?')
     .bind(session.subject_id).first();
 
-  await env.DB.prepare(
-    `INSERT INTO announcements (title, content, created_by, created_by_name, is_active)
-     VALUES (?, ?, ?, ?, 1)`
-  ).bind(fields.title, fields.content, session.subject_id, (admin && admin.username) || '').run();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO announcements (title, content, created_by, created_by_name, is_active, scope)
+       VALUES (?, ?, ?, ?, 1, ?)`
+    ).bind(fields.title, fields.content, session.subject_id, (admin && admin.username) || '', scope.value).run();
+  } catch (err) {
+    // 010 未执行时没有 scope 列：退回只写主页公告
+    if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+    await env.DB.prepare(
+      `INSERT INTO announcements (title, content, created_by, created_by_name, is_active)
+       VALUES (?, ?, ?, ?, 1)`
+    ).bind(fields.title, fields.content, session.subject_id, (admin && admin.username) || '').run();
+  }
 
-  return json({ ok: true, message: '公告已发布' });
+  return json({
+    ok: true,
+    message: scope.value === 'gate' ? '登录页公告已发布（未登录也能看到）' : '公告已发布',
+  });
 }
 
 async function updateAnnouncement(env, data) {

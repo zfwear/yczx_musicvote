@@ -37,6 +37,17 @@ export async function onRequestGet(context) {
   if (!status.ok) return error(status.error, 400);
 
   if (status.value === 'pending') {
+    // 待审核榜排序：**票数为主，分类权重为辅**。
+    //
+    // 综合分 = 票数 × (100 + 分类权重)
+    //   （整数乘法，避免浮点误差；等价于「票数 × (1 + 权重/100)」）
+    //
+    // 效果：
+    //   · 同权重之间比票数，票多的一定在前 —— 票数仍是主要因素；
+    //   · 权重相当于给票数加一个放大系数：权重 100 ≈ 票数翻倍，
+    //     权重 30 ≈ 票数 ×1.3；
+    //   · 所以「票数特别多但权重很低」的歌会排得靠前，但压不过
+    //     「票数略少、权重拉满」的歌 —— 不会直接霸占第一位。
     const { results } = await env.DB.prepare(
       `SELECT s.id,
               s.title,
@@ -45,11 +56,14 @@ export async function onRequestGet(context) {
               s.track_id,
               CAST(s.votes AS INTEGER)       AS votes,
               CAST(s.is_reported AS INTEGER) AS is_reported,
+              CAST(c.weight AS INTEGER)      AS category_weight,
               c.name AS category_name
          FROM songs s
          JOIN categories c ON s.category_id = c.id
         WHERE s.status = 'pending'
-        ORDER BY CAST(s.votes AS INTEGER) DESC, s.id DESC
+        ORDER BY (CAST(s.votes AS INTEGER) * (100 + CAST(c.weight AS INTEGER))) DESC,
+                 CAST(s.votes AS INTEGER) DESC,
+                 s.id DESC
         LIMIT 50`
     ).all();
 

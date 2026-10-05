@@ -18,7 +18,13 @@
   #
   # 若将来愿意把脚本移到 /assets/*.js 外链文件、并去掉 onclick 属性，
   # 就可以把 script-src 收紧为 'self'，那时 CSP 才会成为真正的硬防线。
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+  #
+  # 关于 recaptcha.net：
+  #   人机校验要用 Google reCAPTCHA，必须放行它的脚本域名、它注入的徽标 iframe
+  #   以及后续的校验请求。这里放行的是 **www.recaptcha.net**（Google 官方为
+  #   大陆等地区提供的备用域名）；www.google.com 在大陆不可达，放行它没有意义。
+  #   若改用自建/其它域名，记得同步改这里与 RECAPTCHA_BASE。
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline' https://www.recaptcha.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.recaptcha.net; media-src 'self' blob:; connect-src 'self' https://www.recaptcha.net; font-src 'self'; frame-src https://www.recaptcha.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY

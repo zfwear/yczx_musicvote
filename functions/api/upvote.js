@@ -2,6 +2,7 @@ import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import { requireSession, rateLimit } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
+import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 
 /**
  * 给"待审核"的歌曲投票。
@@ -26,6 +27,10 @@ export async function onRequestPost(context) {
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
+
+  // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
+  const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip });
+  if (!human.ok) return error(human.error, 403);
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

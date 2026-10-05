@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS report_logs;
 DROP TABLE IF EXISTS admin_invites;
 DROP TABLE IF EXISTS announcements;
 DROP TABLE IF EXISTS system_settings;
+DROP TABLE IF EXISTS song_suggestions;
 DROP TABLE IF EXISTS songs;
 DROP TABLE IF EXISTS classes;
 DROP TABLE IF EXISTS admins;

@@ -48,6 +48,7 @@
   <button class="active" onclick="switchTab('pending', this)">待审核</button>
   <button onclick="switchTab('approved', this)">已通过</button>
   <button onclick="switchTab('rejected', this)">回收站</button>
+  <button onclick="switchTab('banned', this)">黑名单</button>
   <button onclick="switchTab('settings', this)">系统设置</button>
 </div>
   <div id="listBox"><p class="sub">加载中...</p></div>
@@ -55,6 +56,234 @@
 <script>
 // 所有来自后端的数据必须经这里转义后才能拼进 innerHTML。
 function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag)); }
+
+/* ============================================================
+   页面内弹窗 / 轻提示
+   —— 替代浏览器原生 alert / confirm / prompt。
+   原生弹窗样式无法控制、在手机上尤其难看，这里统一自绘。
+   样式由 JS 注入 <style>，不改动页面自身的样式块。
+   ============================================================ */
+
+function uiStyles(){
+  if(document.getElementById('uiKitStyle')) return;
+  const s = document.createElement('style');
+  s.id = 'uiKitStyle';
+  s.textContent = [
+    '@keyframes uiFadeIn{from{opacity:0}to{opacity:1}}',
+    '@keyframes uiFadeOut{from{opacity:1}to{opacity:0}}',
+    '@keyframes uiPopIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}',
+    '@keyframes uiToastIn{from{opacity:0;transform:translate(-50%,14px)}to{opacity:1;transform:translate(-50%,0)}}',
+    '@keyframes uiSheen{from{background-position:-140% 0}to{background-position:240% 0}}',
+
+    '.ui-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;',
+    '  background:rgba(15,23,42,.42);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:uiFadeIn .2s ease}',
+    '.ui-overlay.ui-closing{animation:uiFadeOut .16s ease forwards}',
+
+    '.ui-box{width:100%;max-width:380px;padding:22px;border-radius:20px;',
+    '  background:rgba(255,255,255,.97);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);',
+    '  border:1px solid rgba(255,255,255,.92);',
+    '  box-shadow:0 24px 60px -14px rgba(15,23,42,.42),inset 0 1px 0 rgba(255,255,255,.9);',
+    '  animation:uiPopIn .26s cubic-bezier(.2,.9,.3,1.15)}',
+
+    '.ui-title{margin:0 0 8px;font-size:17px;font-weight:700;color:#0f172a;letter-spacing:.3px}',
+    '.ui-msg{margin:0 0 16px;font-size:14px;line-height:1.65;color:#475569;white-space:pre-wrap;word-break:break-word}',
+    '.ui-input{width:100%;box-sizing:border-box;padding:12px;margin:0 0 16px;font-size:15px;border-radius:12px;',
+    '  border:1px solid #dbe3ec;background:rgba(248,250,252,.95);color:#1e293b;transition:border-color .18s,box-shadow .18s}',
+    '.ui-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.22)}',
+
+    '.ui-actions{display:flex;gap:10px;justify-content:flex-end}',
+
+    /* 按钮统一带一点立体感：内高光 + 投影，按下时下沉 */
+    '.ui-btn{width:auto;flex:0 0 auto;margin:0;padding:11px 20px;font-size:14px;font-weight:600;border:0;border-radius:12px;',
+    '  cursor:pointer;transition:transform .14s cubic-bezier(.2,.9,.3,1.2),box-shadow .18s,filter .18s}',
+    '.ui-btn:active{transform:translateY(1px) scale(.985)}',
+    '.ui-btn-primary{color:#fff;background:linear-gradient(180deg,#38bdf8,#0284c7);',
+    '  box-shadow:0 6px 16px -4px rgba(2,132,199,.55),inset 0 1px 0 rgba(255,255,255,.45)}',
+    '.ui-btn-primary:hover{filter:brightness(1.06);box-shadow:0 8px 20px -4px rgba(2,132,199,.6),inset 0 1px 0 rgba(255,255,255,.5)}',
+    '.ui-btn-danger{color:#fff;background:linear-gradient(180deg,#fb7185,#e11d48);',
+    '  box-shadow:0 6px 16px -4px rgba(225,29,72,.5),inset 0 1px 0 rgba(255,255,255,.4)}',
+    '.ui-btn-danger:hover{filter:brightness(1.06)}',
+    '.ui-btn-ghost{color:#475569;background:linear-gradient(180deg,#fff,#eef2f7);border:1px solid #dbe3ec;',
+    '  box-shadow:0 4px 12px -4px rgba(15,23,42,.16),inset 0 1px 0 rgba(255,255,255,.9)}',
+    '.ui-btn-ghost:hover{color:#0f172a}',
+
+    '.ui-toast{position:fixed;left:50%;bottom:34px;z-index:10000;transform:translateX(-50%);',
+    '  max-width:min(88vw,420px);padding:13px 20px;border-radius:999px;font-size:14px;font-weight:600;color:#fff;',
+    '  background:rgba(15,23,42,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);',
+    '  box-shadow:0 12px 30px -8px rgba(15,23,42,.5);animation:uiToastIn .28s cubic-bezier(.2,.9,.3,1.15);',
+    '  transition:opacity .3s ease,transform .3s ease;word-break:break-word;text-align:center}',
+    '.ui-toast-ok{background:linear-gradient(180deg,#34d399,#059669);box-shadow:0 12px 30px -8px rgba(5,150,105,.55)}',
+    '.ui-toast-err{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 12px 30px -8px rgba(225,29,72,.55)}',
+    '.ui-toast.ui-hide{opacity:0;transform:translate(-50%,12px)}',
+  ].join('\n');
+  document.head.appendChild(s);
+}
+
+/** 对话框：resolve(true/false)；带输入框时 resolve(字符串/null)。 */
+function uiDialog(opt){
+  uiStyles();
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'ui-overlay';
+
+    const box = document.createElement('div');
+    box.className = 'ui-box';
+
+    const title = document.createElement('h3');
+    title.className = 'ui-title';
+    title.textContent = opt.title || '提示';
+    box.appendChild(title);
+
+    if(opt.message){
+      const p = document.createElement('p');
+      p.className = 'ui-msg';
+      p.textContent = opt.message;
+      box.appendChild(p);
+    }
+
+    let input = null;
+    if(opt.input){
+      input = document.createElement('input');
+      input.className = 'ui-input';
+      input.type = opt.inputType || 'text';
+      input.value = opt.inputValue || '';
+      input.placeholder = opt.inputPlaceholder || '';
+      box.appendChild(input);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'ui-actions';
+
+    let settled = false;
+    const close = (result) => {
+      if(settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey);
+      overlay.classList.add('ui-closing');
+      setTimeout(() => overlay.remove(), 150);
+      resolve(result);
+    };
+    const cancelResult = () => (opt.input ? null : false);
+
+    if(opt.cancelText !== ''){
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'ui-btn ui-btn-ghost';
+      cancel.textContent = opt.cancelText || '取消';
+      cancel.onclick = () => close(cancelResult());
+      actions.appendChild(cancel);
+    }
+
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'ui-btn ' + (opt.danger ? 'ui-btn-danger' : 'ui-btn-primary');
+    ok.textContent = opt.okText || '确定';
+    ok.onclick = () => close(opt.input ? input.value : true);
+    actions.appendChild(ok);
+
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function onKey(e){
+      if(e.key === 'Escape'){ e.preventDefault(); close(cancelResult()); }
+      else if(e.key === 'Enter'){
+        // 有输入框时只在输入框里回车才提交，避免误触
+        if(opt.input && document.activeElement !== input) return;
+        e.preventDefault();
+        close(opt.input ? input.value : true);
+      }
+    }
+    document.addEventListener('keydown', onKey);
+
+    overlay.addEventListener('mousedown', (e) => {
+      if(e.target === overlay) close(cancelResult());
+    });
+
+    setTimeout(() => { (input || ok).focus(); }, 40);
+  });
+}
+
+function uiAlert(message, title){
+  return uiDialog({ title: title || '提示', message: message, okText: '知道了', cancelText: '' });
+}
+function uiConfirm(message, title, opts){
+  return uiDialog(Object.assign(
+    { title: title || '请确认', message: message, okText: '确定', cancelText: '取消' },
+    opts || {}
+  ));
+}
+function uiPrompt(message, value, title, placeholder){
+  return uiDialog({
+    title: title || '请输入', message: message, input: true,
+    inputValue: value || '', inputPlaceholder: placeholder || '',
+    okText: '确定', cancelText: '取消',
+  });
+}
+
+/** 右下角轻提示，不打断操作。 */
+function uiToast(message, kind){
+  uiStyles();
+  const t = document.createElement('div');
+  t.className = 'ui-toast' + (kind === 'ok' ? ' ui-toast-ok' : kind === 'err' ? ' ui-toast-err' : '');
+  t.textContent = message;
+  document.body.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('ui-hide');
+    setTimeout(() => t.remove(), 320);
+  }, 2400);
+}
+
+/* ============================================================
+   人机校验（Google reCAPTCHA v3）
+   —— 站点密钥与域名都由后端 /api/config 下发，前端不写死任何密钥。
+   —— 脚本加载失败（例如网络到不了 Google）时返回空串，
+      由后端按策略处理，避免"校验挂了全校都投不了稿"。
+   ============================================================ */
+
+let recaptchaConfig = null;
+
+async function getRecaptchaConfig(){
+  if(recaptchaConfig) return recaptchaConfig;
+  try {
+    const r = await fetch('/api/config');
+    const d = r.ok ? await r.json() : {};
+    recaptchaConfig = (d && d.recaptcha) || { enabled: false };
+  } catch(e) {
+    recaptchaConfig = { enabled: false };
+  }
+  return recaptchaConfig;
+}
+
+/** 取一个 reCAPTCHA v3 token；拿不到就返回空串。 */
+async function recaptchaToken(action){
+  const cfg = await getRecaptchaConfig();
+  if(!cfg.enabled || !cfg.siteKey) return '';
+
+  const base = (cfg.base || 'https://www.recaptcha.net').replace(/\/+$/, '');
+
+  try {
+    if(!window.grecaptcha){
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = base + '/recaptcha/api.js?render=' + encodeURIComponent(cfg.siteKey);
+        s.async = true;
+        s.defer = true;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('recaptcha script blocked'));
+        document.head.appendChild(s);
+        // 被墙时 onerror 可能不触发，兜一个超时
+        setTimeout(() => reject(new Error('recaptcha timeout')), 6000);
+      });
+    }
+    await new Promise((resolve) => window.grecaptcha.ready(resolve));
+    return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+  } catch(e) {
+    // 拿不到 token：交给后端决定放行还是拒绝
+    return '';
+  }
+}
+
 // 数字字段一律强制转整数，避免从 id / 票数这类字段打进来的注入。
 function safeInt(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
 
@@ -101,10 +330,20 @@ async function adminLogin(){
   } catch(e) { msg.textContent = '网络错误'; }
 }
 
-async function loadList(){
+/**
+ * 加载歌曲列表。
+ *
+ * quiet=true 时不显示"加载中..."、也不清空现有内容，
+ * 等新数据到了直接替换 —— 观感上不会"整页刷一下"。
+ */
+async function loadList(quiet){
   const box = document.getElementById('listBox');
+
+  // 黑名单与系统设置各有自己的渲染函数，不再走歌曲列表
   if(currentStatus === 'settings') { loadSettings(); return; }
-  box.innerHTML = '<p class="sub">加载中...</p>';
+  if(currentStatus === 'banned') { loadBanned(); return; }
+
+  if(!quiet) box.innerHTML = '<p class="sub">加载中...</p>';
   try {
     const r = await fetch('/api/admin-list?status=' + encodeURIComponent(currentStatus));
     if(r.status === 401 || r.status === 403){ showLogin(); return; }
@@ -117,8 +356,8 @@ async function loadList(){
       header = `<div class="card">
            <h3>回收站</h3>
            <p>这里是被拒绝 / 移入回收站的歌曲，可以逐首恢复或彻底删除。<br>
-              <b>回收站和黑名单不是一回事</b>：黑名单是"禁止再提交某个歌手 / 某个歌名"的规则，
-              在「系统设置」里维护，跟这里的歌曲记录没有关系。</p>
+              <b>回收站和黑名单不是一回事</b>：黑名单只收违禁词、不含任何歌曲记录，
+              在「黑名单」页签里维护，跟这里的歌曲记录没有关系。</p>
            <button class="btn-reject" onclick="emptyRecycle()">清空回收站</button>
          </div>`;
     } else if (currentStatus === 'pending') {
@@ -138,6 +377,7 @@ async function loadList(){
       const isDebugSong = safeInt(s.is_debug) === 1;
       const classText = safeInt(s.class_id) === 0 ? '调试' : ('#' + safeInt(s.class_id));
       return `
+      <div id="song-card-${id}">
       <div class="card">
         <h3>${escapeHtml(s.title)} - ${escapeHtml(s.artist)}</h3>
         <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${classText}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}${isDebugSong ? ' | <span style="color:#7c3aed;font-weight:bold;">调试模式</span>' : ''}</p>
@@ -154,11 +394,41 @@ async function loadList(){
           ${currentStatus === 'pending' ? `<button class="btn-pass" onclick="action(${id}, 'approve')">通过</button><button class="btn-reject" onclick="action(${id}, 'reject')">拒绝</button>${reported ? `<button onclick="action(${id}, 'clear_report')" style="background:#64748b;">清除举报</button>` : ''}` : ''}
           ${currentStatus === 'approved' ? `<button class="btn-reject" onclick="action(${id}, 'reject')">移入回收站</button>` : ''}
           ${currentStatus === 'rejected' ? `<button class="btn-pass" onclick="action(${id}, 'restore')">恢复</button><button class="btn-reject" onclick="action(${id}, 'delete')">彻底删除</button>` : ''}
+          ${currentStatus === 'rejected' ? '' : `<button data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" onclick="banFromButton(this)" style="background:#7c3aed;">加入黑名单</button>`}
+          ${currentStatus === 'rejected' ? '' : `<button data-song="${id}" data-title="${escapeHtml(s.title)}" onclick="showSuggestions(this)" style="background:#0891b2;">建议</button>`}
         </div>
+        <div id="suggest-box-${id}"></div>
       </div>
       <div id="admin-audition-${id}"></div>
+      </div>
     `}).join('');
   } catch(e) { box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败</p>'; }
+}
+
+/**
+ * 局部移除一张歌曲卡片（淡出后删除）。
+ *
+ * 单首歌的审核动作只影响它自己，没必要把整个列表重新拉一遍 ——
+ * 那样会闪一下"加载中..."，观感上就像整页刷新了。
+ */
+function fadeRemoveCard(songId){
+  const el = document.getElementById('song-card-' + safeInt(songId));
+  if(!el) return;
+
+  el.style.transition = 'opacity .22s ease, transform .22s ease';
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(-6px)';
+  setTimeout(() => {
+    el.remove();
+    // 全删空之后给个占位提示，免得留下一片空白
+    const box = document.getElementById('listBox');
+    if(box && !box.querySelector('.card')){
+      const p = document.createElement('p');
+      p.className = 'sub';
+      p.textContent = '这里已经空了';
+      box.appendChild(p);
+    }
+  }, 240);
 }
 
 /* ---------------- 举报收件箱 ---------------- */
@@ -176,7 +446,7 @@ async function loadReportInbox(){
 
     if(d.available === false){
       return `<div class="card">
-        <h3>📬 举报收件箱</h3>
+        <h3>举报收件箱</h3>
         <p class="sub" style="color:#b45309;">数据库尚未执行 008 迁移，收件箱暂不可用。<br>请先在 D1 执行 sql/008_report_inbox.sql</p>
       </div>`;
     }
@@ -186,28 +456,43 @@ async function loadReportInbox(){
 
     if(!list.length){
       return `<div class="card">
-        <h3>📬 举报收件箱</h3>
+        <h3>举报收件箱</h3>
         <p class="sub">暂无需要处理的举报。<br>同一首歌被 <b>${threshold}</b> 个以上班级举报、且仍在待审核池里，才会出现在这里。</p>
       </div>`;
     }
 
     const items = list.map(item => {
       const songId = safeInt(item.song_id);
-      const details = (item.details || []).map(x => `
-        <div style="font-size:12px;color:#64748b;padding:3px 0;border-top:1px dashed rgba(225,29,72,0.2);">
-          · <b style="color:#334155;">${escapeHtml(x.class_name || '未知班级')}</b>：
+      const all = item.details || [];
+
+      const details = all.map(x => `
+        <div style="font-size:12px;color:#64748b;padding:4px 0;border-top:1px dashed rgba(225,29,72,0.2);">
+          <b style="color:#334155;">${escapeHtml(x.class_name || '未知班级')}</b>
+          <span style="color:#94a3b8;">${escapeHtml(x.created_at)}</span><br>
+          <span style="color:#475569;">举报原因：</span>
           ${x.reason ? escapeHtml(x.reason) : '<span style="color:#94a3b8;">（未填原因）</span>'}
-          <span style="color:#94a3b8;">${escapeHtml(x.created_at)}</span>
         </div>
       `).join('');
+
+      // 原因先给一行摘要，完整名单与原因收到「查看举报详情」里 ——
+      // 收件箱一屏能看到更多歌，点开才展开细节。
+      const reasons = all.map((x) => (x.reason || '').trim()).filter(Boolean);
+      const summary = reasons.length
+        ? escapeHtml(reasons.slice(0, 3).join('、')) + (reasons.length > 3 ? ' 等' : '')
+        : '<span style="color:#94a3b8;">（都没有填原因）</span>';
 
       return `
         <div class="card" style="background:rgba(255,255,255,0.95);">
           <h3>${escapeHtml(item.title)} - ${escapeHtml(item.artist)}</h3>
           <p><b style="color:#e11d48;">${safeInt(item.report_count)} 个班级举报</b>
              | 分类：${escapeHtml(item.category_name)} | 当前 ${safeInt(item.votes)} 票</p>
-          ${details}
+          <p style="font-size:12px;color:#475569;margin:0 0 8px;">举报原因：${summary}</p>
+
+          <div id="report-detail-${songId}" style="display:none;margin:0 0 8px;">${details}</div>
+
           <div class="actions">
+            <button onclick="toggleReportDetail(${songId})" style="background:#64748b;"
+              id="report-detail-btn-${songId}" data-count="${all.length} 条">查看举报详情（${all.length} 条）</button>
             <button class="btn-pass" onclick="action(${songId}, 'approve')">通过</button>
             <button class="btn-reject" onclick="action(${songId}, 'reject')">拒绝</button>
             <button onclick="handleReport(${songId})" style="background:#64748b;">标记已处理</button>
@@ -218,7 +503,7 @@ async function loadReportInbox(){
 
     return `
       <div class="card" style="background:rgba(225,29,72,0.07);border-color:rgba(225,29,72,0.35);">
-        <h3>📬 举报收件箱（${list.length} 首待处理）</h3>
+        <h3>举报收件箱（${list.length} 首待处理）</h3>
         <p>只有被 <b>${threshold}</b> 个以上班级举报、且仍在待审核池里的歌才会出现在这里。
            点「标记已处理」后这批举报就不再显示。</p>
         ${items}
@@ -229,8 +514,22 @@ async function loadReportInbox(){
   }
 }
 
+/** 展开/收起某首歌的举报明细（哪些班级、什么原因）。 */
+function toggleReportDetail(songId){
+  const box = document.getElementById('report-detail-' + safeInt(songId));
+  const btn = document.getElementById('report-detail-btn-' + safeInt(songId));
+  if(!box) return;
+
+  const open = box.style.display === 'none';
+  box.style.display = open ? 'block' : 'none';
+  if(btn){
+    const n = btn.dataset.count || '';
+    btn.textContent = open ? '收起举报详情' : ('查看举报详情（' + (n || '') + '）');
+  }
+}
+
 async function handleReport(songId){
-  if(!confirm('确认把这首歌的举报标记为已处理吗？\n\n已处理的举报不再出现在收件箱，同时清除这首歌的「已被举报」标记。\n（歌本身不会被删除，仍在待审核列表里）')) return;
+  if(!await uiConfirm('确认把这首歌的举报标记为已处理吗？\n\n已处理的举报不再出现在收件箱，同时清除这首歌的「已被举报」标记。\n（歌本身不会被删除，仍在待审核列表里）')) return;
 
   const r = await fetch('/api/admin-reports', {
     method:'POST',
@@ -238,8 +537,233 @@ async function handleReport(songId){
     body: JSON.stringify({action:'handle', song_id: safeInt(songId)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已处理'); loadList(); }
-  else alert(d.error || '操作失败');
+  if(r.ok){ uiAlert(d.message || '已处理'); loadList(); }
+  else uiAlert(d.error || '操作失败');
+}
+
+/**
+ * 投稿与投票规定 —— 与首页 index.html 里的 RULES 必须**逐条一致**。
+ * 两处是各自内联脚本，没法共享变量，所以用测试守着不让它们走样。
+ */
+function getRules(){
+  return [
+    '投稿必须从搜索结果里选歌，锁定准确的歌名、歌手与音源；信息不符的将被退回。',
+    '每人每周限投稿一首（按设备去重），提交前请确认无误。',
+    '已在待审核队列或已入库的歌曲不可重复投稿。',
+    '禁止投稿含违规内容的歌曲，包括但不限于：脏话辱骂、人身攻击、政治敏感、色情低俗、暴力恐怖。',
+    '违禁词机制：歌名或歌手命中黑名单违禁词会被直接拦下，且不能靠更换写法绕过。',
+    '每首歌的票数上限为全校总人数，超出部分不计入票数。',
+    '审核综合票数、分类权重与播出适宜性，广播站保留最终取舍权。',
+    '被多个班级举报并经核实的歌曲会被移出，情节严重的封禁对应投稿口令。',
+    '投稿一经采用，广播站可在校园广播中播放；请勿投稿不适合校园环境的内容。',
+    '本规定为审核依据，最终解释权归盐中之声广播站所有。',
+  ];
+}
+
+/* ---------------- 黑名单（独立页签） ---------------- */
+
+/** 按名字切页签（供脚本内部跳转用，不依赖按钮元素）。 */
+function switchTabByName(name){
+  currentStatus = name;
+  document.querySelectorAll('.tabs button').forEach((b) => {
+    b.classList.toggle('active', (b.getAttribute('onclick') || '').includes("'" + name + "'"));
+  });
+  loadList();
+}
+
+/**
+ * 黑名单页签。
+ * 只收违禁词，不含任何歌曲记录 —— 与「回收站」是两套完全独立的数据。
+ */
+async function loadBanned(){
+  const box = document.getElementById('listBox');
+  box.innerHTML = '<p class="sub">加载中...</p>';
+
+  try {
+    const r = await fetch('/api/admin-settings');
+    if(r.status === 401 || r.status === 403){ showLogin(); return; }
+    const data = await r.json();
+
+    const banned = Array.isArray(data.banned) ? data.banned : [];
+
+    const rows = banned.length ? banned.map((b) => {
+      const id = safeInt(b.id);
+      const forever = String(b.expire_at || '').indexOf('2099') === 0;
+      return `
+        <div class="card">
+          <p style="margin:0 0 8px 0;font-size:14px;">
+            违禁词：<b style="color:#e11d48;letter-spacing:1px;">${escapeHtml(b.keyword)}</b>
+          </p>
+          <p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">
+            ${escapeHtml(b.reason || '未填原因')}
+            ${forever ? ' · 长期有效' : ' · 到期自动解禁：' + escapeHtml(b.expire_at)}
+          </p>
+          <button class="btn-reject" onclick="deleteBanned(${id})">删除</button>
+        </div>
+      `;
+    }).join('') : '<p class="sub">黑名单为空</p>';
+
+    box.innerHTML = `
+      <div class="card">
+        <h3>添加违禁词</h3>
+        <p><b>黑名单只能封违禁词，不能封具体的歌曲。</b>
+           填进来的词会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都算命中。<br>
+           所以要下架某一首歌，请到待审核 / 回收站里处理，不要往这里塞歌名。</p>
+        <p><b>黑名单和回收站不是一回事</b>：这里是"以后不许再提交含这个词的内容"的规则，
+           不会删除已有歌曲。</p>
+        <input id="bannedKeyword" placeholder="违禁词（最多 12 字）" style="font-size:14px;padding:10px;margin:8px 0;">
+        <input id="bannedReason" placeholder="原因（选填）" style="font-size:14px;padding:10px;margin:8px 0;">
+        <select id="bannedExpiry" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+          <option value="forever">长期有效</option>
+          <option value="30">30 天后自动解禁</option>
+          <option value="90">90 天后自动解禁</option>
+          <option value="365">一年后自动解禁</option>
+        </select>
+        <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
+      </div>
+
+      <div class="card">
+        <h3>当前违禁词（${banned.length} 条）</h3>
+        ${rows}
+      </div>
+    `;
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">加载失败：' + escapeHtml(String(e && e.message || e)) + '</p>';
+  }
+}
+
+/* ---------------- 从歌曲快捷加入黑名单 ---------------- */
+
+/**
+ * 歌曲卡片上的「加入黑名单」。
+ *
+ * 黑名单只收违禁词，所以这里不让管理员直接"封这首歌" ——
+ * 而是把歌名/歌手拆成几个候选词让他选，或者自己填一个更通用的词。
+ * 这样既快，又不会把整首歌名塞进去当成"封某首歌"。
+ */
+async function banFromButton(button){
+  const title = button.dataset.title || '';
+  const artist = button.dataset.artist || '';
+
+  // 候选：歌手名、歌名里长度合适的片段（更长的不作为候选，免得等于封整首）
+  const candidates = [];
+  if(artist && artist.length <= 12) candidates.push(artist);
+  for(const part of title.split(/[\s\-—·()（）\[\]【】]+/)) {
+    if(part.length >= 2 && part.length <= 6 && !candidates.includes(part)) candidates.push(part);
+  }
+
+  const listText = candidates.length
+    ? candidates.map((c, i) => (i + 1) + '. ' + c).join('\n')
+    : '（这首没有可自动提取的短词，请自己填）';
+
+  const input = await uiPrompt(
+    '要对「' + title + ' - ' + artist + '」加入哪个违禁词？\n\n'
+    + '候选短词：\n' + listText + '\n\n'
+    + '可以填上面任意一个，也可以自己填一个更通用的词（最多 12 字）。\n'
+    + '注意：黑名单是违禁词机制，只封某一首歌请用「拒绝」。',
+    candidates[0] || '',
+    '加入黑名单',
+    '例如：脏话片段 / 某个歌手名'
+  );
+  if(input === null) return;
+
+  const keyword = String(input).trim();
+  if(!keyword){ uiAlert('违禁词不能为空'); return; }
+  if(keyword.length > 12){
+    uiAlert('违禁词最多 12 个字。\n\n黑名单是用来封违禁词的，不是用来封某一首歌的 ——\n要下架某首歌，请用「拒绝」。');
+    return;
+  }
+
+  const reason = await uiPrompt('原因（选填，会记在黑名单里备查）', '违规', '填写原因', '例如：脏话 / 不当内容');
+  if(reason === null) return;
+
+  const r = await fetch('/api/admin-settings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ action:'add_banned', keyword, reason: String(reason).trim() || '违规' })
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){
+    uiToast(d.message || '已加入黑名单', 'ok');
+    // 局部刷新：只更新黑名单缓存，不重绘整个列表
+    if(settingsCache && Array.isArray(settingsCache.banned)) settingsCache.banned = [];
+  } else {
+    uiAlert(d.error || '加入失败');
+  }
+}
+
+/* ---------------- 歌曲建议 ---------------- */
+
+/**
+ * 查看某首歌的建议（学生按「提建议给管理员」提交的）。
+ * 管理员看完自己去别处找合适的版本，本站不负责换源。
+ */
+async function showSuggestions(button){
+  const songId = safeInt(button.dataset.song);
+  const box = document.getElementById('suggest-box-' + songId);
+  if(!box || !songId) return;
+
+  // 再点一次收起
+  if(box.dataset.open === '1'){
+    box.dataset.open = '0';
+    box.innerHTML = '';
+    return;
+  }
+
+  box.dataset.open = '1';
+  box.innerHTML = '<p class="sub">正在读取建议…</p>';
+
+  try {
+    const r = await fetch('/api/suggest?song_id=' + encodeURIComponent(songId));
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok){
+      box.innerHTML = '<p class="sub" style="color:#e11d48;">' + escapeHtml(d.error || '读取失败') + '</p>';
+      return;
+    }
+
+    const list = Array.isArray(d.suggestions) ? d.suggestions : [];
+    if(!list.length){
+      box.innerHTML = '<p class="sub">这首歌还没有收到建议</p>';
+      return;
+    }
+
+    box.innerHTML = `
+      <div style="margin:8px 0 0;padding:10px 12px;border-left:4px solid #7c3aed;border-radius:0 12px 12px 0;background:rgba(124,58,237,0.07);">
+        <div style="font-size:13px;font-weight:700;color:#5b21b6;margin-bottom:6px;">学生建议（${list.length} 条）</div>
+        ${list.map(x => `
+          <div style="font-size:13px;color:#475569;padding:6px 0;border-top:1px dashed rgba(124,58,237,0.25);">
+            <b style="color:#334155;">${escapeHtml(x.class_name || '未知班级')}</b>
+            <span style="color:#94a3b8;font-size:12px;">${escapeHtml(x.created_at)}</span><br>
+            ${escapeHtml(x.content)}
+          </div>
+        `).join('')}
+        <div style="margin-top:8px;">
+          <button onclick="handleSuggestions(${songId})" style="width:auto;padding:7px 12px;font-size:12px;margin:0;background:#64748b;">全部标记已处理</button>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    box.innerHTML = '<p class="sub" style="color:#e11d48;">网络错误</p>';
+  }
+}
+
+async function handleSuggestions(songId){
+  if(!await uiConfirm('确认把这批建议标记为已处理吗？\n\n标记后不再显示在这首歌下面。')) return;
+
+  const r = await fetch('/api/suggest', {
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({song_id: safeInt(songId)})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(r.ok){
+    uiToast(d.message || '已处理', 'ok');
+    // 局部刷新：只收掉这一块，不重绘整个列表
+    const box = document.getElementById('suggest-box-' + safeInt(songId));
+    if(box){ box.dataset.open = '0'; box.innerHTML = ''; }
+  } else {
+    uiAlert(d.error || '操作失败');
+  }
 }
 
 /* ---------------- 系统设置 ---------------- */
@@ -312,7 +836,7 @@ function renderSettings(){
     currentAdminId: safeInt(cache.currentAdminId),
   };
 
-  // ⚠️ isSuper 必须在这里先声明：下面的 buildClassCard / classRows 会用到它，
+  // 注意：isSuper 必须在这里先声明：下面的 buildClassCard / classRows 会用到它，
   // 而 const 存在"暂时性死区"，声明在使用之后就只剩 ReferenceError
   // （曾经导致"系统设置加载失败"）。
   const isSuper = currentRole === 'super';
@@ -393,16 +917,7 @@ function renderSettings(){
     `;
   }).join('');
 
-  const bannedHtml = settingsCache.banned.length ? settingsCache.banned.map(b => {
-    const id = safeInt(b.id);
-    const forever = String(b.expire_at || '').indexOf('2099') === 0;
-    return `
-      <div class="card">
-        <p style="margin:0 0 6px 0;font-size:13px;">违禁词：<b style="color:#e11d48;">${escapeHtml(b.keyword)}</b>（${escapeHtml(b.reason)}）${forever ? '' : '<br>到期自动解禁：' + escapeHtml(b.expire_at)}</p>
-        <button class="btn-reject" onclick="deleteBanned(${id})">删除</button>
-      </div>
-    `;
-  }).join('') : '<p class="sub">黑名单为空</p>';
+  // 违禁词的增删已移到独立的「黑名单」页签
 
   const pepperNote = settingsCache.security.pepperConfigured
     ? '<p class="sub" style="color:#059669;">已配置 AUTH_PEPPER，班级口令索引受服务端私钥保护</p>'
@@ -445,9 +960,13 @@ function renderSettings(){
   const annRows = settingsCache.announcements.length ? settingsCache.announcements.map(a => {
     const id = safeInt(a.id);
     const active = safeInt(a.is_active) === 1;
+    const isGate = (a.scope || 'app') === 'gate';
+    const scopeTag = isGate
+      ? '<span style="color:#7c3aed;font-size:12px;">（登录页公告）</span>'
+      : '<span style="color:#0284c7;font-size:12px;">（主页公告）</span>';
     return `
       <div class="card">
-        <h3>${escapeHtml(a.title)}${active ? '' : ' <span style="color:#e11d48;font-size:12px;">（已下架）</span>'}</h3>
+        <h3>${escapeHtml(a.title)}${active ? '' : ' <span style="color:#e11d48;font-size:12px;">（已下架）</span>'} ${scopeTag}</h3>
         <p style="white-space:pre-wrap;">${escapeHtml(a.content)}</p>
         <p>${a.created_by_name ? escapeHtml(a.created_by_name) + ' · ' : ''}${escapeHtml(a.created_at)}</p>
         <div class="actions">
@@ -497,11 +1016,21 @@ function renderSettings(){
       <input id="bulkStart" type="number" min="1" max="99" value="1" placeholder="起始序号" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bulkEnd" type="number" min="1" max="99" value="10" placeholder="结束序号" style="font-size:14px;padding:10px;margin:8px 0;">
       <input id="bulkMemberCount" type="number" min="0" max="10000" placeholder="每班人数（选填，用于汇总全校人数）" style="font-size:14px;padding:10px;margin:8px 0;">
-      <select id="bulkMode" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+      <select id="bulkMode" onchange="refreshBulkMode()" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
         <option value="random">每班一个随机口令（推荐，更安全）</option>
+        <option value="pattern">规律生成（好记：前缀+年级号+班号，如 yz0101）</option>
         <option value="shared">所有班共用一个口令（简单，但泄露一个等于全泄露）</option>
       </select>
       <input id="bulkSharedPw" placeholder="统一口令（选了「共用」才需要填，至少 6 位）" style="font-size:14px;padding:10px;margin:8px 0;">
+      <div id="bulkPatternBox" style="display:none;background:rgba(2,132,199,0.06);border:1px solid rgba(2,132,199,0.22);border-radius:10px;padding:10px 12px;margin:8px 0;">
+        <p style="margin:0 0 6px;font-size:13px;color:#075985;"><b>规律生成</b>：口令 = 前缀 + 年级号（两位）+ 班号（两位）</p>
+        <input id="bulkPatternPrefix" oninput="refreshBulkMode()" placeholder="口令前缀（字母或数字，2 到 6 位）" value="yz" style="font-size:14px;padding:10px;margin:6px 0;">
+        <input id="bulkPatternGrade" oninput="refreshBulkMode()" type="number" min="1" max="99" placeholder="年级号（如 1 代表高一）" value="1" style="font-size:14px;padding:10px;margin:6px 0;">
+        <p class="sub" style="text-align:left;margin:6px 0 0;font-size:12px;">
+          预览：<span id="bulkPatternPreview" style="color:#075985;font-weight:700;">yz0101</span>
+          <br>优点是好记好念，缺点是别人猜到规律就能推出别班口令 —— 校园内部用一般够。
+        </p>
+      </div>
       <button onclick="bulkGenerate()" style="font-size:14px;padding:10px;">开始生成</button>
       <div id="bulkResult"></div>
     </div>
@@ -586,7 +1115,14 @@ function renderSettings(){
 
     <div class="card">
       <h3>发布公告</h3>
-      <p>公告会显示在主页最上方，学生一进主页就能看到。</p>
+      <p><b>两种公告互不干扰，注意选对类型：</b><br>
+         <b>主页公告</b>：学生登录后在主页最上方看到。<br>
+         <b>登录页公告</b>：还没输入口令时就能看到，所以<b>不要写需要保密的内容</b>
+         （适合放欢迎语、使用说明、值班安排）。</p>
+      <select id="annScope" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
+        <option value="app">主页公告（登录后可见）</option>
+        <option value="gate">登录页公告（未登录也可见）</option>
+      </select>
       <input id="annTitle" placeholder="公告标题" maxlength="40" style="font-size:14px;padding:10px;margin:8px 0;">
       <textarea id="annContent" rows="4" maxlength="500" placeholder="公告内容（可以换行）"
         style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);font-family:inherit;"></textarea>
@@ -596,54 +1132,76 @@ function renderSettings(){
     </div>
 
     <div class="card">
-      <h3>添加违禁词</h3>
-      <p><b>黑名单只能封违禁词，不能封具体的歌曲。</b>
-         填进来的词会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都算命中。<br>
-         所以要下架某一首歌，请到「待审核 / 回收站」里处理，不要往这里塞歌名。</p>
-      <p><b>黑名单和回收站也不是一回事</b>：黑名单是"以后不许再提交含这个词的内容"的规则，
-         不会删除已有歌曲；回收站要在「回收站」页签里单独管理。</p>
-      <input id="bannedKeyword" placeholder="违禁词（最多 12 字，如：脏话片段）" style="font-size:14px;padding:10px;margin:8px 0;">
-      <input id="bannedReason" placeholder="原因（选填）" style="font-size:14px;padding:10px;margin:8px 0;">
-      <select id="bannedExpiry" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
-        <option value="forever">长期有效</option>
-        <option value="30">30 天后自动解禁</option>
-        <option value="90">90 天后自动解禁</option>
-        <option value="365">一年后自动解禁</option>
-      </select>
-      <button onclick="addBanned()" style="font-size:14px;padding:10px;">加入黑名单</button>
-      <div style="height:12px;"></div>
-      <div id="bannedList">${bannedHtml}</div>
+      <h3>违禁词</h3>
+      <p>违禁词的增删已移到顶部「黑名单」页签，那里有独立的表单与列表。</p>
+      <button onclick="switchTabByName('banned')" style="font-size:14px;padding:10px;background:#64748b;">去黑名单页签</button>
+    </div>
+
+    <div class="card">
+      <h3>投稿规定</h3>
+      <p>审核按这份规定执行，学生端首页也能展开查看同一份内容。</p>
+      <button onclick="toggleAdminRules()" style="font-size:14px;padding:10px;background:#64748b;">展开查看规定</button>
+      <div id="adminRulesBox" style="display:none;margin-top:10px;border-top:1px dashed rgba(2,132,199,0.3);padding-top:8px;"></div>
     </div>
   `;
+
+  // 把投稿规定也放进后台（与首页同一份常量，避免两处走样）
+  renderAdminRules();
+
+  // 批量生成的方式切换要显示/隐藏对应输入项
+  refreshBulkMode();
+
+  // 班级列表按年级排好后，把"全选"等按钮状态复位
+  const selectAll = document.getElementById('bulkMode');
+  if(selectAll) selectAll.value = selectAll.value || 'random';
+}
+
+/** 后台的投稿规定：与学生端首页共用同一份内容。 */
+function renderAdminRules(){
+  const box = document.getElementById('adminRulesBox');
+  if(!box) return;
+  box.innerHTML = getRules().map((t, i) =>
+    '<div style="display:flex;gap:8px;padding:4px 0;font-size:13px;line-height:1.6;color:#475569;">'
+    + '<span style="flex:0 0 auto;color:#0284c7;font-weight:700;">' + (i + 1) + '.</span>'
+    + '<span>' + escapeHtml(t) + '</span></div>'
+  ).join('');
+}
+
+function toggleAdminRules(){
+  const box = document.getElementById('adminRulesBox');
+  if(!box) return;
+  const open = box.style.display === 'none';
+  box.style.display = open ? 'block' : 'none';
+  if(open) renderAdminRules();
 }
 
 /** 统一的设置写接口调用：不再携带管理员密码。 */
 async function settingsPost(body, okText){
   const r = await fetch('/api/admin-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(okText || d.message || '操作成功'); loadSettings(); return; }
-  alert(d.error || '操作失败');
+  if(r.ok){ uiAlert(okText || d.message || '操作成功'); loadSettings(); return; }
+  uiAlert(d.error || '操作失败');
 }
 
 async function addClass(){
   const name = document.getElementById('newClassName').value.trim();
   const pw = document.getElementById('newClassPw').value.trim();
-  if(!name || !pw){ alert('班级名称和口令都要填'); return; }
-  if(pw.length < 6){ alert('口令至少 6 位'); return; }
-  if(!confirm('确认添加班级【' + name + '】及其口令吗？')) return;
+  if(!name || !pw){ uiAlert('班级名称和口令都要填'); return; }
+  if(pw.length < 6){ uiAlert('口令至少 6 位'); return; }
+  if(!await uiConfirm('确认添加班级【' + name + '】及其口令吗？')) return;
   settingsPost({action:'add_class', name, password: pw}, '添加成功');
 }
 
 async function changeClassPassword(id){
-  const pw = prompt('请输入该班级的新口令（至少 6 位）');
+  const pw = await uiPrompt('请输入该班级的新口令（至少 6 位）');
   if(pw === null) return;
-  if(pw.trim().length < 6){ alert('口令至少 6 位'); return; }
-  if(!confirm('确认修改吗？修改后该班级所有已登录设备会立即失效。')) return;
+  if(pw.trim().length < 6){ uiAlert('口令至少 6 位'); return; }
+  if(!await uiConfirm('确认修改吗？修改后该班级所有已登录设备会立即失效。')) return;
   settingsPost({action:'update_class_password', id: safeInt(id), new_password: pw.trim()}, '口令已更新');
 }
 
 async function deleteClass(id){
-  if(!confirm('确认删除这个班级口令吗？删除后该班级将无法登录。')) return;
+  if(!await uiConfirm('确认删除这个班级口令吗？删除后该班级将无法登录。')) return;
   settingsPost({action:'delete_class', id: safeInt(id)}, '已删除');
 }
 
@@ -658,14 +1216,14 @@ async function deleteSelectedClasses(){
     .map((el) => safeInt(el.dataset.classCheck))
     .filter((id) => id > 0);
 
-  if(!ids.length){ alert('请先勾选要删除的班级'); return; }
+  if(!ids.length){ uiAlert('请先勾选要删除的班级'); return; }
 
   const names = settingsCache.classes
     .filter((c) => ids.includes(safeInt(c.id)))
     .map((c) => c.name);
   const preview = names.slice(0, 10).join('、') + (names.length > 10 ? ' 等' : '');
 
-  if(!confirm('确认删除这 ' + ids.length + ' 个班级口令吗？\n\n' + preview
+  if(!await uiConfirm('确认删除这 ' + ids.length + ' 个班级口令吗？\n\n' + preview
     + '\n\n删除后这些班级将无法登录，其在线状态也会立即失效。')) return;
 
   const r = await fetch('/api/admin-settings', {
@@ -674,8 +1232,8 @@ async function deleteSelectedClasses(){
     body: JSON.stringify({action:'delete_classes', ids: ids})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已删除'); loadSettings(); }
-  else alert(d.error || '删除失败');
+  if(r.ok){ uiAlert(d.message || '已删除'); loadSettings(); }
+  else uiAlert(d.error || '删除失败');
 }
 
 function copyFromButton(button){
@@ -688,22 +1246,22 @@ async function editClassInfo(id){
   const item = settingsCache.classes.find((c) => safeInt(c.id) === safeInt(id));
   if(!item) return;
 
-  const grade = prompt('年级（例如：高一）', item.grade || '');
+  const grade = await uiPrompt('年级（例如：高一）', item.grade || '');
   if(grade === null) return;
 
   const current = item.member_count === null || item.member_count === undefined
     ? '' : String(safeInt(item.member_count));
-  const countRaw = prompt('班级人数（填数字；留空表示不设置）', current);
+  const countRaw = await uiPrompt('班级人数（填数字；留空表示不设置）', current);
   if(countRaw === null) return;
 
   const trimmed = countRaw.trim();
   const memberCount = trimmed === '' ? null : Number(trimmed);
   if(memberCount !== null && (!Number.isInteger(memberCount) || memberCount < 0 || memberCount > 10000)){
-    alert('人数需要是 0 到 10000 之间的整数');
+    uiAlert('人数需要是 0 到 10000 之间的整数');
     return;
   }
 
-  if(!confirm('确认保存「' + item.name + '」的年级与人数吗？\n\n年级：' + (grade.trim() || '（不填）')
+  if(!await uiConfirm('确认保存「' + item.name + '」的年级与人数吗？\n\n年级：' + (grade.trim() || '（不填）')
     + '\n人数：' + (memberCount === null ? '（不填）' : memberCount))) return;
 
   const r = await fetch('/api/admin-settings', {
@@ -717,8 +1275,8 @@ async function editClassInfo(id){
     })
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已保存'); loadSettings(); }
-  else alert(d.error || '保存失败');
+  if(r.ok){ uiAlert(d.message || '已保存'); loadSettings(); }
+  else uiAlert(d.error || '保存失败');
 }
 
 async function saveVoteCap(){
@@ -726,14 +1284,14 @@ async function saveVoteCap(){
   const cap = Number(input ? input.value : NaN);
 
   if(!Number.isInteger(cap) || cap < 0 || cap > 1000000){
-    alert('请填 0 到 1000000 之间的整数（0 表示不限制）');
+    uiAlert('请填 0 到 1000000 之间的整数（0 表示不限制）');
     return;
   }
 
   const message = cap > 0
-    ? '确认把投票上限设为 ' + cap + ' 票吗？\n\n超过这个数的票**不计入票数**（票照收，学生端显示与正式榜排序都按 ' + cap + ' 封顶）。'
+    ? '确认把投票上限设为 ' + cap + ' 票吗？\n\n超过这个数的票不计入票数（票照收，学生端显示与正式榜排序都按 ' + cap + ' 封顶）。'
     : '确认取消投票上限吗？取消后票数不再封顶。';
-  if(!confirm(message)) return;
+  if(!await uiConfirm(message)) return;
 
   settingsPost({action:'set_vote_cap', cap: cap}, '已保存');
 }
@@ -742,7 +1300,7 @@ function fillTotalMembers(){
   const input = document.getElementById('voteCapInput');
   const total = safeInt((settingsCache.vote || {}).totalMembers);
   if(input) input.value = String(total);
-  if(!total) alert('还没填班级人数，汇总结果是 0。请先在班级列表里填人数。');
+  if(!total) uiAlert('还没填班级人数，汇总结果是 0。请先在班级列表里填人数。');
 }
 
 async function saveReportThreshold(){
@@ -750,11 +1308,11 @@ async function saveReportThreshold(){
   const threshold = Number(input ? input.value : NaN);
 
   if(!Number.isInteger(threshold) || threshold < 2 || threshold > 20){
-    alert('阈值需要是 2 到 20 之间的整数');
+    uiAlert('阈值需要是 2 到 20 之间的整数');
     return;
   }
 
-  if(!confirm('确认把举报阈值设为 ' + threshold + ' 吗？\n\n同一首歌被 ' + threshold + ' 个以上不同班级举报，才会进入举报收件箱。')) return;
+  if(!await uiConfirm('确认把举报阈值设为 ' + threshold + ' 吗？\n\n同一首歌被 ' + threshold + ' 个以上不同班级举报，才会进入举报收件箱。')) return;
 
   settingsPost({action:'set_report_threshold', threshold: threshold}, '已保存');
 }
@@ -840,7 +1398,7 @@ function adminAuditionPanelHtml(songId, list){
   return `
     <div style="margin:8px 0 14px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
-        <div style="font-size:13px;font-weight:700;color:#075985;">🎧 试听候选 · ${list.length} 个</div>
+        <div style="font-size:13px;font-weight:700;color:#075985;">试听候选 · ${list.length} 个</div>
         <button onclick="closeAdminAudition(${id})"
           style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
       </div>
@@ -888,17 +1446,17 @@ function closeAdminAudition(songId){
 async function saveWeight(id){
   const input = document.getElementById('weight_' + safeInt(id));
   const weight = Number(input ? input.value : NaN);
-  if(!Number.isInteger(weight) || weight < 0 || weight > 1000){ alert('权重需要是 0 到 1000 之间的整数'); return; }
-  if(!confirm('确认把这个分类的权重改为 ' + weight + ' 吗？正式榜排序会立即生效。')) return;
+  if(!Number.isInteger(weight) || weight < 0 || weight > 1000){ uiAlert('权重需要是 0 到 1000 之间的整数'); return; }
+  if(!await uiConfirm('确认把这个分类的权重改为 ' + weight + ' 吗？正式榜排序会立即生效。')) return;
   settingsPost({action:'update_category_weight', id: safeInt(id), weight: weight}, '权重已更新');
 }
 
 async function changeAdminPassword(){
   const cur = document.getElementById('curAdminPw').value;
   const next = document.getElementById('newAdminPw').value.trim();
-  if(!cur || !next){ alert('请填写当前密码和新密码'); return; }
-  if(next.length < 8){ alert('新密码至少 8 位'); return; }
-  if(!confirm('确认修改管理员密码吗？修改后其它设备上的登录会立即失效。')) return;
+  if(!cur || !next){ uiAlert('请填写当前密码和新密码'); return; }
+  if(next.length < 8){ uiAlert('新密码至少 8 位'); return; }
+  if(!await uiConfirm('确认修改管理员密码吗？修改后其它设备上的登录会立即失效。')) return;
   settingsPost({action:'change_admin_password', current_password: cur, new_password: next}, '密码已更新');
 }
 
@@ -914,20 +1472,20 @@ async function addBanned(){
   const reason = document.getElementById('bannedReason').value.trim() || '违规';
   const expiry = document.getElementById('bannedExpiry').value;
 
-  if(!keyword){ alert('违禁词不能为空'); return; }
+  if(!keyword){ uiAlert('违禁词不能为空'); return; }
   if(keyword.length > 12){
-    alert('违禁词最多 12 个字。\n\n黑名单是用来封违禁词的，不是用来封某一首歌的 ——\n要下架某首歌，请到「待审核 / 回收站」里处理。');
+    uiAlert('违禁词最多 12 个字。\n\n黑名单是用来封违禁词的，不是用来封某一首歌的 ——\n要下架某首歌，请到「待审核 / 回收站」里处理。');
     return;
   }
 
   const body = {action:'add_banned', keyword, reason};
   if(expiry !== 'forever'){ body.expire_at = toSqlDateTime(new Date(Date.now() + Number(expiry) * 86400000)); }
-  if(!confirm('确认把违禁词【' + keyword + '】加入黑名单吗？\n\n它会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都会被拦下。')) return;
+  if(!await uiConfirm('确认把违禁词【' + keyword + '】加入黑名单吗？\n\n它会和「歌名 + 歌手」整串做包含匹配，出现在哪一边都会被拦下。')) return;
   settingsPost(body, '添加成功');
 }
 
 async function deleteBanned(id){
-  if(!confirm('确认删除这条黑名单记录吗？')) return;
+  if(!await uiConfirm('确认删除这条黑名单记录吗？')) return;
   settingsPost({action:'delete_banned', id: safeInt(id)}, '已删除');
 }
 
@@ -941,27 +1499,41 @@ const ACTION_META = {
 
 async function action(id, type){
   const meta = ACTION_META[type] || { text: '操作', msg: '确认执行该操作吗？' };
-  if(!confirm('【' + meta.text + '】\n' + meta.msg)) return;
+  if(!await uiConfirm('【' + meta.text + '】\n' + meta.msg)) return;
+
   const r = await fetch('/api/admin-action', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({id: safeInt(id), type})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ loadList(); } else { alert(d.error || '操作失败'); }
+
+  if(!r.ok){ uiAlert(d.error || '操作失败'); return; }
+
+  // 单首歌的动作只影响它自己：就地淡出移除，不重绘整个列表。
+  // 例外是"清除举报"——歌曲还在，只是标记变了，那需要重绘才能看出来（用安静模式）。
+  if(type === 'clear_report'){
+    uiToast('已清除举报标记', 'ok');
+    loadList(true);
+  } else {
+    uiToast(meta.text + '完成', 'ok');
+    fadeRemoveCard(id);
+  }
 }
 
 /** 清空回收站：只删 status='rejected' 的歌曲，完全不碰黑名单。 */
 async function emptyRecycle(){
-  if(!confirm('确认清空回收站吗？\n\n回收站里的歌曲会被永久删除、无法恢复。\n（只清空回收站，不会动到黑名单）')) return;
+  if(!await uiConfirm('确认清空回收站吗？\n\n回收站里的歌曲会被永久删除、无法恢复。\n（只清空回收站，不会动到黑名单）')) return;
   const r = await fetch('/api/admin-action', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({type:'empty_recycle'})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert('已清空回收站，共删除 ' + safeInt(d.deleted) + ' 首'); loadList(); }
-  else alert(d.error || '清空失败');
+  if(r.ok){
+    uiToast('已清空回收站，共删除 ' + safeInt(d.deleted) + ' 首', 'ok');
+    loadList(true);
+  } else uiAlert(d.error || '清空失败');
 }
 
 async function updateCategory(id, catId){
@@ -971,7 +1543,12 @@ async function updateCategory(id, catId){
     body: JSON.stringify({id: safeInt(id), category_id: safeInt(catId)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ loadList(); } else { alert(d.error || '修改失败'); }
+  if(r.ok){
+    // 改了分类会连带影响排序（权重参与综合分），所以这里要重排；
+    // 用安静模式重排，不闪"加载中"。
+    uiToast('分类已修改，列表已按新权重重排', 'ok');
+    loadList(true);
+  } else { uiAlert(d.error || '修改失败'); }
 }
 
 async function logout(){
@@ -986,7 +1563,7 @@ async function createInvite(){
   const maxUses = safeInt(document.getElementById('inviteUses').value) || 1;
   const days = safeInt(document.getElementById('inviteDays').value) || 7;
 
-  if(!confirm('确认生成一个动态口令吗？\n\n可用次数：' + maxUses + ' 次\n有效期：' + days + ' 天\n\n生成后明文只显示这一次。')) return;
+  if(!await uiConfirm('确认生成一个动态口令吗？\n\n可用次数：' + maxUses + ' 次\n有效期：' + days + ' 天\n\n生成后明文只显示这一次。')) return;
 
   const r = await fetch('/api/admin-invites', {
     method:'POST',
@@ -994,7 +1571,7 @@ async function createInvite(){
     body: JSON.stringify({action:'create', note: note, max_uses: maxUses, expires_days: days})
   });
   const d = await r.json().catch(() => ({}));
-  if(!r.ok){ alert(d.error || '生成失败'); return; }
+  if(!r.ok){ uiAlert(d.error || '生成失败'); return; }
 
   const link = location.origin + '/register.html?code=' + encodeURIComponent(d.formatted);
   document.getElementById('inviteResult').innerHTML = `
@@ -1011,52 +1588,55 @@ async function createInvite(){
 }
 
 async function revokeInvite(id){
-  if(!confirm('确认作废这个动态口令吗？作废后别人就无法再用它注册。')) return;
+  if(!await uiConfirm('确认作废这个动态口令吗？作废后别人就无法再用它注册。')) return;
   const r = await fetch('/api/admin-invites', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'revoke', id: safeInt(id)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert('已作废'); loadSettings(); } else alert(d.error || '操作失败');
+  if(r.ok){ uiAlert('已作废'); loadSettings(); } else uiAlert(d.error || '操作失败');
 }
 
-function copyText(text){
+async function copyText(text){
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(
-      () => alert('已复制到剪贴板'),
-      () => prompt('复制失败，请手动复制：', text)
-    );
+    try {
+      await navigator.clipboard.writeText(text);
+      uiToast('已复制到剪贴板', 'ok');
+    } catch(e) {
+      // 非 HTTPS 或权限被拒时会走到这里，让用户手动复制
+      await uiPrompt('复制失败，请手动复制下面的内容：', text, '手动复制');
+    }
   } else {
-    prompt('请手动复制：', text);
+    await uiPrompt('当前环境不支持自动复制，请手动复制下面的内容：', text, '手动复制');
   }
 }
 
 /* ---------------- 管理员账号 ---------------- */
 
 async function deleteAdmin(id){
-  if(!confirm('确认删除这个管理员吗？\n删除后他的登录状态会立即失效。')) return;
+  if(!await uiConfirm('确认删除这个管理员吗？\n删除后他的登录状态会立即失效。')) return;
   const r = await fetch('/api/admin-accounts', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'delete', id: safeInt(id)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已删除'); loadSettings(); } else alert(d.error || '删除失败');
+  if(r.ok){ uiAlert(d.message || '已删除'); loadSettings(); } else uiAlert(d.error || '删除失败');
 }
 
 async function resetAdminPassword(id){
-  const pw = prompt('请输入该管理员的新密码（至少 8 位）');
+  const pw = await uiPrompt('请输入该管理员的新密码（至少 8 位）');
   if(pw === null) return;
-  if(pw.trim().length < 8){ alert('密码至少 8 位'); return; }
-  if(!confirm('确认重置吗？对方所有在线登录会立即失效。')) return;
+  if(pw.trim().length < 8){ uiAlert('密码至少 8 位'); return; }
+  if(!await uiConfirm('确认重置吗？对方所有在线登录会立即失效。')) return;
   const r = await fetch('/api/admin-accounts', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'reset_password', id: safeInt(id), new_password: pw.trim()})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已重置'); loadSettings(); } else alert(d.error || '重置失败');
+  if(r.ok){ uiAlert(d.message || '已重置'); loadSettings(); } else uiAlert(d.error || '重置失败');
 }
 
 /* ---------------- 一键批量生成班级口令 ---------------- */
@@ -1074,6 +1654,36 @@ function randomPassword(length){
   let out = '';
   for(let i = 0; i < length; i++) out += PASSWORD_ALPHABET[bytes[i] % PASSWORD_ALPHABET.length];
   return out;
+}
+
+/**
+ * 规律生成的口令：前缀 + 两位年级号 + 两位班号，例如 yz0103。
+ *
+ * 取舍：好记好念（学生能自己推出来，不必查表），
+ * 代价是别人知道规律后能推出别班口令。校园内部使用一般可接受，
+ * 所以后台同时保留了"随机口令"这个更安全的选项。
+ */
+function patternPassword(prefix, grade, cls){
+  return String(prefix) + String(grade).padStart(2, '0') + String(cls).padStart(2, '0');
+}
+
+/** 切换批量生成方式时显示/隐藏对应输入项，并刷新规律预览。 */
+function refreshBulkMode(){
+  const modeEl = document.getElementById('bulkMode');
+  if(!modeEl) return;
+
+  const mode = modeEl.value;
+  const box = document.getElementById('bulkPatternBox');
+  const shared = document.getElementById('bulkSharedPw');
+  if(box) box.style.display = mode === 'pattern' ? 'block' : 'none';
+  if(shared) shared.style.display = mode === 'shared' ? 'block' : 'none';
+
+  const preview = document.getElementById('bulkPatternPreview');
+  if(preview && mode === 'pattern'){
+    const p = ((document.getElementById('bulkPatternPrefix') || {}).value || 'yz').trim().toLowerCase() || 'yz';
+    const g = safeInt((document.getElementById('bulkPatternGrade') || {}).value) || 1;
+    preview.textContent = patternPassword(p, g, 1) + '、' + patternPassword(p, g, 2) + '、' + patternPassword(p, g, 3) + ' …';
+  }
 }
 
 /**
@@ -1095,19 +1705,42 @@ async function bulkGenerate(){
   const memberCount = memberRaw === '' ? null : Number(memberRaw);
   const resultBox = document.getElementById('bulkResult');
 
-  if(!prefix){ alert('请填写班级名称前缀，例如「高一」'); return; }
-  if(!start || !end || end < start){ alert('序号范围不对，结束序号要大于等于起始序号'); return; }
-  if(end - start + 1 > 60){ alert('一次最多生成 60 个班级，请分批'); return; }
-  if(mode === 'shared' && sharedPw.length < 6){ alert('统一口令至少 6 位'); return; }
+  if(!prefix){ uiAlert('请填写班级名称前缀，例如「高一」'); return; }
+  if(!start || !end || end < start){ uiAlert('序号范围不对，结束序号要大于等于起始序号'); return; }
+  if(end - start + 1 > 60){ uiAlert('一次最多生成 60 个班级，请分批'); return; }
+  if(mode === 'shared' && sharedPw.length < 6){ uiAlert('统一口令至少 6 位'); return; }
   if(memberCount !== null && (!Number.isInteger(memberCount) || memberCount < 0 || memberCount > 10000)){
-    alert('每班人数需要是 0 到 10000 之间的整数');
+    uiAlert('每班人数需要是 0 到 10000 之间的整数');
     return;
   }
 
+  // 规律生成：口令 = 前缀 + 两位年级号 + 两位班号，例如 yz0103
+  let patternPrefix = '';
+  let patternGrade = 0;
+  if(mode === 'pattern'){
+    patternPrefix = (document.getElementById('bulkPatternPrefix').value || '').trim().toLowerCase();
+    patternGrade = safeInt(document.getElementById('bulkPatternGrade').value);
+
+    if(!/^[a-z0-9]{2,6}$/.test(patternPrefix)){
+      uiAlert('口令前缀请用 2 到 6 位字母或数字（不含中文与符号），例如 yz');
+      return;
+    }
+    if(!patternGrade || patternGrade < 1 || patternGrade > 99){
+      uiAlert('年级号需要是 1 到 99 之间的整数（例如 1 代表高一）');
+      return;
+    }
+    if(end > 99){
+      uiAlert('规律生成时班号最多到 99');
+      return;
+    }
+  }
+
   const count = end - start + 1;
-  const modeText = mode === 'random' ? '每班一个随机口令' : '所有班共用一个口令';
+  const modeText = mode === 'random' ? '每班一个随机口令'
+    : mode === 'pattern' ? ('规律生成：' + patternPrefix + String(patternGrade).padStart(2, '0') + 'XX')
+    : '所有班共用一个口令';
   // 口令是可查看的（加密存在数据库里），所以不必再提醒"只显示这一次"
-  if(!confirm('确认生成 ' + count + ' 个班级吗？\n\n'
+  if(!await uiConfirm('确认生成 ' + count + ' 个班级吗？\n\n'
     + (grade ? '年级：' + grade + '\n' : '')
     + '名称：' + prefix + '(' + start + ')班 ~ ' + prefix + '(' + end + ')班\n'
     + '方式：' + modeText
@@ -1119,7 +1752,9 @@ async function bulkGenerate(){
 
   for(let n = start; n <= end; n++){
     const name = prefix + '(' + n + ')班';
-    const password = mode === 'shared' ? sharedPw : randomPassword(6);
+    const password = mode === 'shared' ? sharedPw
+      : mode === 'pattern' ? patternPassword(patternPrefix, patternGrade, n)
+      : randomPassword(6);
     resultBox.innerHTML = '<p class="sub">正在生成… ' + (n - start + 1) + '/' + count + '（' + escapeHtml(name) + '）</p>';
 
     try {
@@ -1169,28 +1804,33 @@ function copyBulk(){
 async function createAnnouncement(){
   const title = document.getElementById('annTitle').value.trim();
   const content = document.getElementById('annContent').value.trim();
-  if(!title || !content){ alert('公告标题和内容都要填'); return; }
-  if(!confirm('确认发布公告「' + title + '」吗？学生一进主页就能看到。')) return;
+  const scope = (document.getElementById('annScope') || {}).value || 'app';
+  if(!title || !content){ uiAlert('公告标题和内容都要填'); return; }
+
+  const where = scope === 'gate'
+    ? '登录页（还没输入口令的人也能看到，别写保密内容）'
+    : '主页（学生登录后看到）';
+  if(!await uiConfirm('确认发布公告「' + title + '」吗？\n\n发布位置：' + where)) return;
 
   const r = await fetch('/api/announcements', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action:'create', title: title, content: content})
+    body: JSON.stringify({action:'create', title: title, content: content, scope: scope})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert('公告已发布'); loadSettings(); } else alert(d.error || '发布失败');
+  if(r.ok){ uiToast(d.message || '公告已发布', 'ok'); loadSettings(); } else uiAlert(d.error || '发布失败');
 }
 
 async function editAnnouncement(id){
   const item = settingsCache.announcements.find(a => safeInt(a.id) === safeInt(id));
   if(!item) return;
 
-  const title = prompt('修改公告标题', item.title);
+  const title = await uiPrompt('修改公告标题', item.title);
   if(title === null) return;
-  const content = prompt('修改公告内容（可以换行）', item.content);
+  const content = await uiPrompt('修改公告内容（可以换行）', item.content);
   if(content === null) return;
-  if(!title.trim() || !content.trim()){ alert('标题和内容都不能为空'); return; }
-  if(!confirm('确认保存这次修改吗？')) return;
+  if(!title.trim() || !content.trim()){ uiAlert('标题和内容都不能为空'); return; }
+  if(!await uiConfirm('确认保存这次修改吗？')) return;
 
   const r = await fetch('/api/announcements', {
     method:'POST',
@@ -1198,29 +1838,29 @@ async function editAnnouncement(id){
     body: JSON.stringify({action:'update', id: safeInt(id), title: title.trim(), content: content.trim()})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert('已更新'); loadSettings(); } else alert(d.error || '更新失败');
+  if(r.ok){ uiAlert('已更新'); loadSettings(); } else uiAlert(d.error || '更新失败');
 }
 
 async function toggleAnnouncement(id, active){
-  if(!confirm(active ? '确认把这条公告上架吗？' : '确认下架这条公告吗？下架后学生看不到。')) return;
+  if(!await uiConfirm(active ? '确认把这条公告上架吗？' : '确认下架这条公告吗？下架后学生看不到。')) return;
   const r = await fetch('/api/announcements', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'toggle', id: safeInt(id), is_active: safeInt(active)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert(d.message || '已更新'); loadSettings(); } else alert(d.error || '操作失败');
+  if(r.ok){ uiAlert(d.message || '已更新'); loadSettings(); } else uiAlert(d.error || '操作失败');
 }
 
 async function deleteAnnouncement(id){
-  if(!confirm('确认删除这条公告吗？删除后无法恢复。')) return;
+  if(!await uiConfirm('确认删除这条公告吗？删除后无法恢复。')) return;
   const r = await fetch('/api/announcements', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'delete', id: safeInt(id)})
   });
   const d = await r.json().catch(() => ({}));
-  if(r.ok){ alert('已删除'); loadSettings(); } else alert(d.error || '删除失败');
+  if(r.ok){ uiAlert('已删除'); loadSettings(); } else uiAlert(d.error || '删除失败');
 }
 
 // 启动：用一次探测请求判断会话是否有效，有效就直奔后台。

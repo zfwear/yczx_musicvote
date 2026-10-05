@@ -2,6 +2,7 @@ import { readJson, error, json, clientIp, header } from '../../_lib/http.js';
 import { requireSession, rateLimit } from '../../_lib/auth.js';
 import { sanitizeText, parsePositiveInt, parseFingerprint, parseTrackId } from '../../_lib/validate.js';
 import { changedRows, lastRowId } from '../../_lib/db.js';
+import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 
 /** 查重窗口：每人每周一次。 */
 const DEDUP_WINDOW_DAYS = 7;
@@ -35,6 +36,10 @@ export async function onRequestPost(context) {
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
+
+  // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
+  const human = await verifyRecaptcha(env, data.recaptcha_token, { ip });
+  if (!human.ok) return error(human.error, 403);
 
   // 入库前先收敛成安全纯文本（纵深防御，不是唯一防线）。
   const title = sanitizeText(data.title, { maxLength: 60, field: '歌名' });

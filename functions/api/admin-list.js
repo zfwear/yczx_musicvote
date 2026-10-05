@@ -31,8 +31,16 @@ export async function onRequestGet(context) {
   if (!status.ok) return error(status.error, 400);
 
   // ORDER BY 取自白名单分支，不含用户输入。
+  //
+  // 待审核：**票数为主、分类权重为辅**，与学生端待审核榜用同一套综合分：
+  //   综合分 = 票数 × (100 + 分类权重)
+  // 被举报的仍排在最前（需要优先处理，且它们本来也会进举报收件箱），
+  // 其余按综合分排。
   const orderBy = status.value === 'pending'
-    ? 'ORDER BY CAST(s.is_reported AS INTEGER) DESC, s.created_at DESC, s.id DESC'
+    ? `ORDER BY CAST(s.is_reported AS INTEGER) DESC,
+               (CAST(s.votes AS INTEGER) * (100 + CAST(c.weight AS INTEGER))) DESC,
+               CAST(s.votes AS INTEGER) DESC,
+               s.id DESC`
     : 'ORDER BY s.created_at DESC, s.id DESC';
 
   const selectWithDebug = `
