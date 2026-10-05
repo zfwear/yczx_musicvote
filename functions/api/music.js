@@ -4,26 +4,27 @@ import { sanitizeText } from '../../_lib/validate.js';
 import { signTrackToken } from '../../_lib/tracktoken.js';
 
 /**
- * 音源中转代理（试听）。
+ * 音源中转代理（试听 / 搜索 / 可播性校验）。
  *
  * ⚠️ 安全约束：**客户端永远无法指定上游地址。**
- *    客户端只能传"关键词"或"歌曲 id"，上游地址由服务端决定。
+ *    客户端只能传"关键词"、"歌曲 id"或"要校验的 id"，上游地址由服务端决定。
  *    否则这个接口会立刻变成任何人都能用的开放代理 / SSRF 跳板。
  *
- * 音源选型参考了开源校园广播站点歌系统 VoiceHub
- * (github.com/laoshuikaixue/VoiceHub) 的 musicSources.ts，并逐个实测：
- *   ✅ api.qijieya.cn/meting/   可用，302 跳转到可播放音频（完整歌曲）
- *   ✅ api.injahow.cn/meting/   可用，同上
- *   ❌ api.ygking.top           域名已失效
- *   ❌ music-api.gdstudio.xyz   连接超时
- *   ❌ api.bilibili.com         412，需要 WBI 签名，必须自建服务
- *   ✅ itunes.apple.com         官方 30 秒试听，无需 key（兜底）
+ * 本文件只描述**当前行为**，以 `buildSources()`（见下方）为唯一依据。
+ * 历史上这里写过一版"哪家可用/哪家已废"的清单，它与代码不符、误导过接手的人，
+ * 所以已经删掉；要判断某家源此刻行不行，看 `/api/music?probe=1` 的 `verdict`。
  *
- * 策略：默认 'auto' —— Meting 与苹果**并行**发起，优先采用 Meting（完整歌曲），
- *      拿不到就自动用苹果官方试听兜底。任何一家挂掉都不会让功能失效。
+ * 当前音源与顺序（`auto` 模式，由 buildSources 决定）：
+ *   1. `apple:<storefront>` —— 苹果官方 iTunes 搜索接口，按 hk / tw / us 依次。
+ *      官方 30 秒试听，无需 key，最稳；负责"找得到原唱"。
+ *   2. `netease-native` —— 网易云官方公开接口。给完整歌曲；
+ *      公开搜索接口隐藏主流版权曲，版权受限曲拿不到音频（探测为 false）。
+ *   3. `meting:<host>` —— Meting / GD Studio 形状的第三方中转，排在最后兜底。
+ *      默认基址见 DEFAULT_METING_BASES，其可用性随时间变化，不要假设它活着。
+ *   `MUSIC_PROVIDER=meting` 会关掉苹果源、`=apple` 会关掉网易云与 Meting。
  *
- * 歌曲 id 带音源前缀（mt-xxx / ap-xxx），这样播放时不必猜测该用哪家，
- * 也避免两家的数字 id 互相撞车。
+ * 歌曲 id 带音源前缀（mt-<数字> / ap-<数字>），这样播放时不必猜测该用哪家，
+ * 也避免两家的数字 id 互相撞车。`?check=` 只对 `mt-` 有意义（苹果必有音频）。
  *
  * A7（音源一致性）：搜索结果里每个候选都会额外带一张**服务端签名的
  * 短期选曲凭据**（`token`）。点歌时把它一起提交，服务端就能确认
@@ -32,7 +33,7 @@ import { signTrackToken } from '../../_lib/tracktoken.js';
  *
  * 环境变量（全部可选，不配也能用）：
  *   MUSIC_PROVIDER    'auto'（默认）| 'meting' | 'apple'
- *   MUSIC_API_BASE    覆盖 Meting 上游根地址
+ *   MUSIC_API_BASE    覆盖 Meting 上游根地址（**替换**内置默认值，不是追加）
  *   MUSIC_STOREFRONT  苹果商店地区，默认 hk（cn 商店不通过接口提供歌曲）
  */
 
@@ -58,7 +59,7 @@ const MAX_FIELD_LENGTH = 120;
  * 数字不对就说明部署的不是这一包，不必再猜别的可能。
  * 每次改动本文件时把它 +1（或改日期），交付时与版本号保持一致。
  */
-const MUSIC_BUILD = '2026-10-05-f+multi-source';
+const MUSIC_BUILD = '2026-10-06-a+playable-check';
 
 /* ------------------------------------------------------------------
  * 上游调用的资源护栏（审计 C3）
@@ -67,7 +68,8 @@ const MUSIC_BUILD = '2026-10-05-f+multi-source';
  * 一直不吐字节"的连接，这个 Worker 就会一直占着 CPU 与内存 ——
  * 免费套餐下这是最容易被上游拖垮的地方。所以：
  *   · 搜索类响应体上限 512KB（正常几百字节到几十 KB），解析前先卡住
- *   · 音频转发上限 12MB，超了就断开而不是整首吞进内存
+ *   · 音频转发上限 12MB（`AUDIO_BODY_LIMIT`，只作用于 `?play=` 的转发），
+ *     超了就断开而不是整首吞进内存
  *   · 解析（读取 body）也在同一个时限之内："fetch 返回了"不等于
  *     "数据到了"，超时必须覆盖到 body 读完，否则慢速响应体可以无限拖时间
  * ------------------------------------------------------------------ */
@@ -81,20 +83,10 @@ const AUDIO_BODY_LIMIT = 12 * 1024 * 1024;
 const SEARCH_CACHE_TTL_MS = 120 * 1000;
 /** 最多缓存多少关键词（Worker isolate 内存有限，必须有上限）。 */
 const SEARCH_CACHE_MAX = 200;
-/** "优先源等待窗口"：优先源在这段时间内没给出**合规**结果就先返回别家的。 */
-const PREFERRED_GRACE_MS = 900;
 /** 单个音源连续失败几次进入熔断。 */
 const SOURCE_FAILURE_THRESHOLD = 3;
 /** 熔断冷却时长：给故障源一点恢复时间，又不至于让它长时间不可用。 */
 const SOURCE_COOLDOWN_MS = 90 * 1000;
-/**
- * "满足条件"的最低相似度。
- *
- * 为什么不能只看"有没有结果"：一个查不到歌名的音源经常返回一堆
- * 名字完全不相关的歌（模糊匹配兜底）。那种结果即使"非空"也不该
- * 抢先返回。所以只有结果的相似度过线，才算"首个可用的结果"。
- */
-const MIN_TITLE_SCORE = 0.5;
 
 const DEFAULT_METING_BASES = [
   // 实测过的一批公共音源（清单来自 VoiceHub 的 musicSources.ts，逐个实测筛选）。
@@ -559,37 +551,6 @@ async function keepPlayableNetease(songs) {
   });
 }
 
-/**
- * 同一首歌的多个版本里优先保留**能播的那一版**。
- *
- * 为什么需要它（实测踩到的场景）：搜《雨爱》时网易云给出的**杨丞琳原唱
- * 受版权限制拿不到音频**（outer/url 302 回它自己首页），而苹果目录里
- * 同一首歌只有翻唱/氛围版 —— 如果直接按"可播"过滤，结果就是
- * "搜原唱却只能看到翻唱"。这不是搜索的问题，是**版权**的问题；
- * 但我们可以做到：把这个标题下的候选按"能播优先"排一排，
- * 让能听的那一版浮上来，而不是让整首歌消失。
- *
- * 做法：对同一 (歌名) 分组的候选，把"可播"的排在前面；
- * 组内顺序保持原来的相关度顺序（稳定排序）。
- */
-function preferPlayableVersions(songs) {
-  // 已经过 keepPlayableNetease，剩下的基本都可用；这里只做**稳定重排**：
-  // 同名的候选里，把"标题最干净"的再顶一次（原唱通常就是最干净的那个）。
-  const groups = new Map();
-  songs.forEach((s, i) => {
-    const key = String(s.name || '').toLowerCase().replace(/\s+/g, '');
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ s, i });
-  });
-
-  const out = [];
-  for (const list of groups.values()) {
-    list.sort((x, y) => x.i - y.i);           // 稳定：保持原有相关度顺序
-    out.push(...list.map((x) => x.s));
-  }
-  return out;
-}
-
 async function metingResolve(base, songId) {
   if (isGdStudio(base)) return gdstudioResolve(base, songId);
   const url = `${base}?server=netease&type=url&id=${encodeURIComponent(songId)}`;
@@ -711,23 +672,6 @@ function titlePartOf(raw) {
   if (parts.length < 2) return value;
   if (parts[0].length < 2) return value;      // 第一段太短（如 "a love song"）就不拆
   return parts[0];
-}
-
-/** 把最像查询词的那一首排到第一位 —— 前端默认播第一个候选。 */
-function rankByRelevance(songs, title) {
-  return songs
-    .map((song) => ({ song, score: matchScore(song.name, title) }))
-    .sort((x, y) => y.score - x.score);
-}
-
-/** 一个音源的所有候选中，与查询词最接近的相似度。 */
-function bestScore(songs, title) {
-  let best = 0;
-  for (const song of songs) {
-    const score = matchScore(song.name, title);
-    if (score > best) best = score;
-  }
-  return best;
 }
 
 /**
@@ -924,8 +868,12 @@ function hostOf(url) {
      1. **逐跳校验**：自己跟随重定向，每一跳的目标主机都必须来自可信集合
         （配置里的 Meting 基址 + 苹果 storefront），不在集合里就拒绝。
         用 redirect:'manual' 而不是 'follow'，因为跟随后就再也看不到中间跳了。
-     2. **解析出的 IP 必须不是内网/保留地址**：防 DNS 指向私有地址
-        （即使是可信域名，也有被劫持或配错的可能）。
+     2. **拒绝内网/保留地址**（见下面的 isPrivateIp）。
+        ⚠️ 这条的**实际能力边界**：它只检查目标主机名是不是一个 IP **字面量**
+        或明确的本地后缀（localhost / .local / .internal），**不做 DNS 解析**。
+        也就是说"可信域名被劫持后解析到 169.254.169.254"这种情形它挡不住 ——
+        Workers 运行时没有同步 DNS 查询可用来做这件事。真正的第二道防线是
+        第 1 条：中间跳必须是可信域名，且最终跳只允许 https 公网 URL。
 
    为什么允许"可信集合之外"的 https 主机作为最终跳：上游音源经常把音频
    放在自己的 CDN 上，硬性白名单会把正常试听全部打断（那就从"不安全"变成
@@ -1159,8 +1107,14 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
         settled.push({ source, songs });
         done += 1;
 
+        // 音源 P0-4：**"搜到 0 条"不是源故障。**
+        //
+        // 原来这里写的是 `songs.length ? sourceMarkHealthy() : sourceMarkFailure()`，
+        // 于是连搜三个冷门歌名就会把一个完全健康的源熔断 90 秒 ——
+        // 表现是"刚才还能搜，现在搜不到了"，而用户完全不知道为什么。
+        // 上游**正常返回空结果**恰恰说明它活着：它听懂了，只是没有这首歌。
+        // 只有真的报错（下面的 catch）才算失败，那个分支里单独记账。
         if (songs.length) sourceMarkHealthy(source.name);
-        else sourceMarkFailure(source.name);
 
         // 合并模式：不再"第一个过线就收工"，而是等齐所有源（或到截止时间）
         if (done >= live.length) finish();
@@ -1440,6 +1394,35 @@ export async function onRequestGet(context) {
     message: '试听请求过于频繁，请稍后再试',
   });
   if (limit) return limit;
+
+  /**
+   * 音源 P0-3：惰性可播性校验 `?check=<trackId>`。
+   *
+   * 目的：点「试听」之前就知道这一版有没有音频，**根本不挂必然失败的播放器**。
+   * 零数据库迁移：复用 probeNeteasePlayable 与它自带的 10 分钟缓存。
+   *
+   * 位置很讲究：排在 guardRate 之后、play 分支之前 ——
+   *   1. 不能排在限流之前，否则它就成了免费的探测入口；
+   *   2. 不能排在 play 之后，否则会被 play 分支吞掉；
+   *   3. 它**不会**触发任何音频转发，只做一次重定向探测。
+   *
+   * 只回结论，不回任何上游地址或 id（与 probe 同一条口径）。
+   */
+  const checkId = (url.searchParams.get('check') || '').trim();
+  if (checkId) {
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(checkId)) return error('歌曲 id 不正确', 400);
+
+    // 苹果给的是官方 previewUrl，必有音频；其它前缀来源无法判断 -> null（放行）
+    if (/^ap-/.test(checkId)) return json({ ok: true, playable: true });
+
+    if (/^mt-\d+$/.test(checkId)) {
+      const realId = checkId.slice(3);
+      const playable = await probeNeteasePlayable(realId);
+      return json({ ok: true, playable });
+    }
+
+    return json({ ok: true, playable: null });
+  }
 
   const playId = (url.searchParams.get('play') || '').trim();
   if (playId) {

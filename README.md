@@ -4,6 +4,14 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 
 本包是**整体替换版**：把仓库里的文件全部覆盖即可，不需要挑文件。
 
+> 构建标识（用于核对"线上跑的到底是哪一包"）：
+> `2026-10-07-v6.1-schedule`　｜　`functions/api/music.js` 的构建号
+> `2026-10-06-a+playable-check`（打开 `/api/music?probe=1` 即可看到）。
+> 两者不一致就说明部署的不是这一包。
+>
+> 页面版本号：五个页面页脚最底下显示 `版本 beta1.1`（由
+> `_harness\apply-version.mjs beta1.1` 统一写入）。
+
 ---
 
 ## 一、部署步骤
@@ -19,10 +27,10 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 
 ### 2. 在 D1 控制台执行 SQL
 
-按顺序全部执行一遍（`sql/001` ~ `sql/009`）。方便起见也可以直接粘贴交付目录里的：
+按顺序全部执行一遍（`sql/001` ~ `sql/013`）。方便起见也可以直接粘贴交付目录里的：
 
-- `操作.txt` —— **全新部署**用，99 行纯 SQL，从 001 到 009 全量。
-- `操作-增量补丁.txt` —— **已经跑过 001~003** 的话只跑这个，18 行（004~009）。
+- `操作.txt` —— **全新部署**用，121 行纯 SQL，从 001 到 013 全量。
+- `操作-增量补丁.txt` —— **已经跑过 001~003** 的话只跑这个，46 行（004~013）。
 
 > 注意：完整版不要重复执行：`ALTER TABLE ... ADD COLUMN` 在列已存在时会报错并中断，
 > 后面的语句就跑不到了。
@@ -43,8 +51,8 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 | `GUEST_PASSWORD` | 游客口令。配了才有「游客模式」（只读：能看排行与试听） | **默认关闭**：不配就等于没有游客模式 |
 | `TRACK_TOKEN_SECRET` | 选曲凭据的签名密钥 | 退回用 `AUTH_PEPPER`，一般不用单独配 |
 | `ICP_BEIAN` / `GONGAN_BEIAN` / `COPYRIGHT_HOLDER` | 备案号与版权主体 | 页面里已写死真实值，配了就以环境变量为准 |
-| `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：优先 Meting，失败回退苹果官方试听 |
-| `MUSIC_API_BASE` | 自建 Meting 地址 | 用内置的公共 Meting 源 |
+| `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：**苹果试听优先（hk/tw/us 三个店）→ 网易云官方 → Meting 中转兜底**，与 `buildSources()` 一致 |
+| `MUSIC_API_BASE` | 自建 Meting 地址（**替换**内置默认源，不是追加） | 用内置的 GD Studio 源，实测该基址连接超时 |
 | `MUSIC_STOREFRONT` | 苹果试听的地区，如 `hk` / `tw` / `us` | 默认即可 |
 
 #### 人机校验（reCAPTCHA v3）
@@ -78,14 +86,23 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 > 管理员仍能登录（管理员登录不依赖查找索引），到后台把班级口令
 > **逐个重设**或**批量重新生成**一遍即可恢复。
 
-### 4. 换掉默认口令
+### 4. 设置你自己的管理员口令（**这一步不做就进不去后台**）
 
-本包为了让你先夺回控制权，把凭证重置成了公开的弱口令：
+`000_reset_database.sql` 里那个示例管理员 `admin` 的哈希对应公开口令 `admin888`。
+它是**公开仓库里的示例口令**，所以 `functions/api/admin-login.js` **默认拒绝**用它登录
+（返回 403，只有显式配 `ALLOW_DEFAULT_ADMIN_PASSWORD=1` 才放行，那是给本地测试用的）。
 
-- 管理员：`admin` / `admin888`
-- 班级：`yczx2026`
+**所以正确的顺序是：先用一条 SQL 把自己的口令写进 `admins` 表，再用它登录。**
+具体做法见下文「部署后必做 → 1. 立刻改掉示例管理员口令」，
+最省事的路径是直接执行这条（明文会被首次登录自动升级为哈希）：
 
-**部署完请立刻改掉这两个。** 管理员密码在后台「系统设置 → 修改管理员密码」。
+```sql
+UPDATE admins SET password = '你的新口令' WHERE username = 'admin';
+DELETE FROM sessions WHERE subject = 'admin';
+```
+
+班级口令 `yczx2026` 同样是公开的：管理员登录后到
+「系统设置 → 班级管理」批量生成或逐个修改。
 
 ---
 
@@ -556,9 +573,11 @@ sql/009_song_track_id.sql               点歌时锁定的音源 id
 - **`sql/001` 不可重复执行**（列已存在会报 `duplicate column name`），这是预期行为；
   重复部署请用增量补丁。
 - **改 `AUTH_PEPPER` 会锁死已有班级口令**，见上文第 3 步的说明。
-- **音源是第三方公共服务**，随时可能失效。默认 `auto` 会优先 Meting、失败回退
-  苹果官方试听（30 秒片段，零配置可用）。若要稳定，建议自建 Meting 并用
-  `MUSIC_API_BASE` 指过去。
+- **音源是第三方公共服务**，随时可能失效。默认 `auto` 顺序是
+  **苹果官方试听（hk/tw/us 三个店，30 秒片段，零配置可用）→ 网易云官方接口
+  （完整歌曲，但公开搜索接口隐藏主流版权曲）→ Meting 中转兜底**
+  （内置的唯一默认基址 `music-api.gdstudio.xyz` 实测连接超时）。
+  若要稳定地听完整版，建议自建 Meting 并用 `MUSIC_API_BASE` 指过去。
 - **点歌强制从搜索结果里选**。好处是锁定了音源、榜上直接播对的那一版；
   代价是**搜不到的歌就点不了**（冷门曲目、翻唱、纯音乐尤其容易搜不到）。
   目前的退路只有管理员用调试模式提交。若觉得太严，可以把

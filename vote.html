@@ -58,11 +58,11 @@
   /* 候选面板与搜索框之间留出一档，不再紧贴按钮 */
   #searchBox,#auditionBox{margin-bottom:var(--s2);}
   /* 两个"返回/退出"是次要操作：描边、不与主操作抢注意力 */
-  .back{background:#fff;color:var(--ink-3);border:1px solid var(--line);font-weight:600;box-shadow:none;margin-top:var(--s3);padding:12px 16px;font-size:15px;}
-  .back:hover{background:var(--surface-2);color:var(--ink-2);}
+.back{background:#fff;color:var(--ink-3);border:1px solid var(--line);font-weight:600;box-shadow:none;margin-top:var(--s3);padding:12px 16px;font-size:15px;}
+.back:hover{background:var(--surface-2);color:var(--ink-2);}
 
   /* ---------- 第四档：字体 / 间距 / 圆角统一 + 无障碍 ---------- */
-  .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
+.field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
   button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{
     outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
   @media(prefers-reduced-motion:reduce){
@@ -434,186 +434,228 @@
   }
 /* ==== 设计层 · 终点 ==== */
 /* ============================================================
-     视觉系统 v4（观感重做；布局结构与无障碍约束不动）
+     视觉系统 v4（文件名沿用旧版；这一层就是当前生效的设计层）
      ------------------------------------------------------------
-     设计取向：**暖墨底 + 玉青点缀 + 琥珀提醒**。
-       上一版是"中性冷灰 + 企业蓝"，读起来像后台；这一版把底色偏暖、
-       把强调色换成玉青（teal），红色只留给真正的危险动作，
-       整体往"安静的文具 / 阅读器"靠 —— 学生看歌单和榜单时不刺眼。
-     四条硬约束（都有测试盯着）：
-       1. 手机单栏 + 宽屏左右两栏（含 .mobile-tabs 的显隐切换）；
-       2. 后台宽屏是工作台栅格；
-       3. 正文 ≥15px、辅助文字 ≥12px，且对比度够；
-       4. 深色模式跟随系统。
+     这一层是 v6「夜航 / Night Flight」：它整段替换了旧版的 v4 + v5 两段追加层。
+     维护提示：apply-design.mjs 会**数上面那串特征字出现几次**来校验"设计层恰好一份"，
+     所以那串字在本层正文里只能出现一次，别在别处再写它，否则会被判成叠了两份。
+     设计取向：把"校园后台"改成"深夜电台的节目单" ——
+       冷白纸底 + 靛紫主色 + 青作点缀 + 琥珀读票数；
+       主按钮是胶囊 + 对角渐变 + 外发光；卡片靠三档阴影分层；
+       页签是分段控件；标题大字号 + 紧字距。
+     红线（有测试盯着，改前先读）：
+       1. body 必须含 #eef3f9 + 恰好 1 处 radial-gradient + 1 处 linear-gradient；
+       2. 最后一条带 background 的 .rank-card{...} 必须是
+          background:var(--surface) + box-shadow:none（榜单行保持平底）；
+       3. 样式块里至少一处 backdrop-filter:blur( ；
+       4. 宽屏隐藏切换按钮、双端分栏、后台工作台栅格必须重述；
+       5. 正文里的规则**一律写成一行** —— 选择器后换行会让前端守卫扫不到。
      ============================================================ */
 
   /* ------------------------------------------------------------
-     一、令牌
+     一、亮色令牌（覆盖现有令牌名，全站立刻换肤）
      ------------------------------------------------------------ */
   :root{
-    /* 暖墨底：比纯灰多一点黄，长时间看不发青 */
-    --canvas:#f4f1ec;--surface:#ffffff;--surface-2:#faf8f5;--surface-3:#f1eee8;--surface-4:#e9e5dd;
-    --ink:#181614;--ink-2:#3d3a35;--ink-3:#5f5a52;--ink-4:#8b857b;
-    --line:#e6e1d8;--line-soft:#efeae2;--line-strong:#d3ccc0;
-    /* 玉青：唯一的强调色，只出现在"该被点的地方" */
-    --brand:#0f766e;--brand-strong:#0d5f59;--brand-soft:#e8f4f2;--brand-line:#b7ded8;
-    --brand-ink:#0b544f;
-    /* 危险：砖红（不是正红，避免"降价标签"那种突兀） */
-    --danger:#b23a2f;--danger-soft:#fbf1ef;
-    --warn:#96650a;--warn-soft:#fdf7e8;
-    --success:#12705a;--ok-soft:#eef7f3;
-
-    /* 排版：主标题 32、栏目标题 20、正文 15.5、辅助 13、最小 12 */
-    --fs-display:32px;--fs-title:20px;--fs-head:17px;--fs-body:15.5px;--fs-sub:13px;--fs-cap:12px;
-    --lh-tight:1.22;--lh-body:1.7;
-    --fw-body:400;--fw-medium:500;--fw-strong:600;--fw-bold:700;
-
-    /* 间距与圆角：卡片更大更圆，控件全胶囊 */
+    --brand:#5b3df5;--brand-strong:#4326d8;--brand-soft:#eeeaff;--brand-line:#d3caff;
+    --brand-ink:#2f1a9e;--accent:#06b6d4;--accent-soft:#e6fbff;
+    --ink:#0b0e18;--ink-2:#333b52;--ink-3:#586180;--ink-4:#6d7694;
+    --canvas:#eef3f9;--surface:#ffffff;--surface-2:#fafbff;--surface-3:#f1f4fb;--surface-4:#e8ecf7;
+    --line:#e6e9f4;--line-soft:#eef1f9;--line-strong:#ccd2e6;
+    --danger:#e5484d;--danger-soft:#fff1f1;--warn:#b45309;--warn-soft:#fff7e8;
+    --success:#12b76a;--ok-soft:#eafaf1;
+    --v6-grad:linear-gradient(135deg,#6244ee 0%,#5230e0 45%,#4338ca 100%);
+    --v6-grad-soft:linear-gradient(135deg,rgba(109,76,255,.12),rgba(6,182,212,.10));
+    --v6-r-sm:12px;--v6-r:14px;--v6-r-lg:18px;--v6-r-xl:22px;--v6-r-pill:999px;
+    --v6-sh-1:0 1px 2px rgba(11,14,24,.05),0 1px 3px rgba(11,14,24,.04);
+    --v6-sh-2:0 8px 24px -12px rgba(11,14,24,.22);
+    --v6-sh-3:0 28px 64px -28px rgba(11,14,24,.38);
+    --v6-glow:0 10px 30px -12px rgba(91,61,245,.55);
+    --v6-amber:rgba(245,158,11,.10);
+    --ring:0 0 0 4px rgba(91,61,245,.18);
+    --shadow-card:var(--v6-sh-1);--shadow-pop:var(--v6-sh-3);
+    --r-sm:var(--v6-r-sm);--r-md:var(--v6-r);--r-lg:var(--v6-r-lg);--r-xl:var(--v6-r-xl);
+    --r-pill:var(--v6-r-pill);--r-ctl:var(--v6-r-pill);--r-card:var(--v6-r-xl);--radius:var(--v6-r-lg);
+    --fs-display:34px;--fs-title:20px;--fs-head:17px;--fs-body:15.5px;--fs-sub:13px;--fs-cap:12px;
+    --lh-tight:1.2;--lh-body:1.7;
+    --fw-body:400;--fw-medium:500;--fw-strong:600;--fw-bold:800;
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:44px;
-    --r-sm:10px;--r-md:14px;--r-lg:22px;--r-xl:26px;--r-pill:999px;
-    --r-ctl:var(--r-pill);--r-card:var(--r-lg);
-
-    --ease:cubic-bezier(.2,.8,.2,1);
-    --ease-out:cubic-bezier(.16,1,.3,1);
+    --ease:cubic-bezier(.22,.61,.36,1);--ease-out:cubic-bezier(.22,.61,.36,1);
     --d1:140ms;--d2:240ms;--d3:400ms;
-    --shadow-card:none;
-    --shadow-pop:0 24px 56px -24px rgba(24,22,20,.36);
-    --ring:0 0 0 4px rgba(15,118,110,.16);
   }
 
   /* ------------------------------------------------------------
-     二、画布与基础排版
+     二、画布：冷白纸底 + 一处品牌渐晕（网格取消）
      ------------------------------------------------------------ */
   body{
     font-family:'Segoe UI Variable Display','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,
       BlinkMacSystemFont,'MiSans','HarmonyOS Sans SC','PingFang SC','Hiragino Sans GB',
       'Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
-    font-size:var(--fs-body);line-height:var(--lh-body);letter-spacing:.008em;
-    color:var(--ink-2);background-color:var(--canvas);
+    font-size:var(--fs-body);line-height:var(--lh-body);letter-spacing:.006em;
+    color:var(--ink-2);background-color:#eef3f9;
     background-image:
-      radial-gradient(880px 420px at 50% -200px,rgba(15,118,110,.09),rgba(15,118,110,0) 66%),
-      linear-gradient(180deg,#f8f6f2 0%,var(--canvas) 55%,#eae6df 100%);
+      radial-gradient(1000px 520px at 50% -240px,rgba(91,61,245,.12),rgba(91,61,245,0) 68%),
+      linear-gradient(180deg,#f6f8fd 0%,#eef3f9 55%,#e7ecf5 100%);
     background-attachment:fixed;
     -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
     font-kerning:normal;text-rendering:optimizeLegibility;
   }
+  /* 紫青光晕 + 2% 细颗粒：放在伪元素上，body 规则本身保持"只有一处径向渐变" */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background-image:
+      radial-gradient(680px 380px at 8% 0%,rgba(91,61,245,.10),rgba(91,61,245,0) 70%),
+      radial-gradient(720px 420px at 100% 12%,rgba(6,182,212,.09),rgba(6,182,212,0) 72%);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+    background-image:repeating-conic-gradient(from 0deg at 50% 50%,rgba(11,14,24,.020) 0deg 1deg,rgba(11,14,24,0) 1deg 2deg);
+  }
 
-  h1,h2,h3{color:var(--ink);line-height:var(--lh-tight);font-weight:var(--fw-bold);letter-spacing:-.022em;}
-  .header h1,.top-bar h2{font-size:var(--fs-display);font-weight:var(--fw-bold);letter-spacing:-.03em;}
-  .col-title,.panel h3,#rulesBox h3{font-size:var(--fs-title);font-weight:var(--fw-strong);letter-spacing:-.018em;}
-  .song-main h3,.card h3,.rank-info h3,.ui-title{font-size:var(--fs-head);font-weight:var(--fw-strong);letter-spacing:-.01em;}
+  /* ------------------------------------------------------------
+     三、排版
+     ------------------------------------------------------------ */
+  h1,h2,h3{color:var(--ink);line-height:var(--lh-tight);font-weight:var(--fw-bold);letter-spacing:-.03em;}
+  .header h1,.top-bar h2{font-size:34px;font-weight:800;letter-spacing:-.04em;line-height:1.16;}
+  .col-title,.panel h3,#rulesBox h3{font-size:var(--fs-title);font-weight:var(--fw-bold);letter-spacing:-.022em;}
+  .song-main h3,.card h3,.rank-info h3,.ui-title{font-size:var(--fs-head);font-weight:var(--fw-strong);letter-spacing:-.014em;}
   .song-main p,.rank-info p,.card p,.slot,.ui-msg{font-size:var(--fs-body);color:var(--ink-3);line-height:var(--lh-body);}
   .header p,.sub,.col-title span,.card h3 .range,.slot .idx,.slot .meta,.field-label,.ui-msg,#siteVersion{font-size:var(--fs-sub);}
-  footer p,#disclaimerBox p{font-size:var(--fs-cap);color:var(--ink-4);line-height:1.75;}
-  .rank-votes,.song-votes,.slot .idx,.slot .tag,.card h3 .range,#siteVersion{font-variant-numeric:tabular-nums;}
-  .rank-votes{font-size:19px;font-weight:var(--fw-bold);letter-spacing:-.02em;}
-  /* 表单标签：小字 + 大写字距，像"字段名"而不是正文 */
-  .field-label{display:block;font-weight:var(--fw-medium);color:var(--ink-2);letter-spacing:.06em;}
+  footer p,#disclaimerBox p{font-size:var(--fs-cap);color:var(--ink-4);line-height:1.8;}
+  .rank-votes,.song-votes,.slot .idx,.slot .tag,.card h3 .range,#siteVersion,.cand-dur{font-variant-numeric:tabular-nums;}
+  .rank-votes{font-size:19px;font-weight:800;letter-spacing:-.02em;}
+  .field-label{display:block;font-weight:var(--fw-medium);color:var(--ink-2);letter-spacing:.05em;}
   input,select,textarea{font-size:16px;letter-spacing:0;color:var(--ink);}
 
   /* ------------------------------------------------------------
-     三、容器：1px 暖描边分层，不用投影
+     四、容器：三档阴影 + 描边
      ------------------------------------------------------------ */
   .header,.card,.box,.panel,.list-panel,#gate,.login-box{
-    background:var(--surface);border:1px solid var(--line);box-shadow:none;
-    border-radius:var(--r-card);
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--v6-r-xl);
+    box-shadow:var(--v6-sh-1);
   }
-  .header,.login-box,#gate{border-radius:var(--r-xl);}
-  .header,.card,.box,.panel,.list-panel,#gate,.login-box,.tabs button,
-  .mobile-tabs,.mobile-tabs button{backdrop-filter:none;-webkit-backdrop-filter:none;}
-  .header{margin-bottom:var(--s5);}
+  .header{background:var(--surface);border-color:var(--brand-line);box-shadow:var(--v6-sh-2);margin-bottom:var(--s5);}
+  .card:hover,.box:hover{box-shadow:var(--v6-sh-2);}
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box,.tabs button,.mobile-tabs,.mobile-tabs button{
+    backdrop-filter:none;-webkit-backdrop-filter:none;
+  }
+  /* R3：至少一处毛玻璃面 —— 登录卡与浮层是唯一需要"真的分离"的地方 */
+  .login-box,#gate{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(255,255,255,.86);}
 
   /* ------------------------------------------------------------
-     四、票数：描边徽章（中性，不用红）
+     五、票数：琥珀数字 + 极浅琥珀底（不再是蓝色实心标签）
      ------------------------------------------------------------ */
   .song-votes{
     flex:0 0 auto;display:inline-flex;align-items:baseline;gap:4px;
-    padding:4px 12px;border-radius:var(--r-pill);
-    background:var(--surface);border:1.5px solid var(--brand-line);
+    padding:5px 13px;border-radius:var(--v6-r-pill);
+    background:var(--v6-amber);border:1px solid rgba(245,158,11,.22);
   }
-  .song-votes .rank-votes{color:var(--brand-ink);}
-  .song-votes>span{color:var(--ink-4) !important;font-size:var(--fs-cap) !important;}
+  .song-votes .rank-votes{color:var(--warn);font-weight:800;font-variant-numeric:tabular-nums;}
+  .song-votes>span{color:var(--ink-3) !important;font-size:var(--fs-cap) !important;}
 
   /* ------------------------------------------------------------
-     五、按钮：全胶囊三层级
+     六、按钮：胶囊 + 对角渐变 + 外发光
      ------------------------------------------------------------ */
   button,.gate-enter{
     letter-spacing:.02em;font-weight:var(--fw-medium);
     display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;
-    border-radius:var(--r-pill);
+    border-radius:var(--v6-r-pill);
   }
-  .btn{display:flex;align-items:center;justify-content:center;font-weight:var(--fw-strong);line-height:1.25;letter-spacing:.03em;}
-  .btn,.gate-enter,.box>button,.ui-btn{min-height:48px;font-size:16px;padding:12px 22px;border-radius:var(--r-pill);}
-  .song-acts button,.tabs button,.mobile-tabs button,.back,.more,
-  .card .actions button,.top-bar button{
-    min-height:40px;font-size:14px;padding:9px 16px;border-radius:var(--r-pill);
+  /* 必须是 block：.btn 是个 <a>，靠它撑满整行（改成 inline-flex 会缩成一团） */
+  .btn{display:block;text-align:center;font-weight:var(--fw-strong);line-height:1.25;letter-spacing:.03em;}
+  .btn,.gate-enter,.box>button,.ui-btn{min-height:48px;font-size:16px;padding:12px 22px;border-radius:var(--v6-r-pill);}
+  .song-acts button,.tabs button,.mobile-tabs button,.back,.more,.card .actions button,.top-bar button{
+    min-height:40px;font-size:14px;padding:9px 16px;border-radius:var(--v6-r-pill);
   }
   .card .actions .btn-quiet,.card .actions .btn-danger,.btn-sm,.btn-xs{min-height:36px;font-size:var(--fs-sub);padding:7px 14px;}
   @media(max-width:560px){.song-acts button,.card .actions button{min-height:44px;}}
-
-  .btn,.box>button[onclick="vote()"],.gate-enter,.btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);}
-  .btn:hover,.box>button[onclick="vote()"]:hover,.btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
-  .btn-secondary,.back,.song-acts .act-secondary,
-  .box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
-    background:var(--surface);color:var(--ink-2);border:1.5px solid var(--line-strong);
+  .btn,.btn-primary,.gate-enter,.song-acts .act-primary,.box>button[onclick="vote()"],
+  #goVoteBtn,#regBtn{
+    background:var(--v6-grad);color:#fff;border:0;box-shadow:var(--v6-glow);
   }
-  .btn-secondary:hover,.back:hover,.song-acts .act-secondary:hover{background:var(--surface-2);border-color:var(--ink-4);}
-  .song-acts .act-quiet,.btn-quiet{background:transparent;color:var(--ink-3);border:1.5px solid var(--line);}
+  .btn:hover,.btn-primary:hover,.gate-enter:hover,.song-acts .act-primary:hover,.box>button[onclick="vote()"]:hover,
+  #goVoteBtn:hover,#regBtn:hover{
+    background:var(--v6-grad);border:0;box-shadow:0 14px 34px -12px rgba(91,61,245,.62);transform:translateY(-1px);
+  }
+  .btn:active,.btn-primary:active,.gate-enter:active,.song-acts button:active,.tabs button:active,.mobile-tabs button:active{transform:scale(.985);}
+  .btn-secondary,.back,.song-acts .act-secondary,.box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+    background:transparent;color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;
+  }
+  .btn-secondary:hover,.back:hover,.song-acts .act-secondary:hover,.box>button[onclick="searchSongs()"]:hover,.box>button[onclick="auditionInput()"]:hover{
+    background:var(--surface-3);border-color:var(--brand-line);color:var(--ink);
+  }
+  .song-acts .act-quiet,.btn-quiet{background:transparent;color:var(--ink-2);border:1px solid transparent;box-shadow:none;}
+  /* 原版后台另有一条把 btn-quiet 的背景刷成 --ink-3（浅色下就是个深灰块），
+     文字却留在深灰上 —— 实测 1.23:1，等于看不见。显式钉死一对过线的值。 */
+  #adminBox .btn-quiet,.top-bar .btn-quiet{background:var(--surface-3);color:var(--ink-2);border:1px solid var(--line);}
+  #adminBox .btn-quiet:hover,.top-bar .btn-quiet:hover{background:var(--surface-4);color:var(--ink);}
   .song-acts .act-quiet:hover,.btn-quiet:hover{background:var(--surface-3);color:var(--ink-2);}
-  .song-acts .act-primary{background:var(--brand);color:#fff;border:1.5px solid var(--brand);}
-  .btn-danger{background:var(--surface);color:var(--danger);border:1.5px solid #e4c4bf;}
-  .btn-pass{background:var(--success);border-color:var(--success);}
-  .btn-reject{background:var(--danger);border-color:var(--danger);}
-  button:active,.btn:active,.song-acts button:active,.tabs button:active,.mobile-tabs button:active{transform:scale(.975);}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid rgba(229,72,77,.34);box-shadow:none;}
+  .btn-danger:hover{background:var(--danger-soft);border-color:var(--danger);}
+  .btn-pass{background:var(--success);border-color:var(--success);color:#fff;}
+  .btn-reject{background:var(--danger);border-color:var(--danger);color:#fff;}
   button,.btn,.song-acts button,.tabs button,.mobile-tabs button,.back,.more{
     transition:background-color var(--d1) var(--ease),border-color var(--d1) var(--ease),
                color var(--d1) var(--ease),transform var(--d2) var(--ease),box-shadow var(--d1) var(--ease);
   }
 
   /* ------------------------------------------------------------
-     六、输入控件
+     七、输入控件
      ------------------------------------------------------------ */
   input,select,textarea{
-    background:var(--surface-2);border:1.5px solid var(--line);border-radius:var(--r-md);
+    background:var(--surface-2);border:1px solid var(--line);border-radius:var(--v6-r);
     transition:background-color var(--d2) var(--ease),border-color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
   }
   input::placeholder,textarea::placeholder{color:var(--ink-4);opacity:1;}
   input:focus,select:focus,textarea:focus{background:var(--surface);border-color:var(--brand);box-shadow:var(--ring);outline:none;}
   button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
-    outline:3px solid rgba(15,118,110,.4);outline-offset:2px;border-radius:var(--r-sm);}
+    outline:3px solid rgba(91,61,245,.42);outline-offset:2px;border-radius:var(--v6-r-sm);}
 
   /* ------------------------------------------------------------
-     七、页签：胶囊分段
+     八、页签：分段控件（槽 + 滑块）
      ------------------------------------------------------------ */
   .tabs{gap:var(--s2);}
-  .tabs button{background:transparent;color:var(--ink-3);border:1.5px solid transparent;font-weight:var(--fw-medium);}
+  .tabs button{background:transparent;color:var(--ink-3);border:1px solid transparent;font-weight:var(--fw-medium);}
   .tabs button:hover:not(.active){background:var(--surface-3);color:var(--ink);}
-  .tabs button.active{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:var(--fw-strong);}
-  .mobile-tabs{display:flex;gap:4px;padding:4px;border-radius:var(--r-pill);background:var(--surface-3);border:1px solid var(--line);}
+  .tabs button.active{background:var(--v6-grad);border:1px solid transparent;color:#fff;font-weight:var(--fw-strong);box-shadow:var(--v6-sh-2);}
+  .mobile-tabs{display:flex;gap:4px;padding:4px;border-radius:var(--v6-r-pill);background:var(--surface-3);border:1px solid var(--line);}
   .mobile-tabs button{
-    flex:1 1 0;min-height:38px;margin:0;border:0;border-radius:var(--r-pill);background:transparent;
+    flex:1 1 0;min-height:38px;margin:0;border:0;border-radius:var(--v6-r-pill);background:transparent;
     color:var(--ink-3);font-size:14px;font-weight:var(--fw-medium);
-    transition:background-color var(--d2) var(--ease),color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
   }
-  .mobile-tabs button.active{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(24,22,20,.08);}
+  /* 分段控件的未选中态：--ink-3 on --surface-3 实测 4.2:1，差一点点，
+     这里单独压到 --ink-2（#app 前缀用来盖过原版同特异性规则）。 */
+  #app .mobile-tabs button,.mobile-tabs button:not(.active){color:var(--ink-2);}
+  .mobile-tabs button.active{background:var(--v6-grad);color:#fff;box-shadow:var(--v6-sh-2);}
+  /* 宽屏下分段控件的槽也收成透明（1080 以上后台是左导航） */
+  @media(min-width:1080px){
+    .tabs{background:transparent;border:0;padding:0;border-radius:0;}
+    .tabs button{text-align:left;justify-content:flex-start;box-shadow:none;}
+    .tabs button.active{background:var(--v6-grad-soft);color:var(--brand-ink);border:1px solid var(--brand-line);}
+  }
 
   /* ------------------------------------------------------------
-     八、栏目标题：小字距 + 细下划线（去掉竖条）
+     九、栏目标题
      ------------------------------------------------------------ */
   .col-title{border-left:0;padding-left:0;padding-bottom:var(--s2);border-bottom:1px solid var(--line);
              text-transform:none;letter-spacing:.02em;margin-bottom:var(--s3);}
   .col-title span{font-weight:var(--fw-body);color:var(--ink-4);}
 
   /* ------------------------------------------------------------
-     九、列表与试听面板
+     十、榜单：列表容器才是"浮起的盒子"，行保持平底（R4）
      ------------------------------------------------------------ */
-  .list-panel{margin-bottom:var(--s4);overflow:hidden;min-height:180px;}
+  .list-panel{margin-bottom:var(--s4);overflow:hidden;min-height:180px;counter-reset:rankno;}
+  .list-panel>.rank-card{counter-increment:rankno;}
+  .rank-no::before{content:counter(rankno);}
+  .rank-no{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+           min-width:26px;height:26px;padding:0 6px;border-radius:var(--v6-r-sm);
+           background:var(--surface-3);color:var(--ink-3);font-size:13px;font-weight:700;
+           font-variant-numeric:tabular-nums;}
   .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
   .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
   .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
   .list-panel:has(>.sub:only-child){
     min-height:0;display:flex;align-items:center;justify-content:center;
-    padding:var(--s6) var(--s4);background:var(--surface-2);border-style:dashed;
+    padding:var(--s6) var(--s4);background:var(--surface-2);border-style:dashed;box-shadow:none;
   }
   .list-panel>.sub:only-child{margin:0;color:var(--ink-4);}
   @supports not (selector(:has(*))){.list-panel{min-height:0;}}
@@ -626,286 +668,213 @@
   .list-panel>div:not(.rank-card) audio{width:100%;display:block;}
 
   /* ------------------------------------------------------------
-     十、公告 / 须知 / 页脚 / 空态
+     十一、公告 / 须知 / 页脚 / 空态
      ------------------------------------------------------------ */
-  #announceBox .panel{background:var(--brand-soft);border:1px solid var(--brand-line);border-left:0;border-radius:var(--r-card);}
+  #announceBox .panel{background:var(--brand-soft);border:1px solid var(--brand-line);border-left:0;border-radius:var(--v6-r-xl);}
   #announceBox .panel h3{color:var(--brand-ink);}
+  /* 页脚小字：原版规则把字号压到 11px、颜色定成 #94a3b8（2.48:1，低于 AA）。
+     字号与颜色都改成过线的值 —— 备案信息属于"必须能看清"的内容。 */
+  footer p{font-size:12px;color:var(--ink-3);}
+  #beianFooter,#beianFooter a,#beianFooter span{color:var(--ink-3);}
+  #siteVersion{font-size:12px;}
+  /* 备案页脚里那几个内联 color:#… 的 span/a：属性选择器 + !important 才压得住
+     行内样式（行内优先级高于任何选择器）。文案与顺序一个字都没动。 */
+  #beianFooter [style*="color:#94a3b8"],#beianFooter [style*="color:#cbd5e1"],
+  #beianFooter [style*="color:#8b93a7"]{color:var(--ink-3) !important;}
+  #beianFooter [style*="color:#cbd5e1"]{color:var(--ink-4) !important;}
   #rulesBox .panel>div:first-child{border-bottom:1px solid var(--line);}
   #rulesBox .rules-toggle{background:transparent;border:0;color:var(--brand);font-size:var(--fs-sub);font-weight:var(--fw-medium);}
-  footer img{box-shadow:none;background:transparent;opacity:.35;}
-  #siteVersion{color:var(--ink-4);}
+  footer img{box-shadow:none;background:transparent;opacity:.4;}
+  #siteVersion{color:var(--ink-3);}
+  #beianFooter{background:var(--surface-2);}
   p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
   #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
   .song-acts:empty{display:none;}
   .more[style*="display:none"],.more[style*="display: none"]{display:none !important;margin:0;padding:0;height:0;}
 
   /* ------------------------------------------------------------
-     十一、动效
+     十二、候选面板 / 试听面板（T11 把 JS 内联样式收进这些 class）
+     ------------------------------------------------------------
+     以前这块是 JS 拼内联样式，v5 只能用 [style*="…"] + !important 硬压，
+     所以是"半接管"。v6 直接给它们 class 规格，内联样式退休。
      ------------------------------------------------------------ */
-  @keyframes riseIn4{from{opacity:0;transform:translateY(10px) scale(.995);}to{opacity:1;transform:translateY(0) scale(1);}}
-  @keyframes colIn4{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
-  .rank-card{animation:riseIn4 var(--d3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 28ms);}
-  .col.active{animation:colIn4 var(--d2) var(--ease-out) both;}
-  .card{animation:riseIn4 var(--d3) var(--ease-out) both;}
-  #listBox>.card:nth-child(2){animation-delay:28ms;}
-  #listBox>.card:nth-child(3){animation-delay:56ms;}
-  #listBox>.card:nth-child(4){animation-delay:84ms;}
-  #listBox>.card:nth-child(5){animation-delay:112ms;}
-  #listBox>.card:nth-child(6){animation-delay:140ms;}
-  #listBox>.card:nth-child(n+7){animation-delay:168ms;}
+  .cand-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
+              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
+  .cand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 4px;}
+  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;}
+  .cand-hint{font-size:12px;color:var(--ink-4);padding:0 14px 8px;line-height:1.6;}
+  .cand-hint>button{margin:8px 0 0;}
+  .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
+  .cand-rows{padding:0 14px 12px;}
+  .cand-panel [data-track-row]{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;align-items:center;gap:10px;
+              padding:12px 4px;border-top:1px solid var(--line-soft);min-height:54px;flex-wrap:wrap;
+              transition:background-color var(--d1) var(--ease);}
+  .cand-panel [data-track-row]:first-child{border-top:0;}
+  .cand-panel [data-track-row]:hover{background:var(--surface-2);}
+  .cand-no{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+           width:24px;height:24px;border-radius:var(--v6-r-pill);background:var(--surface-3);
+           color:var(--ink-3);font-size:12px;font-weight:700;}
+  .cand-name{color:var(--ink);font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cand-sub{color:var(--ink-4);font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cand-dur{flex:0 0 auto;color:var(--ink-4);font-size:13px;}
+  .cand-acts{flex:0 0 auto;display:flex;gap:8px;}
+  .cand-acts button,[data-track-row] button{min-height:36px;font-size:13px;padding:7px 14px;
+              background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
+  .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
+  .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
+  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
+  .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
+             border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
+  .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
+  .aud-sub{font-size:12px;color:var(--ink-4);}
+  .aud-slot{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
+  .audio-fallback{display:block;}
 
   /* ------------------------------------------------------------
-     十二、双端适配
+     十三、动效
+     ------------------------------------------------------------ */
+  @keyframes riseIn6{from{opacity:0;transform:translateY(10px) scale(.995);}to{opacity:1;transform:translateY(0) scale(1);}}
+  @keyframes colIn6{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .rank-card{animation:riseIn6 var(--d3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 24ms);}
+  .col.active{animation:colIn6 var(--d2) var(--ease-out) both;}
+  .card{animation:riseIn6 var(--d3) var(--ease-out) both;}
+  #listBox>.card:nth-child(2){animation-delay:24ms;}
+  #listBox>.card:nth-child(3){animation-delay:48ms;}
+  #listBox>.card:nth-child(4){animation-delay:72ms;}
+  #listBox>.card:nth-child(5){animation-delay:96ms;}
+  #listBox>.card:nth-child(6){animation-delay:120ms;}
+  #listBox>.card:nth-child(n+7){animation-delay:144ms;}
+
+  /* ------------------------------------------------------------
+     十四、双端适配（宽屏隐藏切换按钮必须重述）
      ------------------------------------------------------------ */
   @media(min-width:900px){
     body{max-width:1140px;padding:32px 28px;}
-    .header h1,.top-bar h2{font-size:38px;}
+    .header h1,.top-bar h2{font-size:40px;}
     .rank-card{padding:18px 22px;}
     .song-acts button{min-height:40px;}
-    /* 必须重述：设计层在样式表更后面，而基类是 display:flex，
-       与断点里的 display:none 特异性相同 —— 后面的赢。
-       漏掉这条，电脑端会多出一排"待审核榜/正式榜"切换按钮。 */
     .mobile-tabs{display:none;}
-  }
-  @media(min-width:1080px){
-    .tabs{background:transparent;border:0;padding:0;}
-    .tabs button{text-align:left;justify-content:flex-start;}
   }
 
   /* ------------------------------------------------------------
-     十三、深色模式（暖墨 → 暖黑）
+     十四之二、排期页的标题尺度
+     ------------------------------------------------------------
+     用户反馈：排期页那个「每周歌单」四个字太大，压过了页面内容。
+     专用性说明：body>div.header h1 的特异性是 (0,1,2)，压得过 v6 上面
+     那条 .header h1 (0,1,1)；而且只有排期页的 .header 是 body 的直接子级
+     （其它页的 .header 在 #app / .box 里），所以这条天然只命中排期页。
+     不去改原版那条 19px —— 那是 R1 要求原样保留的规则，这里只做覆盖。
+     ------------------------------------------------------------ */
+  body>div.header h1{font-size:22px;font-weight:800;letter-spacing:-.02em;}
+  /* 22px 标题 + 13px 副标题并排会挤（实测手机上要换行），
+     所以排期页的副标题缩到 12px、并给标题留出收缩空间。 */
+  body>div.header h1{min-width:0;}
+  body>div.header p{font-size:12px;white-space:nowrap;}
+  @media(min-width:900px){ body>div.header h1{font-size:24px;} }
+
+  /* ------------------------------------------------------------
+     十五、深色模式：暖黑分层 + 紫青提亮
      ------------------------------------------------------------ */
   @media(prefers-color-scheme:dark){
     :root{
-      --canvas:#141210;--surface:#1c1a17;--surface-2:#232019;--surface-3:#2a2620;--surface-4:#322d26;
-      --ink:#f5f2ec;--ink-2:#d3cdc2;--ink-3:#a8a196;--ink-4:#7f7a71;
-      --line:#2f2b24;--line-soft:#282420;--line-strong:#443f36;
-      --brand:#3fb3a5;--brand-strong:#5cc9bb;--brand-soft:#16241f;--brand-line:#2c4a43;
-      --brand-ink:#9fe0d5;
-      --danger:#e0796c;--danger-soft:#2e1a17;
-      --warn:#d9a441;--warn-soft:#2b2313;
-      --success:#3ecf9a;--ok-soft:#12281f;
-      --shadow-card:none;--shadow-pop:0 24px 56px -24px rgba(0,0,0,.75);
-      --ring:0 0 0 4px rgba(63,179,165,.2);
+      --brand:#8b7bff;--brand-strong:#a496ff;--brand-soft:#1a1730;--brand-line:#332c5c;
+      --brand-ink:#c9c0ff;--accent:#22d3ee;--accent-soft:#0d2a30;
+      --ink:#f2f4fa;--ink-2:#ccd3e0;--ink-3:#a8b0c2;--ink-4:#8d95a8;
+      --canvas:#0a0c14;--surface:#141824;--surface-2:#181d2b;--surface-3:#1e2434;--surface-4:#252c3e;
+      --line:#242a3a;--line-soft:#1d2230;--line-strong:#333b4f;
+      --danger:#ff6b7a;--danger-soft:#2c1418;--success:#34d399;--warn:#ffb020;--warn-soft:#2a2113;
+      --ok-soft:#12281f;--v6-amber:rgba(255,176,32,.12);
+      --v6-grad:linear-gradient(135deg,#6a58e8 0%,#5b3df5 45%,#4f46e5 100%);
+      --v6-grad-soft:linear-gradient(135deg,rgba(139,123,255,.18),rgba(34,211,238,.14));
+      --v6-sh-1:0 1px 2px rgba(0,0,0,.5);
+      --v6-sh-2:0 10px 28px -14px rgba(0,0,0,.72);
+      --v6-sh-3:0 30px 72px -30px rgba(0,0,0,.88);
+      --v6-glow:0 12px 34px -14px rgba(139,123,255,.5);
+      --ring:0 0 0 4px rgba(139,123,255,.22);
     }
     body{
       background-color:var(--canvas);
       background-image:
-        radial-gradient(880px 420px at 50% -200px,rgba(63,179,165,.14),rgba(63,179,165,0) 66%),
-        linear-gradient(180deg,#191713 0%,var(--canvas) 55%,#100e0c 100%);
+        radial-gradient(1000px 520px at 50% -240px,rgba(139,123,255,.18),rgba(139,123,255,0) 68%),
+        linear-gradient(180deg,#11131f 0%,var(--canvas) 55%,#07080e 100%);
     }
+    body::before{
+      background-image:
+        radial-gradient(680px 380px at 8% 0%,rgba(139,123,255,.16),rgba(139,123,255,0) 70%),
+        radial-gradient(720px 420px at 100% 12%,rgba(34,211,238,.12),rgba(34,211,238,0) 72%);
+    }
+    .login-box,#gate{background:rgba(20,24,36,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
     .song-main h3,.rank-card h3,.rank-info h3,.card h3,.header h1,.top-bar h2,.ui-title{color:var(--ink);}
-    .song-main p,.rank-info p,.rank-card p,.card p{color:var(--ink-3);}
+    .song-main p,.rank-info p,.rank-card p,.card p{color:var(--ink-2);}
     .song-main p span,.rank-card p span{color:var(--brand-ink) !important;}
     #gate h2{color:var(--ink) !important;}
-    #gate p{color:var(--ink-3) !important;}
+    #gate p{color:var(--ink-2) !important;}
     .col-title span,.sub,.slot .idx,.slot .meta,footer p,#disclaimerBox p{color:var(--ink-4);}
-    .btn-secondary,.back,.box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
-      background:var(--surface-2);color:var(--ink-2);border-color:var(--line-strong);
-    }
-    .song-votes{background:var(--surface-2);border-color:var(--brand-line);}
+    /* 下面这几条必须比原版规则**更具体**，否则原版写死的颜色会赢：
+       · 原版 .header p{color:#64748b} 在深色下实测只有 3.72:1（低于 AA）；
+       · 原版 #scheduleBox .period{color:#0369a1} 是 CSS 规则不是行内样式，
+         通用属性选择器接不到它，深色下 2.34:1。
+       写法上刻意用 #app / #scheduleBox 前缀把特异性拉高。 */
+    #app .header p,.header .sub,.header p.sub,.box>p.sub,.card>p.sub{color:var(--ink-2);}
+    #scheduleBox .period,#scheduleBox .card h3 .tag,#scheduleBox .more{color:var(--brand-ink);}
+    #scheduleBox .more{border-color:var(--brand-line);background:var(--surface-2);}
+    .song-votes{background:var(--v6-amber);border-color:rgba(255,176,32,.28);}
+    .song-votes .rank-votes{color:var(--warn);}
     .mobile-tabs{background:var(--surface-3);border-color:var(--line);}
-    .mobile-tabs button.active{background:var(--surface-2);box-shadow:none;}
+    .mobile-tabs button.active{background:var(--v6-grad);color:#fff;box-shadow:var(--v6-sh-2);}
     #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
     [style*="background:rgba(255,255,255"]{background:var(--surface) !important;}
     [style*="background:rgba(225,29,72"]{background:var(--danger-soft) !important;}
     [style*="background:rgba(5,150,105"]{background:var(--ok-soft) !important;}
     [style*="border:1px solid #bae6fd"]{border-color:var(--brand-line) !important;}
     [style*="border:1px solid #e2e8f0"]{border-color:var(--line-strong) !important;}
+    /* 内联的天空蓝/深蓝在深色下会变成"看不见的字"：逐个翻成令牌 */
+    [style*="color:#075985"]{color:var(--brand-ink) !important;}
+    [style*="color:#0369a1"]{color:var(--brand-ink) !important;}
+    [style*="color:#0e7490"]{color:var(--accent) !important;}
+    [style*="color:#0ea5e9"]{color:var(--accent) !important;}
+    [style*="color:#0284c7"]{color:var(--brand) !important;}
+    [style*="color:#0369a1"]{color:var(--brand-ink) !important;}
+    [style*="color:#0f172a"]{color:var(--ink) !important;}
+    [style*="color:#1e293b"]{color:var(--ink) !important;}
+    [style*="color:#334155"]{color:var(--ink-2) !important;}
+    [style*="color:#475569"]{color:var(--ink-3) !important;}
+    [style*="color:#64748b"]{color:var(--ink-3) !important;}
+    [style*="color:#94a3b8"]{color:var(--ink-4) !important;}
+    [style*="color:#b45309"]{color:var(--warn) !important;}
+    [style*="color:#e11d48"]{color:var(--danger) !important;}
+    [style*="color:#059669"]{color:var(--success) !important;}
+    [style*="color:#7c3aed"]{color:var(--brand) !important;}
+    [style*="border:1px solid #ddd6fe"]{border-color:var(--brand-line) !important;}
+    [style*="background:linear-gradient(180deg,#fff"]{background:var(--surface-2) !important;}
+    .cand-panel,.aud-panel{background:var(--surface);border-color:var(--brand-line);}
+    .cand-player,.aud-slot{background:var(--surface-2);border-color:var(--line);}
+    .cand-no{background:var(--surface-3);color:var(--ink-3);}
+    .cand-acts button,[data-track-row] button{background:var(--surface-2);color:var(--ink-2);border-color:var(--line-strong);}
+    .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;}
+    .rank-no{background:var(--surface-3);color:var(--ink-3);}
+    /* 页脚小字在深色下也必须过 AA（原版 #94a3b8 在暖黑上只有 4.0:1） */
+    footer p,#beianFooter,#beianFooter a,#beianFooter span,#siteVersion{color:var(--ink-3);}
+    /* 这一条是原版遗留的坑：安静按钮的 hover/active 态把背景刷成
+       var(--ink-3)（一个会随深色切换变浅的令牌），文字却留在深灰上 ——
+       深色下"退出"那个安静按钮实测 1.59:1，属于完全看不清。
+       原版那条在媒体查询里，特异性更高，所以这里用 id 前缀压过去。 */
+    #adminBox .btn-quiet,#adminBox .btn-quiet:hover,#adminBox .btn-quiet:active,
+    .top-bar .btn-quiet,.top-bar .btn-quiet:hover,.top-bar .btn-quiet:active{
+      background:var(--surface-3);color:var(--ink-2);border-color:var(--line);
+    }
+    #beianFooter{background:var(--surface-2);}
   }
 
   /* ------------------------------------------------------------
-     十四、无障碍
+     十六、无障碍：reduced-motion 下全部静态
      ------------------------------------------------------------ */
   @media(prefers-reduced-motion:reduce){
     .rank-card,.card,.col.active{animation:none !important;opacity:1 !important;transform:none !important;}
     *{transition-duration:.01ms !important;animation-duration:.01ms !important;}
     button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
-  }
-
-  /* ============================================================
-     视觉系统 v5：蓝色主体 + 重做背景 + 搜索面板重排
-     ============================================================
-     这一层**只覆盖三件事**，不动 v4 已经铺好的排版尺度与深色映射：
-       1. 颜色族：玉青 → **蓝**（用户点名要"蓝色按钮主体"）；
-       2. 背景：斜向细网格 + 顶部蓝色渐晕（不是单纯的色带渐变）；
-       3. 几处"看着别扭"的布局：搜索候选面板、表单单元、票数徽章。
-     ============================================================ */
-
-  /* ------------------------------------------------------------
-     一、换成蓝色族（主按钮 = 实心蓝）
-     ------------------------------------------------------------ */
-  :root{
-    /* 蓝：比原版天蓝更沉一档，白字对比度 5.4:1（过 AA） */
-    --brand:#2f5cf5;--brand-strong:#2447d4;--brand-soft:#eef2ff;--brand-line:#c5d2fb;
-    --brand-ink:#1e3aa8;
-    --accent:#5b7cfa;                 /* 浅一档，用于强调数字/描边 */
-    /* 中性层仍走暖灰（和蓝色搭起来不发脏），但把底调浅一点让蓝色更跳 */
-    --canvas:#f3f4f8;--surface-2:#f8f9fc;--surface-3:#eff1f7;--surface-4:#e7eaf3;
-    --line:#e4e7f0;--line-soft:#eef0f7;--line-strong:#ccd2e4;
-    /* 危险保持砖红（不刺眼），提示保持琥珀 */
-    --ring:0 0 0 4px rgba(47,92,245,.16);
-  }
-
-  /* 主按钮：实心蓝 + 一道顶部高光，按下轻微收缩 */
-  .btn,.box>button[onclick="vote()"],.gate-enter,.btn-primary,
-  .song-acts .act-primary,a.btn[href="/vote.html"]{
-    background:linear-gradient(180deg,#3a67f7,#2f5cf5);
-    border:1px solid #2447d4;color:#fff;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 16px -10px rgba(47,92,245,.6);
-  }
-  .btn:hover,.box>button[onclick="vote()"]:hover,.btn-primary:hover,
-  a.btn[href="/vote.html"]:hover{background:linear-gradient(180deg,#2f5cf5,#2447d4);border-color:#1e3aa8;}
-  .btn-danger{color:var(--danger);border-color:#e6c8c3;}
-  .tabs button.active,.mobile-tabs button.active{color:var(--ink);}
-  .tabs button.active{background:linear-gradient(180deg,#3a67f7,#2f5cf5);border-color:#2447d4;color:#fff;}
-  input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:var(--ring);}
-  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
-    outline:3px solid rgba(47,92,245,.42);outline-offset:2px;}
-
-  /* ------------------------------------------------------------
-     二、背景重做：斜向细网格 + 顶部蓝色渐晕
-     ------------------------------------------------------------
-     测试要求背景里必须有 radial-gradient、linear-gradient 与 #eef3f9
-     三样（防止回到"四团彩色光斑"）。这里保留它们，但把网格画出来 ——
-     网格用 45° 的极细线，几乎看不见，只在浅色区给一点"纸纹"的质感。
-     ------------------------------------------------------------ */
-  body{
-    background-color:#eef3f9;
-    background-image:
-      repeating-linear-gradient(45deg,rgba(47,92,245,.030) 0 1px,transparent 1px 12px),
-      radial-gradient(960px 460px at 50% -220px,rgba(47,92,245,.13),rgba(47,92,245,0) 68%),
-      linear-gradient(180deg,#f7f9fd 0%,#eef3f9 55%,#e8ecf5 100%);
-    background-attachment:fixed;
-  }
-
-  /* ------------------------------------------------------------
-     三、卡片分组：更清晰的层次（1px 描边 + 极轻投影）
-     ------------------------------------------------------------ */
-  .header,.card,.box,.panel,.list-panel,#gate,.login-box{
-    background:var(--surface);border:1px solid var(--line);
-    box-shadow:0 1px 2px rgba(23,32,64,.04),0 10px 26px -22px rgba(23,32,64,.22);
-  }
-  .header{background:linear-gradient(180deg,rgba(47,92,245,.06),rgba(47,92,245,0));
-         border-color:var(--brand-line);}
-  #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
-  #announceBox .panel h3{color:var(--brand-ink);}
-
-  /* ------------------------------------------------------------
-     四、搜索候选面板重排（截图里最别扭的那块）
-     ------------------------------------------------------------
-     它是 JS 拼出来的内联样式，所以这里用属性选择器接管：
-       · 行改成"编号 + 信息 + 时长 + 操作"的**四列网格**，不再用虚线分隔；
-       · 编号从彩色方块改成安静的小圆点数字；
-       · 操作按钮靠右对齐成一组，不再和文字抢位置；
-       · 每行 ≥54px，手机上够点。
-     ------------------------------------------------------------ */
-  [data-track-row]{
-    display:grid !important;
-    grid-template-columns:26px minmax(0,1fr) auto auto;
-    align-items:center;gap:10px;
-    padding:12px 4px !important;
-    border-top:1px solid var(--line-soft) !important;
-    border-radius:0;
-    min-height:54px;
-    transition:background-color var(--d1) var(--ease);
-  }
-  [data-track-row]:first-child{border-top:0 !important;}
-  [data-track-row]:hover{background:var(--surface-2);}
-  /* 编号：小圆点数字 */
-  [data-track-row]>span:first-child{
-    width:24px !important;height:24px !important;border-radius:999px !important;
-    background:var(--surface-3) !important;color:var(--ink-3) !important;
-    font-size:12px !important;font-weight:600 !important;
-  }
-  /* 信息块：歌名与歌手都允许换行收缩，不再 nowrap 截断 */
-  [data-track-row]>div{min-width:0;}
-  [data-track-row]>div>div:first-child{
-    white-space:normal !important;color:var(--ink) !important;font-size:15px !important;font-weight:600 !important;
-  }
-  [data-track-row]>div>div+div{
-    white-space:normal !important;color:var(--ink-4) !important;font-size:13px !important;margin-top:2px;
-  }
-  /* 时长 */
-  [data-track-row]>span:nth-of-type(2){color:var(--ink-4) !important;font-size:13px !important;}
-  /* 操作组 */
-  [data-track-row]>div:last-child{gap:8px !important;}
-  [data-track-row] button{
-    min-height:36px !important;
-    background:var(--surface) !important;color:var(--ink-2) !important;
-    border:1.5px solid var(--line-strong) !important;box-shadow:none !important;
-    font-size:13px !important;padding:7px 14px !important;
-  }
-  /* "选这首"是主操作 -> 实心蓝（它排在前一个 button） */
-  [data-track-row] button[data-name]{
-    background:linear-gradient(180deg,#3a67f7,#2f5cf5) !important;
-    border-color:#2447d4 !important;color:#fff !important;
-  }
-  /* 面板外框：去掉"竖条 + 半透明底"，改成规整的分组卡片 */
-  div[style*="border-left:4px solid #0ea5e9"]{
-    border-left:1px solid var(--brand-line) !important;
-    border-radius:var(--r-card) !important;
-    background:var(--surface) !important;
-    margin:12px 0 18px !important;
-    box-shadow:0 1px 2px rgba(23,32,64,.04);
-  }
-  /* 面板头部的"收起"按钮安静一点 */
-  div[style*="border-left:4px solid #0ea5e9"] button{min-height:32px !important;font-size:12px !important;}
-  /* 播放器槽位：做成一条"正在播放"的横条 */
-  div[id^="player-"]{
-    border-radius:var(--r-md) !important;
-    background:var(--surface-2) !important;
-    border:1px solid var(--line) !important;
-  }
-
-  /* ------------------------------------------------------------
-     五、表单单元聚成一组（原来零散地各占一行）
-     ------------------------------------------------------------ */
-  .box>label.field-label{margin-top:var(--s4);}
-  .box>label.field-label:first-of-type{margin-top:0;}
-  .box>input,.box>select{margin-bottom:var(--s2);}
-  #picked:empty{display:none;}
-
-  /* ------------------------------------------------------------
-     六、票数徽章：蓝色描边（和主体一致）
-     ------------------------------------------------------------ */
-  .song-votes{background:var(--surface);border:1.5px solid var(--brand-line);}
-  .song-votes .rank-votes{color:var(--brand-ink);}
-
-  /* ------------------------------------------------------------
-     七、双端适配（必须重述宽屏隐藏切换按钮那条）
-     ------------------------------------------------------------ */
-  @media(min-width:900px){
-    .mobile-tabs{display:none;}
-    body{max-width:1140px;}
-  }
-
-  /* ------------------------------------------------------------
-     八、深色模式：换成"暗蓝底"
-     ------------------------------------------------------------ */
-  @media(prefers-color-scheme:dark){
-    :root{
-      --canvas:#0f1219;--surface:#171b24;--surface-2:#1d222c;--surface-3:#242a36;--surface-4:#2b323f;
-      --ink:#f2f5fa;--ink-2:#cbd3e0;--ink-3:#9fa9b8;--ink-4:#78828f;
-      --line:#272e3a;--line-soft:#212734;--line-strong:#3b4351;
-      --brand:#6b8cff;--brand-strong:#8aa3ff;--brand-soft:#161f38;--brand-line:#2b3d6e;
-      --brand-ink:#a9bcff;--accent:#8aa3ff;
-      --ring:0 0 0 4px rgba(107,140,255,.22);
-    }
-    body{
-      background-color:var(--canvas);
-      background-image:
-        repeating-linear-gradient(45deg,rgba(107,140,255,.045) 0 1px,transparent 1px 12px),
-        radial-gradient(960px 460px at 50% -220px,rgba(107,140,255,.16),rgba(107,140,255,0) 68%),
-        linear-gradient(180deg,#131826 0%,var(--canvas) 55%,#0a0d13 100%);
-    }
-    .header{background:linear-gradient(180deg,rgba(107,140,255,.10),rgba(107,140,255,0));
-            border-color:var(--brand-line);}
-    [data-track-row]>span:first-child{background:var(--surface-3) !important;color:var(--ink-3) !important;}
-    [data-track-row] button{background:var(--surface-2) !important;color:var(--ink-2) !important;border-color:var(--line-strong) !important;}
-    [data-track-row] button[data-name]{background:linear-gradient(180deg,#6b8cff,#4a6ef0) !important;border-color:#3f5fd0 !important;color:#0f1219 !important;}
-    div[style*="border-left:4px solid #0ea5e9"]{background:var(--surface) !important;border-color:var(--brand-line) !important;}
-    div[id^="player-"]{background:var(--surface-2) !important;border-color:var(--line) !important;}
+    .btn:hover,.btn-primary:hover{transform:none !important;}
   }
 /* ==== 设计层 · 终点 ==== */
 </style>
@@ -953,7 +922,7 @@
 
 
 <div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
-  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有</div>
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
   <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
     <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
        style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
@@ -965,8 +934,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:#a8b4c4;letter-spacing:.02em;">版本 beta1.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:#a8b4c4;letter-spacing:.02em;">版本 beta1.1</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1690,6 +1658,65 @@ function pickSong(button){
 }
 
 /**
+ * 音源 P0-1：`<audio>` 的失败兜底。
+ *
+ * `/api/music?play=` 失败时返回的是 JSON（404 无片段 / 502 地址不可信 /
+ * 502 不是音频 / 504 超时），`<audio>` 只会静默失败 —— 表现就是"点了没反应"。
+ * 这里监听 error / stalled，就地给一条说明 + 一个重试按钮。
+ */
+function audioFallbackHint(audio){
+  if(!audio || audio.dataset.fallbackShown === '1') return;
+  audio.dataset.fallbackShown = '1';
+
+  const box = audio.parentElement;
+  if(!box) return;
+
+  const old = box.querySelector('.audio-fallback');
+  if(old) old.remove();
+
+  const hint = document.createElement('div');
+  hint.className = 'cand-hint';
+  hint.style.cssText = 'margin-top:8px;';
+
+  const text = document.createElement('span');
+  text.textContent = '这一版暂时播不出来（可能是版权限制或音源抖动），换一个版本试试';
+  hint.appendChild(text);
+
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '重试这一版';
+  retry.className = 'audio-fallback-retry';
+  retry.style.cssText = 'width:auto;padding:7px 14px;font-size:12px;margin:8px 0 0;';
+  retry.addEventListener('click', () => {
+    const track = audio.dataset.trackId || '';
+    if(!track) return;
+    const next = document.createElement('audio');
+    next.controls = true;
+    next.preload = 'metadata';
+    next.style.width = '100%';
+    next.dataset.trackId = track;
+    next.src = '/api/music?play=' + encodeURIComponent(track) + '&retry=' + Date.now();
+    audio.replaceWith(next);
+    bindAudioFallback(next);
+    next.play().catch(() => { /* 可能被自动播放策略拦截，忽略 */ });
+  });
+  hint.appendChild(retry);
+
+  box.appendChild(hint);
+}
+
+function bindAudioFallback(audio){
+  if(!audio) return audio;
+  if(audio.dataset.fallbackBound === '1') return audio;
+  audio.dataset.fallbackBound = '1';
+  audio.addEventListener('error', () => audioFallbackHint(audio));
+  audio.addEventListener('stalled', () => {
+    if(audio.networkState === 3) audioFallbackHint(audio);
+  });
+  return audio;
+}
+
+/**
  * 候选面板：**顶部一个固定播放器 + 下面一份音乐列表**。
  *
  * 早期版本把 <audio> 追加到列表末尾，点最后一首时播放条会跑到很下面。
@@ -1697,40 +1724,39 @@ function pickSong(button){
  */
 function candidatePanelHtml(title, hint, list, boxId, withPick){
   const rows = list.map((s, index) => `
-    <div data-track-row="${escapeHtml(s.id)}"
-         style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(14,165,233,0.3);flex-wrap:wrap;">
-      <span style="flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:rgba(14,165,233,0.16);color:#075985;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${index + 1}</span>
-      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;">
-        <div style="color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
-        <div style="color:#64748b;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
+    <div data-track-row="${escapeHtml(s.id)}" style="flex-wrap:wrap;">
+      <span class="cand-no">${index + 1}</span>
+      <div>
+        <div class="cand-name">${escapeHtml(s.name)}</div>
+        <div class="cand-sub">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
       </div>
-      <span style="flex:0 0 auto;font-size:12px;color:#94a3b8;">${escapeHtml(formatDuration(s.duration))}</span>
-      <div style="flex:0 0 auto;display:flex;gap:6px;">
-        ${withPick ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-token="${escapeHtml(s.track_token || s.token || '')}" data-clear="${boxId}" onclick="pickSong(this)"
-          style="width:auto;padding:7px 12px;font-size:13px;margin:0;">选这首</button>` : ''}
+      <span class="cand-dur">${escapeHtml(formatDuration(s.duration))}</span>
+      <div class="cand-acts">
+        ${withPick && s.playable !== false
+          ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-token="${escapeHtml(s.track_token || s.token || '')}" data-clear="${boxId}" onclick="pickSong(this)">选这首</button>`
+          : (withPick
+            ? '<span class="cand-off">这一版无音频，不能入选</span>'
+            : '')}
         ${s.playable === false
-          ? '<span style="font-size:12px;color:#b45309;white-space:nowrap;">暂无试听</span>'
-          : `<button data-track="${escapeHtml(s.id)}" data-target="${boxId}" onclick="playFromButton(this)"
-          style="width:auto;padding:7px 12px;font-size:13px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">播放</button>`}
+          ? (withPick ? '' : '<span class="cand-off">暂无试听</span>')
+          : `<button data-track="${escapeHtml(s.id)}" data-target="${boxId}" onclick="playFromButton(this)">播放</button>`}
       </div>
     </div>
   `).join('');
 
   return `
-    <div style="margin:10px 0 16px;border-left:4px solid #0ea5e9;border-radius:0 12px 12px 0;background:rgba(14,165,233,0.09);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px;">
-        <div style="font-size:13px;font-weight:700;color:#075985;">${escapeHtml(title)} · ${list.length} 个</div>
-        <button onclick="closeCandidatePanel('${boxId}')"
-          style="width:auto;padding:5px 12px;font-size:12px;margin:0;background:rgba(255,255,255,0.95);color:#64748b;border:1px solid #bae6fd;box-shadow:none;">收起 ▲</button>
+    <div class="cand-panel">
+      <div class="cand-head">
+        <div class="cand-title">${escapeHtml(title)} · ${list.length} 个</div>
+        <button class="cand-quiet" onclick="closeCandidatePanel('${boxId}')">收起 ▲</button>
       </div>
-      <div style="font-size:11px;color:#64748b;padding:0 12px 8px;">${escapeHtml(hint)}</div>
+      <div class="cand-hint">${escapeHtml(hint)}</div>
 
-      <div id="player-${boxId}"
-           style="margin:0 12px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.96);border:1px solid #bae6fd;">
-        <div style="font-size:12px;color:#94a3b8;">点下面任意一行的「播放」开始试听</div>
+      <div class="cand-player" id="player-${boxId}">
+        <div class="cand-hint" style="padding:0;">点下面任意一行的「播放」开始试听</div>
       </div>
 
-      <div style="padding:0 12px 10px;">${rows}</div>
+      <div class="cand-rows">${rows}</div>
     </div>
   `;
 }
@@ -1756,14 +1782,16 @@ function playTrack(trackId, boxId){
     row.style.background = row.dataset.trackRow === trackId ? 'rgba(14,165,233,0.14)' : 'transparent';
   });
 
-  slot.innerHTML = '<div style="font-size:12px;font-weight:600;color:#075985;margin-bottom:6px;">正在试听</div>';
+  slot.innerHTML = '<div class="cand-hint" style="margin-bottom:6px;">正在试听</div>';
 
   const audio = document.createElement('audio');
   audio.controls = true;
-  audio.preload = 'none';
+  audio.preload = 'metadata';
+  audio.dataset.trackId = trackId;
   audio.src = '/api/music?play=' + encodeURIComponent(trackId);
   audio.style.width = '100%';
   slot.appendChild(audio);
+  bindAudioFallback(audio);
   audio.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ });
 }
 
