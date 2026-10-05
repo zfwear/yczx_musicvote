@@ -1207,6 +1207,56 @@ export async function onRequestGet(context) {
     return json({ configured: true, provider: providerMode(env) });
   }
 
+  /**
+   * 音源自检：`/api/music?probe=1`
+   *
+   * 为什么需要它：免费套餐的出口在 Cloudflare 侧，**我在本机测通不代表
+   * 部署后也通**（上游可能对数据中心 IP 另有策略）。所以给一个能从
+   * 真实部署上一键验证的口子 —— 部署完打开这个地址，就能看到
+   * "苹果能不能搜到 / 网易云能不能搜到、能不能拿到音频"。
+   *
+   * 安全：只回**结论与计数**，不回任何上游地址、id、歌名；不需要登录
+   * （它不泄露任何用户数据，而"能直接打开"正是它的价值）。
+   */
+  if (url.searchParams.get('probe') === '1') {
+    const report = { provider: providerMode(env), apple: null, netease: null };
+    const keyword = '七里香';
+
+    // 苹果
+    try {
+      const songs = await appleSearch(keyword, storefronts(env)[0]);
+      report.apple = { ok: songs.length > 0, count: songs.length, hint: '官方 30 秒试听' };
+    } catch {
+      report.apple = { ok: false, count: 0, error: 'unreachable' };
+    }
+
+    // 网易云：搜索 + 取一个候选验证能否真拿到音频
+    try {
+      const songs = await neteaseSearch(keyword);
+      let playable = null;
+      const first = songs.find((s) => /^mt-\d+$/.test(String(s.id || '')));
+      if (first) {
+        const ok = await probeNeteasePlayable(String(first.id).slice(3));
+        playable = ok;                       // true/false/null(探测失败)
+      }
+      report.netease = {
+        ok: songs.length > 0,
+        count: songs.length,
+        playableProbe: playable,
+        hint: '官方接口；playableProbe=true 表示能拿到完整音频',
+      };
+    } catch {
+      report.netease = { ok: false, count: 0, error: 'unreachable' };
+    }
+
+    return json({
+      ...report,
+      verdict: (report.apple && report.apple.ok) || (report.netease && report.netease.ok)
+        ? 'at-least-one-source-works'
+        : 'all-sources-unreachable',
+    });
+  }
+
   // 学生或管理员都可以试听（后台审核时也需要听一下）。
   // 传 null 表示两种会话都接受。
   const auth = await requireSession(env, request, null);

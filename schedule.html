@@ -404,6 +404,296 @@
     button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
   }
 /* ==== 设计层 · 终点 ==== */
+/* ============================================================
+     视觉系统 v4（观感重做；布局结构与无障碍约束不动）
+     ------------------------------------------------------------
+     设计取向：**暖墨底 + 玉青点缀 + 琥珀提醒**。
+       上一版是"中性冷灰 + 企业蓝"，读起来像后台；这一版把底色偏暖、
+       把强调色换成玉青（teal），红色只留给真正的危险动作，
+       整体往"安静的文具 / 阅读器"靠 —— 学生看歌单和榜单时不刺眼。
+     四条硬约束（都有测试盯着）：
+       1. 手机单栏 + 宽屏左右两栏（含 .mobile-tabs 的显隐切换）；
+       2. 后台宽屏是工作台栅格；
+       3. 正文 ≥15px、辅助文字 ≥12px，且对比度够；
+       4. 深色模式跟随系统。
+     ============================================================ */
+
+  /* ------------------------------------------------------------
+     一、令牌
+     ------------------------------------------------------------ */
+  :root{
+    /* 暖墨底：比纯灰多一点黄，长时间看不发青 */
+    --canvas:#f4f1ec;--surface:#ffffff;--surface-2:#faf8f5;--surface-3:#f1eee8;--surface-4:#e9e5dd;
+    --ink:#181614;--ink-2:#3d3a35;--ink-3:#5f5a52;--ink-4:#8b857b;
+    --line:#e6e1d8;--line-soft:#efeae2;--line-strong:#d3ccc0;
+    /* 玉青：唯一的强调色，只出现在"该被点的地方" */
+    --brand:#0f766e;--brand-strong:#0d5f59;--brand-soft:#e8f4f2;--brand-line:#b7ded8;
+    --brand-ink:#0b544f;
+    /* 危险：砖红（不是正红，避免"降价标签"那种突兀） */
+    --danger:#b23a2f;--danger-soft:#fbf1ef;
+    --warn:#96650a;--warn-soft:#fdf7e8;
+    --success:#12705a;--ok-soft:#eef7f3;
+
+    /* 排版：主标题 32、栏目标题 20、正文 15.5、辅助 13、最小 12 */
+    --fs-display:32px;--fs-title:20px;--fs-head:17px;--fs-body:15.5px;--fs-sub:13px;--fs-cap:12px;
+    --lh-tight:1.22;--lh-body:1.7;
+    --fw-body:400;--fw-medium:500;--fw-strong:600;--fw-bold:700;
+
+    /* 间距与圆角：卡片更大更圆，控件全胶囊 */
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:44px;
+    --r-sm:10px;--r-md:14px;--r-lg:22px;--r-xl:26px;--r-pill:999px;
+    --r-ctl:var(--r-pill);--r-card:var(--r-lg);
+
+    --ease:cubic-bezier(.2,.8,.2,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --d1:140ms;--d2:240ms;--d3:400ms;
+    --shadow-card:none;
+    --shadow-pop:0 24px 56px -24px rgba(24,22,20,.36);
+    --ring:0 0 0 4px rgba(15,118,110,.16);
+  }
+
+  /* ------------------------------------------------------------
+     二、画布与基础排版
+     ------------------------------------------------------------ */
+  body{
+    font-family:'Segoe UI Variable Display','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,
+      BlinkMacSystemFont,'MiSans','HarmonyOS Sans SC','PingFang SC','Hiragino Sans GB',
+      'Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+    font-size:var(--fs-body);line-height:var(--lh-body);letter-spacing:.008em;
+    color:var(--ink-2);background-color:var(--canvas);
+    background-image:
+      radial-gradient(880px 420px at 50% -200px,rgba(15,118,110,.09),rgba(15,118,110,0) 66%),
+      linear-gradient(180deg,#f8f6f2 0%,var(--canvas) 55%,#eae6df 100%);
+    background-attachment:fixed;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+    font-kerning:normal;text-rendering:optimizeLegibility;
+  }
+
+  h1,h2,h3{color:var(--ink);line-height:var(--lh-tight);font-weight:var(--fw-bold);letter-spacing:-.022em;}
+  .header h1,.top-bar h2{font-size:var(--fs-display);font-weight:var(--fw-bold);letter-spacing:-.03em;}
+  .col-title,.panel h3,#rulesBox h3{font-size:var(--fs-title);font-weight:var(--fw-strong);letter-spacing:-.018em;}
+  .song-main h3,.card h3,.rank-info h3,.ui-title{font-size:var(--fs-head);font-weight:var(--fw-strong);letter-spacing:-.01em;}
+  .song-main p,.rank-info p,.card p,.slot,.ui-msg{font-size:var(--fs-body);color:var(--ink-3);line-height:var(--lh-body);}
+  .header p,.sub,.col-title span,.card h3 .range,.slot .idx,.slot .meta,.field-label,.ui-msg,#siteVersion{font-size:var(--fs-sub);}
+  footer p,#disclaimerBox p{font-size:var(--fs-cap);color:var(--ink-4);line-height:1.75;}
+  .rank-votes,.song-votes,.slot .idx,.slot .tag,.card h3 .range,#siteVersion{font-variant-numeric:tabular-nums;}
+  .rank-votes{font-size:19px;font-weight:var(--fw-bold);letter-spacing:-.02em;}
+  /* 表单标签：小字 + 大写字距，像"字段名"而不是正文 */
+  .field-label{display:block;font-weight:var(--fw-medium);color:var(--ink-2);letter-spacing:.06em;}
+  input,select,textarea{font-size:16px;letter-spacing:0;color:var(--ink);}
+
+  /* ------------------------------------------------------------
+     三、容器：1px 暖描边分层，不用投影
+     ------------------------------------------------------------ */
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box{
+    background:var(--surface);border:1px solid var(--line);box-shadow:none;
+    border-radius:var(--r-card);
+  }
+  .header,.login-box,#gate{border-radius:var(--r-xl);}
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box,.tabs button,
+  .mobile-tabs,.mobile-tabs button{backdrop-filter:none;-webkit-backdrop-filter:none;}
+  .header{margin-bottom:var(--s5);}
+
+  /* ------------------------------------------------------------
+     四、票数：描边徽章（中性，不用红）
+     ------------------------------------------------------------ */
+  .song-votes{
+    flex:0 0 auto;display:inline-flex;align-items:baseline;gap:4px;
+    padding:4px 12px;border-radius:var(--r-pill);
+    background:var(--surface);border:1.5px solid var(--brand-line);
+  }
+  .song-votes .rank-votes{color:var(--brand-ink);}
+  .song-votes>span{color:var(--ink-4) !important;font-size:var(--fs-cap) !important;}
+
+  /* ------------------------------------------------------------
+     五、按钮：全胶囊三层级
+     ------------------------------------------------------------ */
+  button,.gate-enter{
+    letter-spacing:.02em;font-weight:var(--fw-medium);
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;
+    border-radius:var(--r-pill);
+  }
+  .btn{display:flex;align-items:center;justify-content:center;font-weight:var(--fw-strong);line-height:1.25;letter-spacing:.03em;}
+  .btn,.gate-enter,.box>button,.ui-btn{min-height:48px;font-size:16px;padding:12px 22px;border-radius:var(--r-pill);}
+  .song-acts button,.tabs button,.mobile-tabs button,.back,.more,
+  .card .actions button,.top-bar button{
+    min-height:40px;font-size:14px;padding:9px 16px;border-radius:var(--r-pill);
+  }
+  .card .actions .btn-quiet,.card .actions .btn-danger,.btn-sm,.btn-xs{min-height:36px;font-size:var(--fs-sub);padding:7px 14px;}
+  @media(max-width:560px){.song-acts button,.card .actions button{min-height:44px;}}
+
+  .btn,.box>button[onclick="vote()"],.gate-enter,.btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);}
+  .btn:hover,.box>button[onclick="vote()"]:hover,.btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
+  .btn-secondary,.back,.song-acts .act-secondary,
+  .box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+    background:var(--surface);color:var(--ink-2);border:1.5px solid var(--line-strong);
+  }
+  .btn-secondary:hover,.back:hover,.song-acts .act-secondary:hover{background:var(--surface-2);border-color:var(--ink-4);}
+  .song-acts .act-quiet,.btn-quiet{background:transparent;color:var(--ink-3);border:1.5px solid var(--line);}
+  .song-acts .act-quiet:hover,.btn-quiet:hover{background:var(--surface-3);color:var(--ink-2);}
+  .song-acts .act-primary{background:var(--brand);color:#fff;border:1.5px solid var(--brand);}
+  .btn-danger{background:var(--surface);color:var(--danger);border:1.5px solid #e4c4bf;}
+  .btn-pass{background:var(--success);border-color:var(--success);}
+  .btn-reject{background:var(--danger);border-color:var(--danger);}
+  button:active,.btn:active,.song-acts button:active,.tabs button:active,.mobile-tabs button:active{transform:scale(.975);}
+  button,.btn,.song-acts button,.tabs button,.mobile-tabs button,.back,.more{
+    transition:background-color var(--d1) var(--ease),border-color var(--d1) var(--ease),
+               color var(--d1) var(--ease),transform var(--d2) var(--ease),box-shadow var(--d1) var(--ease);
+  }
+
+  /* ------------------------------------------------------------
+     六、输入控件
+     ------------------------------------------------------------ */
+  input,select,textarea{
+    background:var(--surface-2);border:1.5px solid var(--line);border-radius:var(--r-md);
+    transition:background-color var(--d2) var(--ease),border-color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
+  }
+  input::placeholder,textarea::placeholder{color:var(--ink-4);opacity:1;}
+  input:focus,select:focus,textarea:focus{background:var(--surface);border-color:var(--brand);box-shadow:var(--ring);outline:none;}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(15,118,110,.4);outline-offset:2px;border-radius:var(--r-sm);}
+
+  /* ------------------------------------------------------------
+     七、页签：胶囊分段
+     ------------------------------------------------------------ */
+  .tabs{gap:var(--s2);}
+  .tabs button{background:transparent;color:var(--ink-3);border:1.5px solid transparent;font-weight:var(--fw-medium);}
+  .tabs button:hover:not(.active){background:var(--surface-3);color:var(--ink);}
+  .tabs button.active{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:var(--fw-strong);}
+  .mobile-tabs{display:flex;gap:4px;padding:4px;border-radius:var(--r-pill);background:var(--surface-3);border:1px solid var(--line);}
+  .mobile-tabs button{
+    flex:1 1 0;min-height:38px;margin:0;border:0;border-radius:var(--r-pill);background:transparent;
+    color:var(--ink-3);font-size:14px;font-weight:var(--fw-medium);
+    transition:background-color var(--d2) var(--ease),color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
+  }
+  .mobile-tabs button.active{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(24,22,20,.08);}
+
+  /* ------------------------------------------------------------
+     八、栏目标题：小字距 + 细下划线（去掉竖条）
+     ------------------------------------------------------------ */
+  .col-title{border-left:0;padding-left:0;padding-bottom:var(--s2);border-bottom:1px solid var(--line);
+             text-transform:none;letter-spacing:.02em;margin-bottom:var(--s3);}
+  .col-title span{font-weight:var(--fw-body);color:var(--ink-4);}
+
+  /* ------------------------------------------------------------
+     九、列表与试听面板
+     ------------------------------------------------------------ */
+  .list-panel{margin-bottom:var(--s4);overflow:hidden;min-height:180px;}
+  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
+  .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
+  .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
+  .list-panel:has(>.sub:only-child){
+    min-height:0;display:flex;align-items:center;justify-content:center;
+    padding:var(--s6) var(--s4);background:var(--surface-2);border-style:dashed;
+  }
+  .list-panel>.sub:only-child{margin:0;color:var(--ink-4);}
+  @supports not (selector(:has(*))){.list-panel{min-height:0;}}
+  /* 动态插入的试听面板（每张卡片后面的 div#audition-N） */
+  .list-panel>div:not(.rank-card){
+    display:block;width:100%;box-sizing:border-box;margin:0;padding:0;
+    border-top:1px solid var(--line-soft);background:var(--surface-2);
+  }
+  .list-panel>div:not(.rank-card):empty{display:none;}
+  .list-panel>div:not(.rank-card) audio{width:100%;display:block;}
+
+  /* ------------------------------------------------------------
+     十、公告 / 须知 / 页脚 / 空态
+     ------------------------------------------------------------ */
+  #announceBox .panel{background:var(--brand-soft);border:1px solid var(--brand-line);border-left:0;border-radius:var(--r-card);}
+  #announceBox .panel h3{color:var(--brand-ink);}
+  #rulesBox .panel>div:first-child{border-bottom:1px solid var(--line);}
+  #rulesBox .rules-toggle{background:transparent;border:0;color:var(--brand);font-size:var(--fs-sub);font-weight:var(--fw-medium);}
+  footer img{box-shadow:none;background:transparent;opacity:.35;}
+  #siteVersion{color:var(--ink-4);}
+  p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
+  #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
+  .song-acts:empty{display:none;}
+  .more[style*="display:none"],.more[style*="display: none"]{display:none !important;margin:0;padding:0;height:0;}
+
+  /* ------------------------------------------------------------
+     十一、动效
+     ------------------------------------------------------------ */
+  @keyframes riseIn4{from{opacity:0;transform:translateY(10px) scale(.995);}to{opacity:1;transform:translateY(0) scale(1);}}
+  @keyframes colIn4{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .rank-card{animation:riseIn4 var(--d3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 28ms);}
+  .col.active{animation:colIn4 var(--d2) var(--ease-out) both;}
+  .card{animation:riseIn4 var(--d3) var(--ease-out) both;}
+  #listBox>.card:nth-child(2){animation-delay:28ms;}
+  #listBox>.card:nth-child(3){animation-delay:56ms;}
+  #listBox>.card:nth-child(4){animation-delay:84ms;}
+  #listBox>.card:nth-child(5){animation-delay:112ms;}
+  #listBox>.card:nth-child(6){animation-delay:140ms;}
+  #listBox>.card:nth-child(n+7){animation-delay:168ms;}
+
+  /* ------------------------------------------------------------
+     十二、双端适配
+     ------------------------------------------------------------ */
+  @media(min-width:900px){
+    body{max-width:1140px;padding:32px 28px;}
+    .header h1,.top-bar h2{font-size:38px;}
+    .rank-card{padding:18px 22px;}
+    .song-acts button{min-height:40px;}
+    /* 必须重述：设计层在样式表更后面，而基类是 display:flex，
+       与断点里的 display:none 特异性相同 —— 后面的赢。
+       漏掉这条，电脑端会多出一排"待审核榜/正式榜"切换按钮。 */
+    .mobile-tabs{display:none;}
+  }
+  @media(min-width:1080px){
+    .tabs{background:transparent;border:0;padding:0;}
+    .tabs button{text-align:left;justify-content:flex-start;}
+  }
+
+  /* ------------------------------------------------------------
+     十三、深色模式（暖墨 → 暖黑）
+     ------------------------------------------------------------ */
+  @media(prefers-color-scheme:dark){
+    :root{
+      --canvas:#141210;--surface:#1c1a17;--surface-2:#232019;--surface-3:#2a2620;--surface-4:#322d26;
+      --ink:#f5f2ec;--ink-2:#d3cdc2;--ink-3:#a8a196;--ink-4:#7f7a71;
+      --line:#2f2b24;--line-soft:#282420;--line-strong:#443f36;
+      --brand:#3fb3a5;--brand-strong:#5cc9bb;--brand-soft:#16241f;--brand-line:#2c4a43;
+      --brand-ink:#9fe0d5;
+      --danger:#e0796c;--danger-soft:#2e1a17;
+      --warn:#d9a441;--warn-soft:#2b2313;
+      --success:#3ecf9a;--ok-soft:#12281f;
+      --shadow-card:none;--shadow-pop:0 24px 56px -24px rgba(0,0,0,.75);
+      --ring:0 0 0 4px rgba(63,179,165,.2);
+    }
+    body{
+      background-color:var(--canvas);
+      background-image:
+        radial-gradient(880px 420px at 50% -200px,rgba(63,179,165,.14),rgba(63,179,165,0) 66%),
+        linear-gradient(180deg,#191713 0%,var(--canvas) 55%,#100e0c 100%);
+    }
+    .song-main h3,.rank-card h3,.rank-info h3,.card h3,.header h1,.top-bar h2,.ui-title{color:var(--ink);}
+    .song-main p,.rank-info p,.rank-card p,.card p{color:var(--ink-3);}
+    .song-main p span,.rank-card p span{color:var(--brand-ink) !important;}
+    #gate h2{color:var(--ink) !important;}
+    #gate p{color:var(--ink-3) !important;}
+    .col-title span,.sub,.slot .idx,.slot .meta,footer p,#disclaimerBox p{color:var(--ink-4);}
+    .btn-secondary,.back,.box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+      background:var(--surface-2);color:var(--ink-2);border-color:var(--line-strong);
+    }
+    .song-votes{background:var(--surface-2);border-color:var(--brand-line);}
+    .mobile-tabs{background:var(--surface-3);border-color:var(--line);}
+    .mobile-tabs button.active{background:var(--surface-2);box-shadow:none;}
+    #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
+    [style*="background:rgba(255,255,255"]{background:var(--surface) !important;}
+    [style*="background:rgba(225,29,72"]{background:var(--danger-soft) !important;}
+    [style*="background:rgba(5,150,105"]{background:var(--ok-soft) !important;}
+    [style*="border:1px solid #bae6fd"]{border-color:var(--brand-line) !important;}
+    [style*="border:1px solid #e2e8f0"]{border-color:var(--line-strong) !important;}
+  }
+
+  /* ------------------------------------------------------------
+     十四、无障碍
+     ------------------------------------------------------------ */
+  @media(prefers-reduced-motion:reduce){
+    .rank-card,.card,.col.active{animation:none !important;opacity:1 !important;transform:none !important;}
+    *{transition-duration:.01ms !important;animation-duration:.01ms !important;}
+    button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
+  }
+/* ==== 设计层 · 终点 ==== */
 </style>
 </head>
 <body>
