@@ -1,5 +1,5 @@
 import { readJson, error, json, clientIp, header } from '../../_lib/http.js';
-import { requireSession, rateLimit } from '../../_lib/auth.js';
+import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows, lastRowId, isMissingColumn } from '../../_lib/db.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
@@ -38,17 +38,38 @@ export async function onRequestPost(context) {
 
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
+
+  // 游客模式：只读。放在**读请求体、限流与任何写入之前** ——
+  // 这意味着被拒的游客请求连一次限流计数都不会留下（测试据此断言
+  // "接口 403 且数据没有落库"）。前端把「去投稿」置灰只是体验，
+  // 真正的闸门在这里：任何人都能直接 POST 这个接口。
+  const guestDenied = denyGuest(auth.session, '游客模式只能查看排行，不能投稿');
+  if (guestDenied) return guestDenied;
+
   const classId = auth.session.subject_id;
   // 调试模式（用管理员身份在学生端登录）不走每周限次、不查重
   const isDebug = auth.session.role === 'debug';
 
   const ip = clientIp(request);
-  const flood = await rateLimit(env, `vote:${ip}`, 30, 3600);
-  if (!flood.allowed) return error('提交过于频繁，请稍后再试', 429);
-
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
+
+  // 限流放在**读完请求体之后**：按设备指纹计额度。
+  // 旧写法是 rateLimit('vote:' + ip, 30, 3600) —— 校园网共用出口 IP，
+  // 全校共用 30 次额度，一个人刷满之后正常学生全部点不了歌。
+  // 现在身份额度按设备指纹（每台设备 30 次/小时），另外留一道 600/小时 的 IP 宽松兜底。
+  const fpForLimit = parseFingerprint(data.fingerprint);
+  const flood = await guardRate(env, request, {
+    kind: 'vote',
+    limit: 30,
+    windowSeconds: 3600,
+    fingerprint: fpForLimit.ok ? fpForLimit.value : '',
+    clientId: typeof data.client_id === 'string' ? data.client_id : '',
+    session: auth.session,
+    message: '提交过于频繁，请稍后再试',
+  });
+  if (flood) return flood;
 
   // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
   const human = await verifyRecaptcha(env, data.recaptcha_token, { ip });

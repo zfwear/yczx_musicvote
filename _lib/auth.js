@@ -13,6 +13,7 @@
 import { randomToken, sha256Hex, hmacHex } from './crypto.js';
 import {
   parseCookies, serializeCookie, isSecureRequest, clientIp, header, error,
+  rateKey, rateIpKey,
 } from './http.js';
 
 /**
@@ -85,6 +86,73 @@ export async function classPasswordLookup(env, password) {
   return hmacHex(authPepper(env), password);
 }
 
+/* --------------------- 游客模式（环境变量 GUEST_PASSWORD） --------------------- */
+
+/** 游客在 sessions.role 里的取值。 */
+export const GUEST_ROLE = 'guest';
+/** 游客在界面上显示的身份名（它不属于任何班级，所以不能拿 classes.name）。 */
+export const GUEST_CLASS_NAME = '游客模式';
+/** 游客碰写操作时的统一说法；前端置灰的提示文字与它保持一致。 */
+export const GUEST_DENY_MESSAGE = '游客模式只能查看排行，不能投稿';
+
+/**
+ * 游客口令。
+ *
+ * 为什么用环境变量而不是往 classes 表里插一行：
+ *   游客在业务上根本没有班级归属。一旦混进 classes 表，后台的班级列表、
+ *   年级人数汇总、口令批量生成都会多出一个假的"班级"，还可能被管理员
+ *   误删或误改；更要紧的是"没配就等于关闭"这条安全默认值就没法落地了
+ *   （表里有一行就意味着永久开启）。放在环境变量里，它就是一条**独立口令**：
+ *   删掉变量，整个游客模式干净地消失，数据库里一个字节都不留。
+ */
+export function guestPassword(env) {
+  return env && typeof env.GUEST_PASSWORD === 'string' ? env.GUEST_PASSWORD.trim() : '';
+}
+
+/**
+ * 游客模式是否启用。
+ *
+ * **默认关闭**：只有真的配了非空 GUEST_PASSWORD 才算启用。
+ * 即"忘记配这个变量"的结果是功能不存在，而不是悄悄开了一个只读后门。
+ */
+export function guestLoginEnabled(env) {
+  return guestPassword(env).length > 0;
+}
+
+/**
+ * 是不是游客会话。
+ *
+ * 游客复用**学生那一侧**的会话与 Cookie（subject='class'）：前端整套
+ * 排行 / 试听 / 设备指纹逻辑都建立在这个会话上，另起一套 Cookie 只会让
+ * 每个页面都要分叉。区分身份只靠 role='guest'；subject_id 恒为 0，
+ * 语义与调试模式一致 —— "不属于任何真实班级"。
+ */
+export function isGuestSession(session) {
+  return Boolean(session)
+    && session.subject === 'class'
+    && String(session.role || '').toLowerCase() === GUEST_ROLE;
+}
+
+/**
+ * 写接口的游客闸门。
+ *
+ * 用途：在 vote / upvote / report / suggest 等写接口里，紧跟 requireSession
+ * 之后调用。**是游客就返回 403 响应，不是游客返回 null。**
+ *
+ * 为什么必须放在服务端、而且放在最前面：
+ *   前端置灰只是体验，任何人都能直接 curl 这些接口。所以写接口必须自己拦；
+ *   放在读取请求体、限流计数与任何 INSERT 之前，是为了让被拒的请求
+ *   **连副作用都不产生**（不占限流额度、不留数据库痕迹），测试也据此断言。
+ *
+ * @param {object|null} session readSession/requireSession 拿到的会话行
+ * @param {string} [message] 给游客看的中文提示
+ * @returns {Response|null} 403 响应，或 null（放行）
+ */
+export function denyGuest(session, message = GUEST_DENY_MESSAGE) {
+  if (!isGuestSession(session)) return null;
+  return error(message, 403);
+}
+
 /**
  * 调试登录（在学生端口令框里输入「管理员账号:密码」）的服务端开关。
  *
@@ -100,9 +168,33 @@ export function debugLoginEnabled(env) {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
-/** 管理员会话 12 小时；学生会话 30 天（学生是每周点一次，会话要够长）。 */
+/**
+ * 会话有效期。
+ *
+ * 管理员：12 小时。后台是"做事的地方"，权限大，短一点更安全。
+ *
+ * 学生：**1 天，且每次打开页面自动续期**（滑动窗口，见 refreshSessionOnUse）。
+ *   语义要分清楚 ——
+ *     · **班级口令**：长期留存，除非管理员在后台显式删除，否则永不主动清除
+ *       （库里没有任何地方会删 classes 行，只有 UPDATE 改口令）。
+ *     · **设备上的会话**：只留 1 天。一天没打开过网页就要重新输口令；
+ *       只要这天里打开过，就自动续到"再往后 1 天"。
+ *   为什么是 1 天：学生一周来点一两次歌，会话太长等于口令长期挂在设备上；
+ *   太短又天天要输口令。1 天 + 滑动续期正好是"常用的人不用重输，
+ *   长期不用的设备自动失效"。
+ */
 export const ADMIN_TTL_SECONDS = 12 * 60 * 60;
-export const CLASS_TTL_SECONDS = 30 * 24 * 60 * 60;
+export const CLASS_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * 续期节流：同一会话**每小时最多续一次**。
+ *
+ * 为什么需要节流：续期是一次 UPDATE。学生一分钟里翻五个页面就写五次库，
+ * 而 Cloudflare 免费套餐的 CPU/写入额度是有限的 —— 用不必要的写入换来的
+ * "更精确的过期时间"没有任何收益（反正都要等一天才过期）。
+ * 1 小时的粒度意味着：会话实际有效期在 24~25 小时之间，体感上没差别。
+ */
+const SESSION_REFRESH_INTERVAL_SECONDS = 60 * 60;
 
 /** D1 绑定缺失时给出明确错误，而不是让异常冒泡成 500 堆栈。 */
 export function requireDb(env) {
@@ -227,6 +319,11 @@ export async function createSession(
  *
  * 返回行的字段：id / subject / subject_id / role / expires_at，
  * 以及 013 之后才有的 debug_admin_id（调试会话的归属管理员）。
+ *
+ * 顺带做**滑动续期**：只要这次请求带着有效会话，就把过期时间推到"从现在起
+ * 再一个完整有效期"（见 refreshSessionOnUse）。所以"学生只在打开网页时被续期"
+ * 这件事不需要前端做任何事 —— 页面一打开就会请求 /api/rank 或 /api/me，
+ * 那两次请求就会把会话续上。
  */
 export async function readSession(env, request, subject = null) {
   const tokens = presentedTokens(request, subject);
@@ -238,7 +335,7 @@ export async function readSession(env, request, subject = null) {
       let row;
       try {
         row = await env.DB.prepare(
-          `SELECT id, subject, subject_id, role, debug_admin_id, expires_at
+          `SELECT id, subject, subject_id, role, debug_admin_id, expires_at, user_agent
              FROM sessions
             WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
         ).bind(tokenHash).first();
@@ -247,7 +344,7 @@ export async function readSession(env, request, subject = null) {
         // 让迁移进度不同的部署都还能正常登录。
         if (!isMissingColumnError(err)) throw err;
         row = await env.DB.prepare(
-          `SELECT id, subject, subject_id, role, expires_at
+          `SELECT id, subject, subject_id, role, expires_at, user_agent
              FROM sessions
             WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
         ).bind(tokenHash).first();
@@ -272,6 +369,7 @@ export async function readSession(env, request, subject = null) {
         }
       }
 
+      await refreshSessionOnUse(env, row);
       return row;
     }
     return null;
@@ -284,6 +382,84 @@ export async function readSession(env, request, subject = null) {
       throw wrapped;
     }
     throw err;
+  }
+}
+
+/**
+ * 从 sessions.user_agent 里读出"最近一次活动时间"。
+ *
+ * 为什么借用这一列：续期需要知道"上次续期是什么时候"才能节流，否则每个请求
+ * 都要写一次库。而新增一列意味着**必须有新迁移**，可已有站点按增量补丁的习惯
+ * 是"只覆盖文件、不跑 SQL" —— 那样这列不存在，节流就会静默失效
+ *（表现为每请求一次写一次库，正是我们要避免的）。
+ *
+ * sessions.user_agent 在全项目里**只写不读**（没有任何查询或界面用到它），
+ * 所以把"设备信息 + 最近活动时间"一起放进去是安全的：
+ *   · 设备信息保留（出问题时还能看是谁的会话）；
+ *   · 不引入任何迁移，部署零风险。
+ * 格式：`<原始 UA>‖<ISO 时间>`；没有时间戳时返回 null（表示"从没续过"）。
+ */
+const SESSION_SEEN_SEP = '‖';
+
+function lastSeenAtOf(session) {
+  const raw = String((session && session.user_agent) || '');
+  const at = raw.lastIndexOf(SESSION_SEEN_SEP);
+  if (at < 0) return null;
+  const stamp = raw.slice(at + SESSION_SEEN_SEP.length).trim();
+  return /^\d{4}-\d{2}-\d{2}T/.test(stamp) ? stamp : null;
+}
+
+/** 把"设备信息 + 最近活动时间"重新拼回去。 */
+function withLastSeen(userAgent, isoNow) {
+  const raw = String(userAgent || '');
+  const at = raw.lastIndexOf(SESSION_SEEN_SEP);
+  const device = at >= 0 ? raw.slice(0, at) : raw;
+  return `${device.slice(0, 200)}${SESSION_SEEN_SEP}${isoNow}`;
+}
+
+/**
+ * 滑动续期：会话被用到时，把过期时间推到"从现在起再一个完整有效期"。
+ *
+ * 需求原话是「会话在设备上的留存时间为一天，在再次打开网页时刷新」——
+ * 这里就是那句话的服务端实现：
+ *   · 打开页面 → 前端必然发一次 /api/rank 或 /api/me → readSession → 这里续期；
+ *   · 一天没打开 → 会话自然过期（查询条件 datetime(expires_at) > now 不成立），
+ *     下次进来要重新输口令。
+ *
+ * 三个刻意的设计：
+ *   1. **节流**：同一会话每小时最多写一次（SESSION_REFRESH_INTERVAL_SECONDS）。
+ *      续期是一次 UPDATE；一分钟里翻五个页面写五次库毫无收益，
+ *      而免费套餐的写入额度要留给真正要做的事。
+ *   2. **只续不缩**：新过期时间取 MAX(原过期时间, now + 有效期)。
+ *      即使遇到时钟抖动或并发，也绝不会缩短会话 —— "把人踢下线"
+ *      不该由一次续期逻辑顺手做掉。
+ *   3. **失败一律忽略**：续期是体验优化，它失败不该让正常请求失败。
+ *      会话是否有效最终由那次查询的 expires_at > now 决定，不依赖这里。
+ */
+async function refreshSessionOnUse(env, row) {
+  const id = Number(row && row.id);
+  if (!Number.isInteger(id) || id <= 0) return;
+
+  // 节流：距上次续期不到一小时就什么都不做（连库都不碰）
+  const lastSeen = lastSeenAtOf(row);
+  if (lastSeen) {
+    const ageSeconds = (Date.now() - Date.parse(lastSeen)) / 1000;
+    if (Number.isFinite(ageSeconds) && ageSeconds < SESSION_REFRESH_INTERVAL_SECONDS) return;
+  }
+
+  try {
+    const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, '');
+    await env.DB.prepare(
+      `UPDATE sessions
+          SET expires_at = datetime(
+                MAX(datetime(expires_at), datetime('now', '+${CLASS_TTL_SECONDS} seconds'))
+              ),
+              user_agent = ?
+        WHERE id = ?
+          AND datetime(expires_at) > datetime('now')`
+    ).bind(withLastSeen(row.user_agent, nowIso), id).run();
+  } catch {
+    /* 见函数说明：续期失败不影响本次请求 */
   }
 }
 
@@ -627,4 +803,51 @@ export async function clearRateLimit(env, bucket) {
   try {
     await env.DB.prepare('DELETE FROM rate_limits WHERE bucket = ?').bind(bucket).run();
   } catch { /* 尽力而为 */ }
+}
+
+/**
+ * 写接口的统一限流闸门：**按身份**限额 + **按 IP** 一道宽松兜底。
+ *
+ * 为什么要有这一层（本轮修的问题）：
+ *   原来 vote / upvote / report / music 都写成 `rateLimit(env, 'vote:' + ip, 30, 3600)` ——
+ *   校园网共用出口 IP，于是全校共用 30 次额度。一个人（或一个脚本）把额度打满，
+ *   正常学生全部收到 429。按 IP 限流在这里不是安全，是把可用性交给了攻击者。
+ *
+ * 两道限流的分工：
+ *   · 身份额度（identKey）：这是**公平**用的 —— 每台设备/每一条会话各有一份，
+ *     别人刷不爆你的额度。客户端能伪造身份键，所以它**不是**防滥用的硬边界。
+ *   · IP 兜底（rateKey 里的 ip 那一道）：这才是**防滥用**用的 —— 阈值放得很宽，
+ *     只挡"一个出口的脚本疯狂刷"，正常一个班甚至一个年级都不会碰到。
+ *   两道都超了才拒绝：任何一道还有余量就放行。
+ *
+ * @param {object} env
+ * @param {Request} request
+ * @param {{kind: string, limit: number, windowSeconds: number, ipLimit?: number,
+ *          fingerprint?: string, clientId?: string, session?: object, message?: string}} opts
+ * @returns {Promise<Response|null>} 429 响应，或 null（放行）
+ */
+export async function guardRate(env, request, opts) {
+  const {
+    kind, limit, windowSeconds,
+    ipLimit = Math.max(limit * 8, 600),
+    fingerprint, clientId, session,
+    message = '操作过于频繁，请稍后再试',
+  } = opts;
+
+  const identityBucket = rateKey(request, { kind, fingerprint, clientId, session });
+  const identity = await rateLimit(env, identityBucket, limit, windowSeconds);
+
+  // IP 兜底只在身份额度已经用完时才查 —— 省一次数据库往返（免费套餐 CPU 预算有限）。
+  // 代价是"身份额度够用时完全不看 IP"，这正是我们想要的：正常流量永不触碰兜底阈值。
+  if (identity.allowed) return null;
+
+  const ipBucket = rateIpKey(request, kind);
+  if (ipBucket === identityBucket) {
+    // 连身份都没有（既无指纹也无会话），已经退化成按 IP —— 不必再查一遍。
+    return error(message, 429);
+  }
+
+  const backstop = await rateLimit(env, ipBucket, ipLimit, windowSeconds);
+  if (backstop.allowed) return null;
+  return error(message, 429);
 }

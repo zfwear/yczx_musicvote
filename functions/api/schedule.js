@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession, requireStaff } from '../../_lib/auth.js';
+import { requireSession, requireStaff, isGuestSession, readSession } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum } from '../../_lib/validate.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -123,7 +123,17 @@ export async function onRequestPost(context) {
   const { request, env } = context;
 
   const auth = await requireStaff(env, request);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    // 排期本来就是管理员专属（requireStaff），游客拿的是学生会话，
+    // 理论上进不来。但这里要把话说明白：游客真正去做这件事时如果只看到
+    // 「登录已过期，请重新登录」，他会以为重新登录就能排期 —— 于是反复试。
+    // 所以先认一下"是不是游客"，是的话给一句准确的 403。
+    // 注意顺序：**先 requireStaff 再认游客**，这样同时持有管理员 Cookie 的
+    // 浏览器（一边登录后台、一边开着游客会话）仍然正常排期，不会被误伤。
+    const classSession = await readSession(env, request, 'class').catch(() => null);
+    if (isGuestSession(classSession)) return error('游客模式只能查看排行，不能排期', 403);
+    return auth.response;
+  }
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);

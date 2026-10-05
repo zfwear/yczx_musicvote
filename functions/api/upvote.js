@@ -1,5 +1,5 @@
 import { readJson, error, json, clientIp } from '../../_lib/http.js';
-import { requireSession, rateLimit } from '../../_lib/auth.js';
+import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
@@ -33,11 +33,15 @@ export async function onRequestPost(context) {
 
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
+
+  // 游客模式：只读，不能投票。与投稿同理 —— 拦在读请求体与占位之前，
+  // 被拒的请求不会写 upvote_logs，也不会把票数 +1。
+  const guestDenied = denyGuest(auth.session, '游客模式只能查看排行，不能投票');
+  if (guestDenied) return guestDenied;
+
   const classId = auth.session.subject_id;
 
   const ip = clientIp(request);
-  const flood = await rateLimit(env, `upvote:${ip}`, 200, 3600);
-  if (!flood.allowed) return error('投票过于频繁，请稍后再试', 429);
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
@@ -55,6 +59,24 @@ export async function onRequestPost(context) {
   // 可选的幂等请求标识：不传时行为与以前完全一致（老前端还在跑）。
   const requestId = parseRequestId(parsed.value.request_id);
   if (!requestId.ok) return error(requestId.error, 400);
+
+  // 限流：按**设备指纹**计额度（读完请求体才知道指纹，所以放在这里）。
+  //
+  // 旧写法是把出口 IP 直接拼进桶名、200 次/小时 —— 校园网全校共用一个出口，
+  // 一个人刷满，全年级都投不了票。现在每台设备 30 次/小时（投票本身还有
+  // upvote_logs 的唯一索引去重，正常学生一小时内不可能投 30 次），
+  // IP 只留 600/小时 的宽松兜底（那一道是防脚本，不是防同学）。
+  // ⚠️ 不要在桶名里直接拼 IP —— 有测试专门扫这个写法（连注释里的示例也会命中）。
+  const flood = await guardRate(env, request, {
+    kind: 'upvote',
+    limit: 30,
+    windowSeconds: 3600,
+    fingerprint: fingerprint.value,
+    clientId: typeof parsed.value.client_id === 'string' ? parsed.value.client_id : '',
+    session: auth.session,
+    message: '投票过于频繁，请稍后再试',
+  });
+  if (flood) return flood;
 
   const song = await env.DB.prepare(
     "SELECT id FROM songs WHERE id = ? AND status = 'pending'"

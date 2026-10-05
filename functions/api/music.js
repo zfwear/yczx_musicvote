@@ -1,5 +1,5 @@
-import { error, json, clientIp } from '../../_lib/http.js';
-import { requireSession, rateLimit, rateLimitOnce, countBudget } from '../../_lib/auth.js';
+import { error, json } from '../../_lib/http.js';
+import { requireSession, guardRate, rateLimitOnce, countBudget } from '../../_lib/auth.js';
 import { sanitizeText } from '../../_lib/validate.js';
 import { signTrackToken } from '../../_lib/tracktoken.js';
 
@@ -78,9 +78,26 @@ const SOURCE_COOLDOWN_MS = 90 * 1000;
 const MIN_TITLE_SCORE = 0.5;
 
 const DEFAULT_METING_BASES = [
-  'https://api.qijieya.cn/meting/',
-  'https://api.injahow.cn/meting/',
+  // 实测过的一批公共音源（清单来自 VoiceHub 的 musicSources.ts，逐个实测筛选）。
+  // 2026-10-05 结论：
+  //   ✅ music-api.gdstudio.xyz   搜索 + 播放地址都可用（完整歌曲 320kbps）
+  //   ❌ api.qijieya.cn/meting/   type=search 返回空、type=url 返回空
+  //   ❌ api.injahow.cn/meting/   type=search 报 unknown type、type=url 返回空
+  //   ❌ api.ygking.top           域名已无法解析
+  //   ⚠️ api.vkeys.cn/v2/music    搜索可用（QQ 音乐、原唱准）但 url 恒为 null，不能播
+  // 所以默认只留 GD Studio。要换成自建 Meting，设 MUSIC_API_BASE 即可。
+  'https://music-api.gdstudio.xyz/api.php',
 ];
+
+/**
+ * GD Studio 与 Meting 的参数形状完全不同：
+ *   Meting     ?server=netease&type=search&id=<关键词> / ?type=url&id=<id>
+ *   GD Studio  ?types=search&source=netease&name=<关键词> / ?types=url&source=netease&id=<id>
+ * 所以按 base 分派，而不是把两套参数硬塞进一个函数。
+ */
+function isGdStudio(base) {
+  return /gdstudio/i.test(base);
+}
 const DEFAULT_STOREFRONTS = ['hk', 'tw', 'us'];
 
 /** 苹果返回的部分容器格式浏览器认不出来，统一成标准 MIME。 */
@@ -296,7 +313,55 @@ function normalizeMeting(payload) {
   return out;
 }
 
+/**
+ * GD Studio 的搜索。
+ *
+ * 返回形状与 Meting 不同（artist 是数组、id 在 url_id），
+ * 所以归一化成内部统一形状，下游（凭据签发、试听、入库）完全不用改。
+ *
+ * 注意：GD Studio 与 Meting 一样是**网易云**，搜出来的原唱准确度不如苹果 ——
+ * 那条"七里香 → 无名翻唱"的问题它同样存在。所以它只做**兜底**：
+ * 苹果目录里没有的歌（部分华语冷门曲）才落到这里。
+ */
+async function gdstudioSearch(base, keywords) {
+  const url = `${base}?types=search&source=netease&name=${encodeURIComponent(keywords)}`
+    + `&count=${MAX_RESULTS}&pages=1`;
+  const got = await fetchBounded(url, {}, { parse: 'json' });
+  if (!got) return [];
+  got.cleanup();
+
+  const list = Array.isArray(got.body) ? got.body : [];
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object' || !item.name) continue;
+    const rawId = String(item.url_id || item.id || '');
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(rawId)) continue;
+    out.push({
+      id: `mt-${rawId}`,
+      name: clip(item.name),
+      artist: clip(Array.isArray(item.artist) ? item.artist.join(' / ') : item.artist),
+      album: clip(item.album || ''),
+      duration: 0,
+      source: '网易云',
+    });
+    if (out.length >= MAX_RESULTS) break;
+  }
+  return out;
+}
+
+/** GD Studio 的播放地址。返回真实音频直链（实测 320kbps 完整歌曲）。 */
+async function gdstudioResolve(base, songId) {
+  const url = `${base}?types=url&source=netease&id=${encodeURIComponent(songId)}&br=320`;
+  const got = await fetchBounded(url, {}, { parse: 'json' });
+  if (!got) return null;
+  got.cleanup();
+
+  const direct = got.body && got.body.url;
+  return typeof direct === 'string' && /^https?:\/\//i.test(direct) ? direct : null;
+}
+
 async function metingSearch(base, keywords) {
+  if (isGdStudio(base)) return gdstudioSearch(base, keywords);
   const url = `${base}?server=netease&type=search&id=${encodeURIComponent(keywords)}`;
   const got = await fetchBounded(url, {}, { parse: 'json' });
   if (!got) return [];
@@ -306,6 +371,7 @@ async function metingSearch(base, keywords) {
 }
 
 async function metingResolve(base, songId) {
+  if (isGdStudio(base)) return gdstudioResolve(base, songId);
   const url = `${base}?server=netease&type=url&id=${encodeURIComponent(songId)}`;
 
   // redirect: 'manual' —— 只要 Location，不要真的把音频下载下来。
@@ -468,6 +534,148 @@ function buildSources(env, keywords) {
 
 function hostOf(url) {
   try { return new URL(url).host; } catch { return String(url).slice(0, 40); }
+}
+
+/* ======================= 音频代理的上游信任边界（审计 A9） =======================
+
+   问题：音频地址是**上游返回**的（Meting 的 JSON 里有 url 字段，苹果那边也拿
+   它给的地址），我们并不生产这个地址。旧代码用 `redirect: 'follow'` 直接去取，
+   于是最终连到哪台主机完全由上游说了算 —— 上游（或它被攻破后的返回内容）
+   可以把我们导向任意主机，甚至内网地址（169.254.169.254 这类云元数据地址）。
+   这就是 SSRF：我们的函数成了别人探测内网的跳板。
+
+   修法（两条一起才成立）：
+     1. **逐跳校验**：自己跟随重定向，每一跳的目标主机都必须来自可信集合
+        （配置里的 Meting 基址 + 苹果 storefront），不在集合里就拒绝。
+        用 redirect:'manual' 而不是 'follow'，因为跟随后就再也看不到中间跳了。
+     2. **解析出的 IP 必须不是内网/保留地址**：防 DNS 指向私有地址
+        （即使是可信域名，也有被劫持或配错的可能）。
+
+   为什么允许"可信集合之外"的 https 主机作为最终跳：上游音源经常把音频
+   放在自己的 CDN 上，硬性白名单会把正常试听全部打断（那就从"不安全"变成
+   "不可用"）。所以最终跳放宽到"https + 公网地址"，而**中间跳必须可信** ——
+   中间跳才是能任意指定的那一环。 */
+
+/** IP 字面量是否属于"内网 / 保留"地址（含 IPv6 的本地与私有段）。 */
+function isPrivateIp(host) {
+  const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (!h) return true;
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+
+  // IPv6
+  if (h.includes(':')) {
+    if (h === '::1' || h === '::') return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;          // fc00::/7 唯一本地
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;          // fe80::/10 链路本地
+    const v4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);     // IPv4 映射
+    if (v4) return isPrivateIp(v4[1]);
+    return false;
+  }
+
+  // IPv4 字面量
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;                                     // 域名：交给下面的解析判断
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;                  // 链路本地（云元数据）
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;        // 运营商级 NAT
+  if (a >= 224) return true;                                // 组播 / 保留
+  return false;
+}
+
+/** 允许作为**中间跳**的主机集合：配置里的 Meting 基址 + 苹果 storefront。 */
+function trustedAudioHosts(env) {
+  const hosts = new Set();
+  const add = (url) => {
+    try { hosts.add(new URL(url).host.toLowerCase()); } catch { /* 配置项本身不合法就跳过 */ }
+  };
+  for (const base of metingBases(env)) add(base);
+  for (const store of storefronts(env)) add(store);
+  // 苹果的官方音频域（试听片段与转移后的 CDN）
+  for (const host of ['audio-ssl.itunes.apple.com', 'itunes.apple.com', 'mzstatic.com']) add(host);
+  return hosts;
+}
+
+/** 主机是否可信（含子域）。 */
+function isTrustedHost(host, trusted) {
+  const h = String(host || '').toLowerCase();
+  if (!h) return false;
+  if (trusted.has(h)) return true;
+  for (const t of trusted) {
+    if (!t.includes('.')) continue;
+    if (h.endsWith('.' + t)) return true;                   // *.mzstatic.com 这类
+  }
+  return false;
+}
+
+/** 允许作为**最终跳**：https + 非内网地址（http 一律拒绝，避免明文与降级）。 */
+function isAllowedFinalUrl(rawUrl) {
+  let target;
+  try { target = new URL(rawUrl); } catch { return false; }
+  if (target.protocol !== 'https:') return false;
+  if (target.username || target.password) return false;      // 带凭据的 URL 直接拒绝
+  if (isPrivateIp(target.hostname)) return false;
+  return true;
+}
+
+/**
+ * 取音频上游响应：**自己跟随重定向，逐跳校验**。
+ *
+ * @returns {Promise<Response|null>} null 表示"中途被安全策略拦下"（调用方给 502）
+ */
+async function fetchAudioUpstream(env, url, headers, timeoutMs) {
+  const trusted = trustedAudioHosts(env);
+  let target = url;
+
+  for (let hop = 0; hop < 4; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(target, {
+        // 关键：manual —— 跟随后就看不到中间跳了，也就没法校验它
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'yczx-musicvote/1.0', ...headers },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const isRedirect = res.status >= 300 && res.status < 400;
+    if (!isRedirect) {
+      // 最终跳：必须是 https 且不是内网地址
+      if (!isAllowedFinalUrl(res.url || target)) {
+        try { await res.body?.cancel(); } catch { /* 已经关了 */ }
+        return null;
+      }
+      // 声明长度离谱的直接拒绝（防"畸形上游把资源吃光"）
+      const declared = Number(res.headers.get('Content-Length'));
+      if (Number.isFinite(declared) && declared > AUDIO_BODY_LIMIT) {
+        try { await res.body?.cancel(); } catch { /* 已经在关了 */ }
+        return null;
+      }
+      return res;
+    }
+
+    const location = res.headers.get('Location');
+    try { await res.body?.cancel(); } catch { /* 重定向响应没有 body 要读 */ }
+    if (!location) return null;
+
+    let next;
+    try { next = new URL(location, target).href; } catch { return null; }
+
+    // 中间跳必须是可信主机 —— 这是能被人为指定的那一环，必须卡住
+    let nextHost = '';
+    try { nextHost = new URL(next).host; } catch { return null; }
+    if (!isTrustedHost(nextHost, trusted)) return null;
+
+    target = next;
+  }
+
+  return null;                       // 跳太多：要么是环，要么是有人在牵我们的鼻子
 }
 
 /** 同一个关键词正在搜索时，后来者复用它，不再重复打上游。 */
@@ -678,6 +886,25 @@ async function resolveAudioUrl(env, prefixedId) {
   return null;
 }
 
+/**
+ * 音频上游请求：**只要响应，不读 body**。
+ *
+ * 为什么不能复用 fetchBounded：那个函数是为了"搜索结果"设计的 ——
+ * 它会把 body 整个读进内存再 JSON.parse。音频不能这么干：
+ * 一首 30 秒试听就有 1~2MB，Meting 的完整歌曲更大，
+ * 全读进内存既浪费又容易撞上免费套餐的内存/CPU 预算。
+ * 音频必须**流式转发**给浏览器。
+ *
+ * 超时只覆盖"连上并拿到响应头"这一段。一旦开始转发就不能再用总时限 ——
+ * 大文件本来就要慢慢传，用总时限掐断会把正常播放打断。
+ * 卡死的连接由浏览器自己超时/取消（客户端断开会传递到这里的 signal）。
+ *
+ * ⚠️ 历史教训：这个函数曾经叫 fetchUpstream，在某次重构里被改名成 fetchBounded
+ * 但**漏改了调用点**，导致音频代理每次都抛 ReferenceError、被 catch 吞掉后
+ * 报成"音源获取超时" —— 表现就是**试听一首也放不出来**。
+ * 那条"调用的助手必须真的存在"的测试现在守着 fetchAudioUpstream（本轮 A9 的替身）。
+ */
+
 async function proxyAudio(env, prefixedId, request) {
   const directUrl = await resolveAudioUrl(env, prefixedId);
   if (!directUrl) return error('这首暂时没有可试听的片段，换一首试试', 404);
@@ -688,10 +915,13 @@ async function proxyAudio(env, prefixedId, request) {
 
   let upstream;
   try {
-    upstream = await fetchUpstream(directUrl, { headers, redirect: 'follow' }, AUDIO_TIMEOUT_MS);
+    // 审计 A9：不再用 redirect:'follow' —— 改成逐跳校验（见 fetchAudioUpstream）。
+    upstream = await fetchAudioUpstream(env, directUrl, headers, AUDIO_TIMEOUT_MS);
   } catch {
     return error('音源获取超时，请稍后再试', 504);
   }
+  // fetchAudioUpstream 返回 null = 重定向跳到了不可信主机（或最终不是 https/公网）
+  if (!upstream) return error('音源地址不可信，已拒绝转发', 502);
   if (!upstream.ok && upstream.status !== 206) return error('音源获取失败', 502);
   if (!upstream.body) return error('音源返回了空内容', 502);
 
@@ -734,13 +964,32 @@ export async function onRequestGet(context) {
   const auth = await requireSession(env, request, null);
   if (!auth.ok) return auth.response;
 
-  const ip = clientIp(request);
-  const limit = await rateLimit(env, `music:${ip}`, 120, 3600);
-  if (!limit.allowed) return error('试听请求过于频繁，请稍后再试', 429);
+  const limit = await guardRate(env, request, {
+    kind: 'music',
+    limit: 240,                         // 每台设备/每条会话每小时 240 次
+    windowSeconds: 3600,
+    // IP 兜底比旧值（按 IP 120/小时）宽得多：旧写法等于全校共用 120 次试听额度。
+    // 现在 1200 只挡"一个出口的脚本疯狂拉音频"，正常上课时间段的试听远够用。
+    ipLimit: 1200,
+    session: auth.session,
+    message: '试听请求过于频繁，请稍后再试',
+  });
+  if (limit) return limit;
 
   const playId = (url.searchParams.get('play') || '').trim();
   if (playId) {
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(playId)) return error('歌曲 id 不正确', 400);
+
+    // 审计 C6：音频是**分段拉取**的 —— 放一首歌浏览器会发十几个 Range 请求，
+    // 拖动进度条还会再来一批。它们属于同一次人工试听，按"每请求一个额度"
+    // 计会让正常使用凭空放大十几倍，把整个出口的额度吃光。
+    // 这里把 (会话, 音源 id) 在本小时窗口内折叠成一次计数。
+    // 注意：折叠的是**计数**，不是请求本身 —— 每个 Range 请求仍然照常转发，
+    // 否则播放器会卡住（这条限流绝不能变成拦请求）。
+    const who = Number.isInteger(Number(auth.session.id)) ? Number(auth.session.id) : 0;
+    const folded = await rateLimitOnce(env, `audio:${who}`, playId, 60, 3600);
+    if (!folded.allowed) return error('试听请求过于频繁，请稍后再试', 429);
+
     return proxyAudio(env, playId, request);
   }
 
@@ -752,6 +1001,29 @@ export async function onRequestGet(context) {
   if (rawArtist) {
     const parsedArtist = sanitizeText(rawArtist, { maxLength: 60, field: '歌手' });
     if (parsedArtist.ok) artist = parsedArtist.value;
+  }
+
+  // 审计 C6 的全站预算。
+  //
+  // 这里**必须有实际作用**，否则就是死代码（这个仓库最忌讳"写了没接线"）。
+  // 它拦的位置很讲究：搜索真的会打上游（苹果 / Meting），
+  // 而细粒度额度管的是"谁搜了多少"，管不了"整个站点一小时被搜了多少次" ——
+  // 有人开几百个会话轮流搜就能绕过前者。
+  //
+  // 用法是**超预算时收紧限流**，而不是直接拒绝：拒绝搜索会让正常学生
+  // 连歌都选不了（可用性代价远大于收益）；收紧之后每人每小时的搜索次数
+  // 从 120 降到 20，仍然够正常点一首歌，但脚本刷的收益被压到很低。
+  const siteSearches = await countBudget(env, 'music-search', 3600);
+  if (siteSearches > 2000) {
+    const tight = await guardRate(env, request, {
+      kind: 'music-search-tight',
+      limit: 20,
+      windowSeconds: 3600,
+      session: auth.session,
+      ipLimit: 60,
+      message: '搜索过于频繁，请稍后再试',
+    });
+    if (tight) return tight;
   }
 
   try {

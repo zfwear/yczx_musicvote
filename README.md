@@ -40,6 +40,7 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 | `RECAPTCHA_MIN_SCORE` | v3 分数阈值，默认 `0.5` | 低于它判为机器人 |
 | `RECAPTCHA_BASE` | 覆盖校验域名 | 默认 `https://www.recaptcha.net` |
 | `DEBUG_LOGIN` | 设成 `1` 才启用「管理员账号:密码」调试登录 | **默认关闭**，生产留空即可 |
+| `GUEST_PASSWORD` | 游客口令。配了才有「游客模式」（只读：能看排行与试听） | **默认关闭**：不配就等于没有游客模式 |
 | `TRACK_TOKEN_SECRET` | 选曲凭据的签名密钥 | 退回用 `AUTH_PEPPER`，一般不用单独配 |
 | `ICP_BEIAN` / `GONGAN_BEIAN` / `COPYRIGHT_HOLDER` | 备案号与版权主体 | 页面里已写死真实值，配了就以环境变量为准 |
 | `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：优先 Meting，失败回退苹果官方试听 |
@@ -284,6 +285,55 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 
 调试会话有效期 2 小时，走和普通学生一样的 HttpOnly Cookie，不影响后台登录态。
 
+### 游客模式（只读口令，环境变量 `GUEST_PASSWORD`）
+
+**用途**：让没拿到班级口令的人（家长、外校同学、来参观的老师）只**看排行**，
+不能投稿、不能投票、不能举报。
+
+| | 说明 |
+|---|---|
+| 怎么开 | 在 Pages → Settings → Environment variables 里加 `GUEST_PASSWORD`，值就是游客口令 |
+| 怎么关 | **删掉这个变量**（或留空）。默认就是关闭的 |
+| 登录入口 | 和班级口令**共用首页那一个输入框**，不用记两个入口 |
+| 判定顺序 | 先按班级口令查，查不到再比 `GUEST_PASSWORD`；两者写成同一串时按**班级**登录 |
+| 会话 | 复用学生那一侧（`yczx_class_session` Cookie），`role='guest'`、`subject_id=0` |
+
+**能做什么 / 不能做什么**（服务端逐条拦，不是只把按钮变灰）：
+
+| 接口 | 游客 |
+|---|---|
+| `GET /api/rank`（看排行） | 允许 |
+| `GET /api/music`（试听） | 允许。**这是有意的判断**：试听只是一个只读代理，而且榜单里每首歌就带试听按钮；禁掉它会让"只能看排行"变得很别扭 |
+| `GET /api/announcements`（公告） | 允许 |
+| `POST /api/vote`（投稿） | **403**「游客模式只能查看排行，不能投稿」 |
+| `POST /api/upvote`（投票） | **403**「…不能投票」 |
+| `POST /api/report`（举报） | **403**「…不能举报」 |
+| `POST /api/suggest`（歌曲建议） | **403**「…不能提建议」 |
+| `POST /api/schedule`（排期） | **403**「…不能排期」（本来就是管理员专属） |
+
+闸门统一放在读请求体、限流计数与任何写入**之前**，所以被拒的请求
+连一次限流计数、一行数据库记录都不会留下（测试就是这么断言的）。
+
+前端配合（只是体验层，真正的闸门在服务端）：
+
+- 首页顶部显示一条提示：「当前为游客模式，只能查看排行（榜单里的试听仍然可用）；不能投稿、投票或举报。」
+- 「去投稿」/「投票」/「举报」置灰。用的是 `disabled` 属性而不是"把颜色调淡"：
+  按钮直接不再派发点击，「去投稿」是链接所以同时去掉 `href`（没有 `href` 的链接
+  键盘也进不去），并补 `aria-disabled` 与说明原因的 `title`。
+- 点歌页：提交按钮**默认就是禁用的**，进页面先问身份再决定解不解开 ——
+  游客一进来就看到原因并被告知回主页，不会"填完表单才被拒"。
+- 身份判断走 `GET /api/me`（未登录 401）或登录响应里的 `guest` 标记，
+  **不做**"试一次写操作看会不会 403"的探测。
+
+> **为什么不把游客口令放进 `classes` 表**：游客在业务上不属于任何班级。
+> 混进表里会让后台的班级列表、年级人数汇总、口令批量生成都多出一个假"班级"，
+> 还可能被误删误改；而且"表里有一行"就意味着永久开启，"不配即关闭"这条
+> 安全默认值就落不了地。放在环境变量里，删掉变量整个功能干净消失，
+> 数据库里一个字节都不留。
+
+> 建议把游客口令设成一个**只能看**的独立值（够长、与班级口令不同），
+> 并且按"它会被转发出去"来对待。即使泄露，后果也只是多了些只读观众。
+
 ### 界面交互（弹窗、动画、局部刷新）
 
 - **不用浏览器原生弹窗。** 全站 84 处 `alert / confirm / prompt` 都已换成自绘弹窗
@@ -440,7 +490,8 @@ _routes.json                            只让 /api/* 走 Functions，保住每�
 assets/school-badge.png                 右上角校徽
 assets/radio-logo.png                   盐中之声
 
-functions/api/login.js                  班级口令登录（支持"账号:密码"调试模式）
+functions/api/login.js                  班级口令登录（游客口令与"账号:密码"调试模式共用此入口）
+functions/api/me.js                     当前身份（role / isGuest / className），未登录返回 401
 functions/api/logout.js                 退出（两种身份 Cookie 一起清）
 functions/api/rank.js                   榜单：待审核（按票数、封顶）/ 正式（按权重、不带票数）
 functions/api/vote.js                   点歌提交：违禁词 → 限次 → 查重 → 原子写入
@@ -459,7 +510,7 @@ functions/api/admin-settings.js         多口令 / 年级人数 / 投票上限 
 functions/api/admin-reports.js          举报收件箱
 
 _lib/crypto.js                          PBKDF2、HMAC 查找索引、AES-GCM 可查看密文、随机口令
-_lib/auth.js                            会话、角色、限流、双 Cookie
+_lib/auth.js                            会话、角色、游客闸门（denyGuest）、限流、双 Cookie
 _lib/http.js                            JSON / 错误响应 / Cookie / 客户端 IP
 _lib/db.js                              changedRows / lastRowId / 迁移缺失识别
 _lib/settings.js                        系统设置读写（投票上限、举报阈值）
@@ -519,8 +570,17 @@ sql/009_song_track_id.sql               点歌时锁定的音源 id
 
 交给开发者的测试脚本位于 `_harness/`（**不属于交付内容**）：
 用 `node:sqlite` 起一个 D1 替身，真实执行 `sql/*.sql`，真实调用每个 handler，
-覆盖鉴权、越权、注入、并发去重、迁移缺失、编码损坏、CSS/DOM 约束等场景，
-共 258 项断言。
+覆盖鉴权、越权、注入、并发去重、迁移缺失、编码损坏、CSS/DOM 约束等场景。
+
+| 套件 | 内容 | 当前结果 |
+|---|---|---|
+| `run.mjs` | 主入口：运行时基准 + 四个测试文件 + 两个冒烟子进程 + 全量语法检查 | **308 项通过 / 0 失败** |
+| `verify-reset.mjs` | 重置库 → 全量迁移 → 登录 → 点歌全链路 | **33 项通过 / 0 失败** |
+| `tests/render.smoke.mjs` | `admin.html` 的渲染函数在真实数据下不抛异常 | **22 项通过 / 0 失败** |
+| `check-compliance.cjs` | 合规体检：须知 9 条、双备案、无障碍、无图形化 emoji | **25 项通过 / 0 问题** |
+
+游客模式那批断言单独放在 `tests/guest.test.mjs`（`run.mjs` 会加载）：
+先直接调每个写接口断言 403，再回查数据库确认**一行都没写进去**；
 
 ---
 
@@ -617,7 +677,13 @@ sql/009_song_track_id.sql               点歌时锁定的音源 id
 `DEBUG_LOGIN` 默认关闭。它能让高级管理员在一次登录里不限次、不查重地
 往真实歌曲表写数据（用于压测投稿逻辑）—— 生产环境请保持关闭。
 
-### 6. 不要把密钥提交进仓库
+### 6. 想开游客模式就单独设一个口令
+
+不设 `GUEST_PASSWORD` 就**没有**游客模式（默认关闭）。要开的话，
+请设一个只在游客模式里用的独立口令 —— 别把班级口令复制一份进去：
+游客口令大概率会被转发到班级群、家长群，它能做的事越少越好（它只能看排行）。
+
+### 7. 不要把密钥提交进仓库
 
 仓库里已经放了 `.gitignore`，会挡掉 `.env` / `.dev.vars` / 本地数据库导出等。
 环境变量请只配在 Cloudflare Pages 的 Environment variables 里。

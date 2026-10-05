@@ -1,6 +1,6 @@
-import { readJson, error, json, clientIp } from '../../_lib/http.js';
-import { requireSession, rateLimit } from '../../_lib/auth.js';
-import { parsePositiveInt, sanitizeText } from '../../_lib/validate.js';
+import { readJson, error, json } from '../../_lib/http.js';
+import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
+import { parsePositiveInt, parseFingerprint, sanitizeText } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
 
 /**
@@ -18,14 +18,31 @@ export async function onRequestPost(context) {
 
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
-  const classId = auth.session.subject_id;
 
-  const ip = clientIp(request);
-  const flood = await rateLimit(env, `report:${ip}`, 60, 3600);
-  if (!flood.allowed) return error('操作过于频繁，请稍后再试', 429);
+  // 游客模式：只读，不能举报。拦在读请求体与占位之前 ——
+  // 被拒的请求不会写 report_logs，也不会把 is_reported 置起来。
+  const guestDenied = denyGuest(auth.session, '游客模式只能查看排行，不能举报');
+  if (guestDenied) return guestDenied;
+
+  const classId = auth.session.subject_id;
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
+
+  // 限流按设备指纹（读完请求体才知道），IP 只留宽松兜底。
+  // 旧写法 `report:${ip}` = 全校共用 60 次/小时；而举报本身已有
+  // report_logs 的 (class_id, song_id) 唯一索引做原子占位，所以这里只是防洪。
+  const fingerprint = parseFingerprint(parsed.value.fingerprint);
+  const flood = await guardRate(env, request, {
+    kind: 'report',
+    limit: 20,
+    windowSeconds: 3600,
+    fingerprint: fingerprint.ok ? fingerprint.value : '',
+    clientId: typeof parsed.value.client_id === 'string' ? parsed.value.client_id : '',
+    session: auth.session,
+    message: '操作过于频繁，请稍后再试',
+  });
+  if (flood) return flood;
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

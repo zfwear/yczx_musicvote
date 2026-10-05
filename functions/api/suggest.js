@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession, requireStaff, rateLimit } from '../../_lib/auth.js';
+import { requireSession, requireStaff, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, sanitizeText } from '../../_lib/validate.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -54,8 +54,21 @@ export async function onRequestPost(context) {
   const auth = await requireSession(env, request, 'class');
   if (!auth.ok) return auth.response;
 
-  const flood = await rateLimit(env, `suggest:${auth.session.subject_id}`, 20, 3600);
-  if (!flood.allowed) return error('建议提得有点频繁，请稍后再试', 429);
+  // 游客模式：只读。提建议同样是写操作，拦在读请求体与限流之前，
+  // 被拒的请求不会在 song_suggestions 里留下任何一行。
+  // （GET / PUT 本来就是 requireStaff，游客连门都进不去，不需要额外处理。）
+  const guestDenied = denyGuest(auth.session, '游客模式只能查看排行，不能提建议');
+  if (guestDenied) return guestDenied;
+
+  const flood = await guardRate(env, request, {
+    kind: 'suggest',
+    limit: 20,
+    windowSeconds: 3600,
+    clientId: '',                       // 前端没上报 client_id 时退回会话维度
+    session: auth.session,
+    message: '建议提得有点频繁，请稍后再试',
+  });
+  if (flood) return flood;
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);

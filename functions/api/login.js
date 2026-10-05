@@ -3,6 +3,7 @@ import {
   requireDb, createSession, rateLimit, clearRateLimit,
   classPasswordLookup, authPepper, CLASS_TTL_SECONDS,
   debugLoginEnabled, normalizeRole,
+  guestPassword, guestLoginEnabled, GUEST_ROLE, GUEST_CLASS_NAME,
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
@@ -16,6 +17,11 @@ import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.j
  *    再用 PBKDF2 校验；登录成功签发服务端会话，口令不再出现在后续请求里。
  *  - 登录成功后口令会从"明文/弱哈希"自动升级为 PBKDF2 哈希，
  *    因此不需要提前知道现网口令就能完成迁移。
+ *
+ * 同一个入口还承担两种"非班级"身份（顺序：班级 → 游客 → 调试）：
+ *  - 游客：配了环境变量 GUEST_PASSWORD 时，它是一条独立口令，
+ *    登录后拿到只读会话（role='guest'）。不配就等于这个入口没有。
+ *  - 调试：DEBUG_LOGIN=1 且用高级管理员的"账号:密码"。
  */
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -24,14 +30,31 @@ export async function onRequestPost(context) {
   if (missing) return missing;
 
   const ip = clientIp(request);
-  const limit = await rateLimit(env, `class-login:${ip}`, 10, 900);
-  if (!limit.allowed) return error('尝试过于频繁，请 15 分钟后再试', 429);
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
 
   const secret = parseSecret(parsed.value.password, { min: 4, max: 128, field: '班级口令' });
   if (!secret.ok) return error(secret.error, 400);
+
+  // ---- 登录限流：口令进 URL 之前就要做，但**必须按"这个口令"分桶** ----
+  //
+  // 旧写法是 `class-login:${ip}`，10 次/15 分钟 —— 校园网整个学校共用一个出口 IP，
+  // 于是只要几个人打错口令，**全校都登不进去**（表现为"刚开学大家都在输口令，
+  // 一半人报 429"）。这不是更安全，是把可用性交给了任何一个手滑的人。
+  //
+  // 现在的分桶键是 `ip + 口令摘要`：
+  //   · 同一个口令反复试 → 10 次就 429 —— 这才是暴力破解要防的那件事；
+  //   · 不同口令各错一次 → 各算一次，不会互相顶掉（NAT 公平性）；
+  //   · 摘要用 authPepper 派生，攻击者无法从 bucket 名反推口令内容。
+  // 另外那 40 次/15 分钟的 IP 兜底挡的是"一个出口狂试几百个不同口令"。
+  const secretKey = (await classPasswordLookup(env, secret.value)).slice(0, 16);
+  const loginBucket = `class-login:${ip}:${secretKey}`;
+  const limit = await rateLimit(env, loginBucket, 10, 900);
+  if (!limit.allowed) return error('尝试过于频繁，请 15 分钟后再试', 429);
+
+  const ipFlood = await rateLimit(env, `class-login-ip:${ip}`, 40, 900);
+  if (!ipFlood.allowed) return error('该网络登录尝试过于频繁，请稍后再试', 429);
 
   const lookup = await classPasswordLookup(env, secret.value);
 
@@ -65,6 +88,46 @@ export async function onRequestPost(context) {
         needsUpgrade = true;
         break;
       }
+    }
+  }
+
+  // 2.5) 游客模式（环境变量 GUEST_PASSWORD）。
+  //
+  // 判定顺序刻意是「班级口令 → 游客口令 → 调试登录」：
+  //   · 班级口令优先 —— 真实班级永远压过游客，一个班的口令哪怕和游客口令
+  //     写成同一个字串，也仍然按班级身份登录（不会被降级成游客）；
+  //   · 游客口令排在调试登录之前，是因为它就是一条**普通口令**，
+  //     不该被"账号:密码"的正则再解释一遍（那条路只认管理员表）。
+  //
+  // 比较方式：两边都过一遍同一把 HMAC（classPasswordLookup），再比摘要。
+  // 直接 `===` 比原始口令会泄露长度与前缀信息；比 HMAC 摘要则不会
+  // （摘要由私钥派生，攻击者无法从摘要反推口令），与班级口令的查找索引同一套路。
+  //
+  // 没有配 GUEST_PASSWORD 时这一段整体不成立 —— 游客模式默认关闭。
+  if (!matched && guestLoginEnabled(env)) {
+    const guestLookup = await classPasswordLookup(env, guestPassword(env));
+
+    if (lookup === guestLookup) {
+      // 会话落在**学生**这一侧（subject='class'）：前端整套排行与试听逻辑
+      // 都建立在它之上，另起一套 Cookie 只会让每个页面都要分叉。
+      // subject_id 用 0 —— 与调试模式同义："不属于任何真实班级"。
+      // 真正拦住游客写操作的是各写接口里的 denyGuest()，不是这里的 role 本身。
+      const session = await createSession(env, request, {
+        subject: 'class',
+        subjectId: 0,
+        role: GUEST_ROLE,
+        ttlSeconds: CLASS_TTL_SECONDS,
+      });
+      // 登录成功：把这个口令的失败计数清掉（按 (ip, 口令) 分桶，见上面）
+      await clearRateLimit(env, loginBucket);
+
+      // guest / role 一并回给前端，让它**立刻**知道要置灰哪些按钮，
+      // 不必再多打一次 /api/me。
+      return json(
+        { ok: true, class_id: 0, class_name: GUEST_CLASS_NAME, guest: true, role: GUEST_ROLE },
+        200,
+        { 'Set-Cookie': session.setCookie }
+      );
     }
   }
 
@@ -113,7 +176,7 @@ export async function onRequestPost(context) {
     subjectId: matched.id,
     ttlSeconds: CLASS_TTL_SECONDS,
   });
-  await clearRateLimit(env, `class-login:${ip}`);
+  await clearRateLimit(env, loginBucket);
 
   // 令牌只通过 HttpOnly Cookie 下发，不放进响应体，脚本读不到。
   return json(
