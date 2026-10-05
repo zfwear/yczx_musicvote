@@ -165,8 +165,11 @@
   .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
   .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
   .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
-  .song-votes{background:var(--danger-soft);border:1px solid rgba(225,29,72,.14);}
-  .rank-votes{color:var(--danger);font-weight:750;}
+  /* 票数：原来沿用原版的"降价标签"造型（红字 + 红底描边），
+     在待审核榜里像在报警。改成安静的浅蓝胶囊：数字用品牌色，
+     单位"票"用辅助色，靠字重与底色拉开层次而不是靠红色抢注意力。 */
+  .song-votes{background:var(--brand-soft);border:1px solid var(--brand-line);padding:3px 10px;gap:3px;}
+  .rank-votes{color:var(--brand-strong);font-weight:600;}
   /* 行内按钮：三层级保持，但把圆角/描边/过渡统一 */
   .song-acts button{border-radius:var(--r-ctl);transition:background-color var(--d1) var(--ease),border-color var(--d1) var(--ease),color var(--d1) var(--ease);}
   .song-acts .act-secondary{background:var(--surface);border:1px solid var(--brand-line);color:var(--brand-ink);}
@@ -432,7 +435,7 @@
     .header h1{color:var(--ink);}
     #gate h2{color:var(--ink) !important;}
     #gate p{color:var(--ink-3) !important;}
-    .song-votes{background:var(--danger-soft);border-color:#5c2a33;}
+    .song-votes{background:var(--brand-soft);border-color:var(--brand-line);}
     .col-title span,.sub,.slot .idx,.slot .meta,footer p,#disclaimerBox p{color:var(--ink-3);}
     /* 歌名里那个"已被举报 / 调试模式"的红色与紫色小标签 */
     .card p span{color:var(--danger) !important;}
@@ -444,6 +447,167 @@
     [style*="background:rgba(5,150,105"]{background:var(--ok-soft) !important;}
     [style*="border:1px solid #bae6fd"]{border-color:var(--brand-line) !important;}
     [style*="border:1px solid #e2e8f0"]{border-color:var(--line-strong) !important;}
+  }
+
+  /* ------------------------------------------------------------
+     十一、iOS 液态玻璃层
+     ------------------------------------------------------------
+     参照 iOS 的观感：柔和浅灰底、大圆角、**半透明液态玻璃**表面，
+     按下时轻微收缩（而不是传统网页那种 hover 变色）。
+
+     两个必须一起做对的技术点：
+       1. **液态玻璃 = backdrop-filter: blur() + saturate()**，再叠一层
+          半透明白渐变与一道极细高光内描边（inset 0 1px 0 rgba(255,255,255,.7)）。
+          只有模糊没有饱和会发灰，像毛玻璃而不像苹果的玻璃。
+       2. **按下反馈用 scale(.97) 而不是位移** —— 位移在触屏上像"抖"，
+          缩放才像按下去。曲线走统一的 --ease 时间轴。
+     全部带 -webkit- 前缀（iOS Safari 必须），reduced-motion 下关掉缩放。
+     ------------------------------------------------------------ */
+
+  /* 画布：iOS 那种柔和浅灰底；去掉网格（网格有"设计模板"的味道） */
+  body{
+    background-image:
+      radial-gradient(760px 400px at 50% -180px,rgba(10,132,255,.10),rgba(10,132,255,0) 70%),
+      linear-gradient(180deg,#f7f8fa 0%,#eef0f4 100%) !important;
+    background-attachment:fixed;
+  }
+
+  /* 卡片：大圆角 + 极轻投影（iOS 分组列表的观感） */
+  .box,.card,.panel,.list-panel,#gate,.login-box{
+    border-radius:20px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -18px rgba(15,23,42,.18);
+  }
+  .header{border-radius:22px;}
+
+  /* ---- 主按钮：液态玻璃（品牌色的呈现层） ---- */
+  .box>button[onclick="vote()"],
+  .gate-enter,
+  .btn.btn-primary,
+  a.btn[href="/vote.html"]{
+    background-image:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,0) 62%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 8px 20px -10px rgba(2,132,199,.55);
+    border:1px solid rgba(255,255,255,.35);
+    transform:translateZ(0);
+    transition:transform .2s var(--ease),box-shadow .2s var(--ease),filter .2s var(--ease);
+  }
+  .box>button[onclick="vote()"]:active,
+  .gate-enter:active,
+  .btn.btn-primary:active,
+  a.btn[href="/vote.html"]:active{
+    transform:scale(.97);
+    filter:brightness(.96);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 3px 10px -6px rgba(2,132,199,.5);
+  }
+
+  /* ---- 次按钮 / 输入框：玻璃白（半透明 + 模糊 + 高光边） ---- */
+  .box>button[onclick="searchSongs()"],
+  .box>button[onclick="auditionInput()"],
+  .back,
+  .song-acts .act-secondary,
+  input,select,textarea{
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+  }
+  .box>button[onclick="searchSongs()"],
+  .box>button[onclick="auditionInput()"],
+  .back{
+    background-color:rgba(255,255,255,.62);
+    background-image:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.52));
+    border:1px solid rgba(255,255,255,.75);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 6px 16px -12px rgba(15,23,42,.28);
+    transition:transform .2s var(--ease),background-color .2s var(--ease),box-shadow .2s var(--ease);
+  }
+  .box>button[onclick="searchSongs()"]:active,
+  .box>button[onclick="auditionInput()"]:active,
+  .back:active{transform:scale(.97);background-color:rgba(255,255,255,.5);}
+
+  /* ---- 输入框：iOS 风（浅底、大圆角、焦点白底 + 品牌色描边环） ---- */
+  input,select,textarea{
+    background-color:rgba(255,255,255,.72);
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:14px;
+    transition:background-color .2s var(--ease),border-color .2s var(--ease),box-shadow .2s var(--ease);
+  }
+  input:focus,select:focus,textarea:focus{
+    background-color:rgba(255,255,255,.96);
+    border-color:var(--brand);
+    box-shadow:0 0 0 4px rgba(2,132,199,.14);
+  }
+
+  /* ---- 行内小按钮与页签：胶囊化玻璃 ---- */
+  .song-acts .act-secondary,.tabs button,.mobile-tabs{border-radius:999px;}
+  .song-acts button{border-radius:999px;padding-left:16px;padding-right:16px;}
+  .mobile-tabs{background:rgba(15,23,42,.05);border:1px solid rgba(15,23,42,.05);padding:3px;}
+  .mobile-tabs button{border-radius:999px;}
+  .mobile-tabs button.active{
+    background-color:rgba(255,255,255,.92);
+    -webkit-backdrop-filter:blur(12px) saturate(180%);
+    backdrop-filter:blur(12px) saturate(180%);
+    box-shadow:0 1px 2px rgba(15,23,42,.10),inset 0 1px 0 rgba(255,255,255,.9);
+  }
+
+  /* ---- 被 display:none 的元素不许再占位（修投票页那个大空洞） ----
+     .more 的内联样式是 display:none，但原版 CSS 给了它 display:block 与 padding，
+     于是"隐藏"的按钮仍在文档流里撑出一块空白。 */
+  .more[style*="display:none"],.more[style*="display: none"]{display:none !important;margin:0;padding:0;height:0;}
+
+  /* ---- 空容器不许占位（同一个空洞的另一半） ----
+     #searchBox / #auditionBox 是候选面板的占位容器，未展开时里面什么都没有，
+     但它们继承了全局 input,button{padding:14px;margin:0 0 12px} 一类的间距规则，
+     于是"空盒子"照样撑出一块空白。:empty 只在真的没有任何子节点时命中，
+     一旦面板渲染出来就不再生效 —— 既修了空洞，也不影响展开后的样子。 */
+  #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
+  .song-acts:empty{display:none;}
+
+  /* ---- 空的状态提示行不许占位 ----
+     投票页那个"大空洞"的真身就是这里：p#msg 是等错误/提示文案的状态行，
+     原版给了它固定高度与下边距，**空着也占 24px + 14px**（实测量出来的）。
+     收掉之后表单变紧凑；一旦有文案就会自然撑开，
+     而这个位移发生在用户主动操作的那一刻，不会造成"凭空跳动"。 */
+  p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
+
+  /* ---- 悬浮层（登录卡 / 页头）：更浓的液态玻璃 ---- */
+  #gate,.login-box,.header{
+    -webkit-backdrop-filter:blur(24px) saturate(180%);
+    backdrop-filter:blur(24px) saturate(180%);
+    background-color:rgba(255,255,255,.72);
+    background-image:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.62));
+    border:1px solid rgba(255,255,255,.75);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 12px 32px -22px rgba(15,23,42,.35);
+  }
+
+  /* ---- 深色模式：白玻璃换成"深色玻璃" ---- */
+  @media(prefers-color-scheme:dark){
+    body{
+      background-image:
+        radial-gradient(760px 400px at 50% -180px,rgba(76,178,232,.16),rgba(76,178,232,0) 70%),
+        linear-gradient(180deg,#12161d 0%,#0b0f15 100%) !important;
+    }
+    #gate,.login-box,.header,.box,.card,.panel,.list-panel{
+      background-color:rgba(28,34,44,.72);
+      background-image:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0));
+      border-color:rgba(255,255,255,.10);
+    }
+    .box>button[onclick="searchSongs()"],
+    .box>button[onclick="auditionInput()"],
+    .back{
+      background-color:rgba(255,255,255,.08);
+      background-image:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.04));
+      border-color:rgba(255,255,255,.14);
+      color:var(--ink-2);
+    }
+    input,select,textarea{background-color:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12);}
+    input:focus,select:focus,textarea:focus{background-color:rgba(255,255,255,.10);border-color:var(--brand);}
+    .mobile-tabs{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.08);}
+    .mobile-tabs button.active{background-color:rgba(255,255,255,.14);box-shadow:0 1px 2px rgba(0,0,0,.4);}
+    .song-acts .act-secondary{background-color:rgba(255,255,255,.08);border-color:rgba(255,255,255,.14);color:var(--brand-ink);}
+  }
+
+  /* 无障碍：reduced-motion 下不要按下缩放 */
+  @media(prefers-reduced-motion:reduce){
+    .box>button[onclick="vote()"]:active,.gate-enter:active,.btn.btn-primary:active,
+    a.btn[href="/vote.html"]:active,.box>button[onclick="searchSongs()"]:active,
+    .box>button[onclick="auditionInput()"]:active,.back:active{transform:none;}
   }
 /* ==== 设计层 v2 · 终点 ==== */
 </style>
@@ -485,7 +649,7 @@
     </a>
   </div>
   <div style="margin-top:2px;font-size:11px;color:#a8b4c4;">本站页面内容与设计归盐中之声广播站所有，未经许可请勿转载或用于商业用途。</div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:#a8b4c4;letter-spacing:.02em;">版本 beta0.9.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:#a8b4c4;letter-spacing:.02em;">版本 beta0.9.1</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），

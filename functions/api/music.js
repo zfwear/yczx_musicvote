@@ -370,6 +370,64 @@ async function metingSearch(base, keywords) {
   return normalizeMeting(got.body);
 }
 
+/* ======================= 网易云「官方接口」直连源 =======================
+
+   为什么要有它（2026-10 实测）：
+     公共中转站基本全军覆没 —— music-api.gdstudio.xyz 连接超时、
+     api.qijieya.cn / api.injahow.cn 返回空、api.ygking.top 域名失效。
+     但**各平台自己的公开接口还能用**，不需要任何 key、也不需要自建服务。
+     VoiceHub 走的正是这条路（server/api/native-api/*），这里按同样思路直连，
+     不依赖任何第三方中转。
+
+   实测结论（2026-10-05，本机直连）：
+     · 网易云搜索 api/search/get/web   ✅ 200，返回 JSON
+     · 网易云播放 song/media/outer/url ✅ 302 跳到 m*.music.126.net，**完整歌曲 MP3**
+     · QQ 音乐 搜索 client_search_cp   ✅ 200，原唱排序很准（七里香 → 周杰伦）
+     · QQ 音乐 播放 vkey               ❌ result:104003、purl 为空 → 版权限制，不能播
+     · 咪咕搜索                        ❌ 返回 HTML 页面（接口已废弃）
+     · 苹果 iTunes                     ✅ 200，原唱准，但只有 30 秒试听片段
+
+   ⚠️ 已知边界（写下来免得以后误判）：网易云**公开搜索接口隐藏了主流版权曲**
+   （搜「七里香 周杰伦」返回的全是翻唱，没有周杰倫原唱）。所以两个源各有分工：
+     · 原唱准确性靠**苹果源**（它的目录里有周杰倫）；
+     · 完整时长靠**网易云源**（outer/url 给的是整首歌）。
+   两个源并存、结果合并，比只留一个可靠得多。 */
+
+/** 网易云搜索：官方公开接口，不需要 key。 */
+async function neteaseSearch(keywords) {
+  const url = 'https://music.163.com/api/search/get/web'
+    + `?s=${encodeURIComponent(keywords)}&type=1&offset=0&total=true&limit=${MAX_RESULTS}`;
+  const got = await fetchBounded(url, {
+    headers: { Referer: 'https://music.163.com/', Cookie: 'appver=2.0.2' },
+  }, { parse: 'json' });
+  if (!got) return [];
+  got.cleanup();
+
+  const list = (got.body && got.body.result && got.body.result.songs) || [];
+  const out = [];
+  for (const item of list) {
+    if (!item || !item.id || !item.name) continue;
+    const id = String(item.id);
+    if (!/^\d{1,20}$/.test(id)) continue;
+    const artists = Array.isArray(item.artists) ? item.artists : [];
+    out.push({
+      id: `mt-${id}`,
+      name: clip(item.name),
+      artist: clip(artists.map((a) => a && a.name).filter(Boolean).join(' / ')),
+      album: clip((item.album && item.album.name) || ''),
+      duration: Math.round((Number(item.duration) || 0) / 1000),
+      source: '网易云',
+    });
+    if (out.length >= MAX_RESULTS) break;
+  }
+  return out;
+}
+
+/** 网易云播放地址：outer/url 会 302 跳到真实 CDN 直链（完整歌曲）。 */
+function neteaseResolveUrl(songId) {
+  return `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(songId)}.mp3`;
+}
+
 async function metingResolve(base, songId) {
   if (isGdStudio(base)) return gdstudioResolve(base, songId);
   const url = `${base}?server=netease&type=url&id=${encodeURIComponent(songId)}`;
@@ -486,6 +544,54 @@ function bestScore(songs, title) {
 }
 
 /**
+ * 把多个音源的结果**合并**成一个候选池（而不是只留第一个达标的源）。
+ *
+ * 为什么必须合并（这是"搜不到歌"的主要成因之一）：
+ *   旧逻辑是"第一个相似度过线的源就定胜负"，苹果排在最前、又总是很快返回，
+ *   于是后面的网易云源**永远不会出现在候选里** —— 学生因此看不到完整歌曲，
+ *   只能听 30 秒片段。两个源的价值本来就不同：
+ *     · 苹果：原唱准（目录里有周杰倫），但只有 30 秒；
+ *     · 网易云：完整歌曲，但公开搜索接口隐藏了主流版权曲（原唱排名差）。
+ *   合并之后学生两边都能选，这才是"搜得到 + 听得到"。
+ *
+ * 排序规则（顺序很讲究）：
+ *   1. 与查询词的相似度高的在前 —— 学生搜什么就先看到什么；
+ *   2. 相似度相同则**源优先级高的在前** —— 苹果(order 0)优先，
+ *      所以"周杰倫原唱"会排在翻唱前面；
+ *   3. 同名同歌手去重，保留优先级高的那个源。
+ *
+ * @param {Array<{source: object, songs: Array}>} settled 各源的结果
+ * @param {string} keywords 查询词
+ */
+function mergeCandidates(settled, keywords) {
+  const ordered = settled.slice()
+    .filter((e) => e && Array.isArray(e.songs) && e.songs.length)
+    .sort((a, b) => a.source.order - b.source.order);
+
+  const seen = new Set();
+  const pool = [];
+
+  for (const entry of ordered) {
+    for (const song of entry.songs) {
+      // 去重键：歌名 + 歌手（归一化掉空白与大小写；歌名里的括号版本差异要保留，
+      // 因为「七里香」与「七里香 (Live)」确实是两个不同的候选）
+      const key = `${String(song.name || '').toLowerCase().replace(/\s+/g, '')}`
+        + `|${String(song.artist || '').toLowerCase().replace(/\s+/g, '')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pool.push({ song, order: entry.source.order, score: matchScore(song.name, keywords) });
+    }
+  }
+
+  pool.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;   // 相似度优先
+    return a.order - b.order;                            // 再按源优先级
+  });
+
+  return pool.slice(0, MAX_RESULTS).map((x) => x.song);
+}
+
+/**
  * 一个关键词要问哪些音源。
  *
  * ⚠️ 优先级于 2026-10-05 调整过。原因是实测发现学生"搜不到想要的歌"：
@@ -517,13 +623,26 @@ function buildSources(env, keywords) {
       });
     });
   }
+
+  // 网易云官方接口直连：**排在苹果之后、第三方中转站之前**。
+  // 它给的是完整歌曲（比苹果的 30 秒片段长），但公开搜索接口隐藏了
+  // 主流版权曲（原唱排名不如苹果），所以并列存在、结果合并，
+  // 苹果负责"找得到原唱"、它负责"能听完整版"。
+  if (mode !== 'apple') {
+    sources.push({
+      name: 'netease-native',
+      order: mode === 'meting' ? 0 : storefronts(env).length,
+      resolve: () => neteaseSearch(keywords),
+    });
+  }
+
   if (mode !== 'apple') {
     const storefrontCount = mode === 'meting' ? 0 : storefronts(env).length;
     metingBases(env).forEach((base, index) => {
       sources.push({
         name: `meting:${hostOf(base)}:${index}`,
-        // 排在所有苹果源之后：只在苹果找不到时才用
-        order: storefrontCount + index,
+        // 排在最后：只在前面几家都拿不到时才用（公共中转站目前基本都挂了）
+        order: storefrontCount + 1 + index,
         resolve: () => metingSearch(base, keywords),
       });
     });
@@ -585,16 +704,34 @@ function isPrivateIp(host) {
   return false;
 }
 
-/** 允许作为**中间跳**的主机集合：配置里的 Meting 基址 + 苹果 storefront。 */
+/** 允许作为**中间跳**的主机集合：配置里的 Meting 基址 + 苹果 storefront + 已知官方域。 */
 function trustedAudioHosts(env) {
   const hosts = new Set();
-  const add = (url) => {
-    try { hosts.add(new URL(url).host.toLowerCase()); } catch { /* 配置项本身不合法就跳过 */ }
+  /**
+   * 收进可信集合。**要同时接受"完整 URL"和"裸域名"两种输入** ——
+   * 这是个踩过的坑：`new URL('music.163.com')` 会抛 TypeError（没有协议），
+   * 而它被 catch 静默吞掉，于是那几个裸域名**从来没进过集合**，
+   * 表现为"网易云能搜到、一播就报音源地址不可信"。
+   * 静默的 catch 是最难查的一类 bug，所以这里显式区分两种形态。
+   */
+  const add = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return;
+    if (raw.includes('://')) {
+      try { hosts.add(new URL(raw).host); } catch { /* 配置项本身不合法就跳过 */ }
+      return;
+    }
+    // 裸域名（可带端口）：去掉路径部分后直接收下
+    const host = raw.split('/')[0];
+    if (/^[a-z0-9.-]+(:\d+)?$/.test(host)) hosts.add(host);
   };
   for (const base of metingBases(env)) add(base);
   for (const store of storefronts(env)) add(store);
   // 苹果的官方音频域（试听片段与转移后的 CDN）
   for (const host of ['audio-ssl.itunes.apple.com', 'itunes.apple.com', 'mzstatic.com']) add(host);
+  // 网易云官方接口与它的音频 CDN —— outer/url 会 302 到 m*.music.126.net。
+  // 少了这两条，网易云源能搜到却播不了（中间跳会被判成不可信主机）。
+  for (const host of ['music.163.com', 'music.126.net', '126.net']) add(host);
   return hosts;
 }
 
@@ -610,13 +747,26 @@ function isTrustedHost(host, trusted) {
   return false;
 }
 
-/** 允许作为**最终跳**：https + 非内网地址（http 一律拒绝，避免明文与降级）。 */
-function isAllowedFinalUrl(rawUrl) {
+/**
+ * 允许作为**最终跳**：默认要求 https + 非内网地址。
+ *
+ * 例外：**可信域名的音频 CDN 允许 http** —— 网易云的 outer/url 实测就跳到
+ * `http://m801.music.126.net/...`（它至今没上 https）。如果一律要求 https，
+ * 网易云源就会"搜得到、播不了"。所以按来源放宽：
+ *   · 主机的**顶级域**在可信集合里（music.126.net 等）→ 允许 http；
+ *   · 其它主机                            → 必须是 https（拒绝明文与降级）。
+ * 这样"安全性来自我们对这个域名来源的既有信任"，而不是"随便哪个 http 都放行"。
+ *
+ * @param {string} rawUrl
+ * @param {Set<string>} trusted 可信主机集合（来自配置与已知官方域）
+ */
+function isAllowedFinalUrl(rawUrl, trusted = new Set()) {
   let target;
   try { target = new URL(rawUrl); } catch { return false; }
-  if (target.protocol !== 'https:') return false;
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') return false;
   if (target.username || target.password) return false;      // 带凭据的 URL 直接拒绝
   if (isPrivateIp(target.hostname)) return false;
+  if (target.protocol === 'http:' && !isTrustedHost(target.host, trusted)) return false;
   return true;
 }
 
@@ -646,8 +796,8 @@ async function fetchAudioUpstream(env, url, headers, timeoutMs) {
 
     const isRedirect = res.status >= 300 && res.status < 400;
     if (!isRedirect) {
-      // 最终跳：必须是 https 且不是内网地址
-      if (!isAllowedFinalUrl(res.url || target)) {
+      // 最终跳：非内网地址；http 只允许可信域名（见 isAllowedFinalUrl 的说明）
+      if (!isAllowedFinalUrl(res.url || target, trusted)) {
         try { await res.body?.cancel(); } catch { /* 已经关了 */ }
         return null;
       }
@@ -689,19 +839,23 @@ function searchKeyFor(env, keywords) {
 /**
  * 一次关键词搜索。
  *
- * 旧实现是 `await Promise.all(所有音源)` 再按优先级挑第一个有结果的 ——
- * 问题是**必须等最慢的那个**：一个上游挂起 6 秒，苹果那边 200ms 就返回了
- * 也要干等。审计同时提醒：**不能简单换成 Promise.race** ——
- * 先返回的那个经常是"空结果"（某个源没收录），race 会直接选到空。
+ * 历史演变（三次改动，都是为了"搜得到 + 听得到"）：
+ *   第一版 `await Promise.all(所有源)` 再挑第一个有结果的 —— 必须等最慢的那个，
+ *   一个上游挂起 6 秒，苹果 200ms 就回来了也要干等。
+ *   第二版"首个**过线**结果优先 + 优先源等待窗口" —— 快是快了，但
+ *   **苹果总是最快、又总是过线**，于是合并前的第三版暴露了问题：
+ *   网易云的完整歌曲永远进不了候选，学生只能听 30 秒片段。
+ *   第三版（现在）**合并所有源**：等到 MERGE_DEADLINE_MS 或所有源都返回，
+ *   然后交给 mergeCandidates 去重排序。
  *
- * 现在的策略是"首个**满足条件**的结果优先 + 优先源等待窗口"：
- *   · 各音源并行发起，谁先返回一个**相似度过线**的结果就先采用（抢先返回
- *     空结果的源不会被选中，因为空结果永远不满足条件）；
- *   · 优先源（Meting）额外获得 PREFERRED_GRACE_MS 的等待窗口：
- *     苹果 200ms 就回来了也要先等一等，毕竟完整歌曲比 30 秒片段好；
- *     优先源没来就先用苹果，用户体验不被慢源拖住；
- *   · 所有源都返回但没有一个"过线"的，退而求其次用最像的那个（有胜于无）。
+ * 为什么敢等：候选只有 8 条，两个主源（苹果、网易云）实测都在 1 秒内返回；
+ * 真正会挂起的只有那些已经失效的第三方中转站，而它们**熔断之后就不再发了**。
+ * 所以"等"的代价只在冷启动的头几次，换来的是原唱与完整版都能选。
  */
+
+/** 合并模式下的最长等待：到点就用已经拿到的结果，绝不无限等。 */
+const MERGE_DEADLINE_MS = 2500;
+
 async function searchOnce(env, keywords) {
   // 1) 短期缓存：降级阶段会用同一个关键词再搜一次，必须复用
   const cacheKey = searchKeyFor(env, keywords);
@@ -730,18 +884,17 @@ async function searchOnce(env, keywords) {
       return true;
     });
 
-    // 3) 每个源跑完就立刻结算 —— 不等其它源
+    // 3) 收集所有源的结果，等到"全部返回"或"合并截止时间"
     await new Promise((resolve) => {
       if (!live.length) { resolve(); return; }
 
-      let bestGood = null;          // 第一个"过线"的结果
-      let graceTimer = null;
+      let deadlineTimer = null;
       let finished = false;
 
       const finish = () => {
         if (finished) return;
         finished = true;
-        if (graceTimer) clearTimeout(graceTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
         resolve();
       };
 
@@ -749,21 +902,10 @@ async function searchOnce(env, keywords) {
         settled.push({ source, songs });
         done += 1;
 
-        if (songs.length) {
-          sourceMarkHealthy(source.name);
-          const inGrace = Date.now() - now < PREFERRED_GRACE_MS;
-          // 优先源在等待窗口内返回：直接用（order 0 本来就是首选）
-          if (source.order === 0 || !inGrace) {
-            if (!bestGood || source.order < bestGood.source.order) bestGood = { source, songs };
-          }
-          const good = bestScore(songs, keywords) >= MIN_TITLE_SCORE;
-          if (!bestGood && good && source.order === 0) bestGood = { source, songs };
-          // 过线 且 不是"还该等优先源"的情况 -> 立刻返回
-          if (good && (!inGrace || source.order === 0)) { finish(); return; }
-        } else {
-          sourceMarkFailure(source.name);
-        }
+        if (songs.length) sourceMarkHealthy(source.name);
+        else sourceMarkFailure(source.name);
 
+        // 合并模式：不再"第一个过线就收工"，而是等齐所有源（或到截止时间）
         if (done >= live.length) finish();
       };
 
@@ -777,29 +919,18 @@ async function searchOnce(env, keywords) {
           });
       }
 
-      // 优先源等待窗口：到点了就用已经拿到的结果，不再干等
-      graceTimer = setTimeout(() => { if (bestGood) finish(); }, PREFERRED_GRACE_MS);
+      // 截止时间：到点就用已经拿到的结果，绝不无限等（挂掉的源由熔断在下一轮剔除）
+      deadlineTimer = setTimeout(finish, MERGE_DEADLINE_MS);
     });
 
-    // 4) 选结果：过线的优先源 > 过线的其它源 > 最像的那个
-    const ordered = settled.slice().sort((a, b) => a.source.order - b.source.order);
-
-    let chosen = null;
-    for (const entry of ordered) {
-      if (!entry.songs.length) continue;
-      if (bestScore(entry.songs, keywords) >= MIN_TITLE_SCORE) { chosen = entry.songs; break; }
-    }
-    if (!chosen) {
-      let best = null;
-      for (const entry of ordered) {
-        if (!entry.songs.length) continue;
-        const score = bestScore(entry.songs, keywords);
-        if (!best || score > best.score) best = { score, songs: entry.songs };
-      }
-      chosen = best ? best.songs : [];
-    }
-
-    const ranked = rankByRelevance(chosen, keywords).map((x) => x.song);
+    // 4) 选结果：现在改成**合并所有源**（见 mergeCandidates 的说明）。
+    //    旧逻辑是"第一个过线的源就定胜负"，苹果总是最快，于是网易云的
+    //    完整歌曲永远进不了候选 —— 学生只能听 30 秒片段。
+    //
+    //    代价与取舍：合并要等其它源（最多到 MERGE_DEADLINE_MS）才算完，
+    //    所以首字节会比"抢跑"慢一点。但候选只有 8 条、等待窗口很短，
+    //    而换来的是"原唱 + 完整版都能选"，值。
+    const ranked = mergeCandidates(settled, keywords);
     cacheSet(cacheKey, ranked);
     return ranked;
   })();
@@ -874,6 +1005,23 @@ async function resolveAudioUrl(env, prefixedId) {
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(realId)) return null;
 
   if (prefix === 'ap') return appleResolve(realId);
+
+  // 网易云官方接口：**纯数字 id** 才可能是它（网易云歌曲 id 都是数字）。
+  //
+  // 这里为什么能安全地"先猜网易云"：mt- 前缀同时被三种源使用，
+  // 而它们的 id 形态不同 ——
+  //   · 网易云官方  → 纯数字（如 mt-2712018330）
+  //   · GD Studio   → 带字母的 url_id（如 mt-ab12cd34）
+  //   · Meting      → 数字，但它是自建服务、用户自己配的
+  // 所以对纯数字 id：先按网易云官方解析；万一那是自建 Meting 的 id，
+  // 我们的代理会把"打不开的地址"变成一次失败的转发并报 502 ——
+  // 不会更糟（原本它也未必可用），而常见情况（公共中转站全挂、
+  // 只有官方接口活着）下这是唯一能播的路。
+  // 历史数据的兼容性：009 之前入库的 track_id 是这三家的混合，
+  // 但**试听失败只是提示重试**，不会破坏数据，所以不为此加新表列。
+  if (prefix === 'mt' && /^\d{1,20}$/.test(realId)) {
+    return neteaseResolveUrl(realId);
+  }
 
   if (prefix === 'mt') {
     for (const base of metingBases(env)) {
