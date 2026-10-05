@@ -5,12 +5,12 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 本包是**整体替换版**：把仓库里的文件全部覆盖即可，不需要挑文件。
 
 > 构建标识（用于核对"线上跑的到底是哪一包"）：
-> `2026-10-07-v6.1-schedule`　｜　`functions/api/music.js` 的构建号
-> `2026-10-06-a+playable-check`（打开 `/api/music?probe=1` 即可看到）。
+> `2026-10-07-1.0.0`　｜　`functions/api/music.js` 的构建号
+> `2026-10-06-a+playable-check` → **`2026-10-07-b+gdstudio-org`**（打开 `/api/music?probe=1` 即可看到）。
 > 两者不一致就说明部署的不是这一包。
 >
-> 页面版本号：五个页面页脚最底下显示 `版本 beta1.1`（由
-> `_harness\apply-version.mjs beta1.1` 统一写入）。
+> 页面版本号：五个页面页脚最底下显示 `版本 1.0.0`（由
+> `_harness\apply-version.mjs 1.0.0` 统一写入）。
 
 ---
 
@@ -51,8 +51,8 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 | `GUEST_PASSWORD` | 游客口令。配了才有「游客模式」（只读：能看排行与试听） | **默认关闭**：不配就等于没有游客模式 |
 | `TRACK_TOKEN_SECRET` | 选曲凭据的签名密钥 | 退回用 `AUTH_PEPPER`，一般不用单独配 |
 | `ICP_BEIAN` / `GONGAN_BEIAN` / `COPYRIGHT_HOLDER` | 备案号与版权主体 | 页面里已写死真实值，配了就以环境变量为准 |
-| `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：**苹果试听优先（hk/tw/us 三个店）→ 网易云官方 → Meting 中转兜底**，与 `buildSources()` 一致 |
-| `MUSIC_API_BASE` | 自建 Meting 地址（**替换**内置默认源，不是追加） | 用内置的 GD Studio 源，实测该基址连接超时 |
+| `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：**苹果试听优先（hk/tw/us 三个店）→ GD Studio / Meting 中转 → 网易云官方**，与 `buildSources()` 一致。设 `meting` 可以关掉苹果源，让中转源成为第一位 |
+| `MUSIC_API_BASE` | 自建 Meting 地址（**替换**内置默认源，不是追加） | 用内置的两台 GD Studio 基址：`music.gdstudio.org`（用户指定，排第一）与 `music-api.gdstudio.xyz`（同家兜底） |
 | `MUSIC_STOREFRONT` | 苹果试听的地区，如 `hk` / `tw` / `us` | 默认即可 |
 
 #### 人机校验（reCAPTCHA v3）
@@ -574,10 +574,22 @@ sql/009_song_track_id.sql               点歌时锁定的音源 id
   重复部署请用增量补丁。
 - **改 `AUTH_PEPPER` 会锁死已有班级口令**，见上文第 3 步的说明。
 - **音源是第三方公共服务**，随时可能失效。默认 `auto` 顺序是
-  **苹果官方试听（hk/tw/us 三个店，30 秒片段，零配置可用）→ 网易云官方接口
-  （完整歌曲，但公开搜索接口隐藏主流版权曲）→ Meting 中转兜底**
-  （内置的唯一默认基址 `music-api.gdstudio.xyz` 实测连接超时）。
-  若要稳定地听完整版，建议自建 Meting 并用 `MUSIC_API_BASE` 指过去。
+  **苹果官方试听（hk/tw/us 三个店，30 秒片段，零配置可用）→ GD Studio /
+  Meting 中转（完整歌曲；第一台是用户指定的 `music.gdstudio.org`，第二台是
+  同家的 `music-api.gdstudio.xyz` 兜底）→ 网易云官方接口
+  （完整歌曲，但公开搜索接口隐藏主流版权曲）**。
+  中转源排在苹果之后、网易云之前：苹果是"搜得到原唱"的唯一保证，中转源比
+  网易云官方公开接口覆盖面更宽。想完全以中转源为准，设 `MUSIC_PROVIDER=meting`。
+  若要稳定地听完整版，建议自建 Meting 并用 `MUSIC_API_BASE` 指过去（注意它是
+  **替换**内置清单，不是追加）。
+- **两台 GD Studio 基址的参数形状相同、信封不一定相同。** 所以它们的响应都过一层
+  `unwrapGdList` / `unwrapGdUrl` / `gdArtistOf` / `gdAlbumOf` / `gdDurationOf`
+  适配（裸数组、`{data:[…]}`、`{result:{songs:[…]}}` 都认；歌手字段同时认
+  `artist: string[]` 与 `artists:[{name}]`）。**认不出来一律当空结果**，
+  与"只认裸数组"的旧行为一致，所以加基址不会让已有的那台变差。
+- **想知道线上到底哪台能通**：部署完打开 `/api/music?probe=1`，看 `gdstudio`
+  那一节（逐个基址的候选条数与"能否取到播放地址"）。它只回序号与结论，
+  不回域名/id/歌名，所以不需要登录。音源改完记得同时更新 `MUSIC_BUILD`。
 - **点歌强制从搜索结果里选**。好处是锁定了音源、榜上直接播对的那一版；
   代价是**搜不到的歌就点不了**（冷门曲目、翻唱、纯音乐尤其容易搜不到）。
   目前的退路只有管理员用调试模式提交。若觉得太严，可以把

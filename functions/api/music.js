@@ -17,11 +17,14 @@ import { signTrackToken } from '../../_lib/tracktoken.js';
  * 当前音源与顺序（`auto` 模式，由 buildSources 决定）：
  *   1. `apple:<storefront>` —— 苹果官方 iTunes 搜索接口，按 hk / tw / us 依次。
  *      官方 30 秒试听，无需 key，最稳；负责"找得到原唱"。
- *   2. `netease-native` —— 网易云官方公开接口。给完整歌曲；
+ *   2. `meting:<host>` —— GD Studio / Meting 形状的中转，**优先源**。
+ *      2026-10-07 按用户要求从末位提上来；默认第一个基址就是用户指定的
+ *      `music.gdstudio.org`。给完整歌曲，覆盖面比网易云官方公开接口宽。
+ *   3. `netease-native` —— 网易云官方公开接口。给完整歌曲；
  *      公开搜索接口隐藏主流版权曲，版权受限曲拿不到音频（探测为 false）。
- *   3. `meting:<host>` —— Meting / GD Studio 形状的第三方中转，排在最后兜底。
- *      默认基址见 DEFAULT_METING_BASES，其可用性随时间变化，不要假设它活着。
- *   `MUSIC_PROVIDER=meting` 会关掉苹果源、`=apple` 会关掉网易云与 Meting。
+ *   默认基址见 DEFAULT_METING_BASES，其可用性随时间变化，不要假设它活着。
+ *   `MUSIC_PROVIDER=meting` 会关掉苹果源（于是中转源成为第一位）、
+ *   `=apple` 会关掉网易云与 Meting。
  *
  * 歌曲 id 带音源前缀（mt-<数字> / ap-<数字>），这样播放时不必猜测该用哪家，
  * 也避免两家的数字 id 互相撞车。`?check=` 只对 `mt-` 有意义（苹果必有音频）。
@@ -59,7 +62,7 @@ const MAX_FIELD_LENGTH = 120;
  * 数字不对就说明部署的不是这一包，不必再猜别的可能。
  * 每次改动本文件时把它 +1（或改日期），交付时与版本号保持一致。
  */
-const MUSIC_BUILD = '2026-10-06-a+playable-check';
+const MUSIC_BUILD = '2026-10-07-b+gdstudio-org';
 
 /* ------------------------------------------------------------------
  * 上游调用的资源护栏（审计 C3）
@@ -97,6 +100,16 @@ const DEFAULT_METING_BASES = [
   //   ❌ api.ygking.top           域名已无法解析
   //   ⚠️ api.vkeys.cn/v2/music    搜索可用（QQ 音乐、原唱准）但 url 恒为 null，不能播
   // 所以默认只留 GD Studio。要换成自建 Meting，设 MUSIC_API_BASE 即可。
+  //
+  // 2026-10-07 追加 `music.gdstudio.org`（用户指定接入的"音源 API"）：
+  //   · 域名本身活着（Cloudflare，首页 200），与 music-api.gdstudio.xyz 同属 GD Studio；
+  //   · 本机实测它的 `?types=search&...` 回 `401 {"detail":"Invalid request."}`，
+  //     只有 `?types=playlist` 回 `200 []`。用户明确要求接入，所以照办、放在第一位。
+  //   · 为什么放第一位也不冒险：搜索侧它是**并行的一路**，返回空只是少一路候选，
+  //     不会拖长尾（所有源都受 MERGE_DEADLINE_MS 约束）；播放侧 metingResolve
+  //     逐基址回退，它取不到地址就自动落到下一个基址。GD Studio 家的两套参数
+  //     形状由 isGdStudio() 按域名自动分派，这里不需要再写任何分派逻辑。
+  'https://music.gdstudio.org/api.php',
   'https://music-api.gdstudio.xyz/api.php',
 ];
 
@@ -334,6 +347,89 @@ function normalizeMeting(payload) {
  * 那条"七里香 → 无名翻唱"的问题它同样存在。所以它只做**兜底**：
  * 苹果目录里没有的歌（部分华语冷门曲）才落到这里。
  */
+/* ---- GD Studio 家族的**形状适配层** ----
+ *
+ * 为什么单拎一层出来（2026-10-07，用户要求接入 music.gdstudio.org 时新增）：
+ *   同一个"GD Studio"现在有两个基址在跑 —— 老的 `music-api.gdstudio.xyz`
+ *   （裸数组）与新的 `music.gdstudio.org`。实测新基址的后端是 FastAPI
+ *   （错误体形如 `{"detail":"Invalid request."}`），这类实现常把结果包一层
+ *   `data` / `result`，歌曲字段也可能沿用上游（网易云）的 `artists[].name`
+ *   而不是 GD 自己的 `artist: string[]`。
+ *
+ *   适配层的作用就一句：**不管外面套了几层信封，把候选规规矩矩地交出来。**
+ *   认不出来一律当空结果 —— 与旧代码 `Array.isArray(body) ? body : []` 完全一致，
+ *   所以老基址的行为一个字节都没变，新基址的多种形状也能直接吃下。
+ *
+ * 注意：这里只做"形状归一"，**不做任何地址改写** —— 客户端依旧无法指定上游。
+ */
+
+/** 把几种常见的响应信封拆成数组。 */
+function unwrapGdList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  for (const key of ['data', 'result', 'songs', 'list']) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') {
+      // 再深一层：{ data: { songs: [...] } } / { result: { songs: [...] } }
+      for (const inner of ['songs', 'list', 'data']) {
+        if (Array.isArray(value[inner])) return value[inner];
+      }
+    }
+  }
+  return [];
+}
+
+/** 歌手：GD 形状是 `artist: string[]`，网易云原生形状是 `artists: [{name}]`。 */
+function gdArtistOf(item) {
+  if (Array.isArray(item.artist)) {
+    return item.artist
+      .map((a) => (a && typeof a === 'object' ? a.name : a))
+      .filter(Boolean)
+      .join(' / ');
+  }
+  if (typeof item.artist === 'string' && item.artist) return item.artist;
+  if (Array.isArray(item.artists)) {
+    return item.artists.map((a) => (a && a.name) || a).filter(Boolean).join(' / ');
+  }
+  return '';
+}
+
+/** 专辑：GD 形状是字符串，网易云原生形状是 `{ name }`。 */
+function gdAlbumOf(item) {
+  if (item.album && typeof item.album === 'object') return item.album.name || '';
+  return typeof item.album === 'string' ? item.album : '';
+}
+
+/**
+ * 时长（秒）。
+ *
+ * 两个基址的单位不一样：老基址不给时长，新基址若沿用网易云形状则给**毫秒**。
+ * 用 10000 当分界：正常歌曲的毫秒值必然远大于它（最短的整曲也有 30 秒 = 30000），
+ * 而秒值必然远小于它（一小时的曲子也才 3600）。这样两边都判得准。
+ */
+function gdDurationOf(item) {
+  const raw = Number(item && item.duration);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.round(raw > 10000 ? raw / 1000 : raw);
+}
+
+/** 把几种常见的响应信封拆成一个 URL 字符串。 */
+function unwrapGdUrl(payload) {
+  if (typeof payload === 'string') return payload.trim();
+  if (!payload || typeof payload !== 'object') return null;
+  for (const key of ['url', 'data', 'src', 'link']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value) return value.trim();
+    if (value && typeof value === 'object') {
+      for (const inner of ['url', 'src', 'link']) {
+        if (typeof value[inner] === 'string' && value[inner]) return value[inner].trim();
+      }
+    }
+  }
+  return null;
+}
+
 async function gdstudioSearch(base, keywords) {
   const url = `${base}?types=search&source=netease&name=${encodeURIComponent(keywords)}`
     + `&count=${SOURCE_FETCH_LIMIT}&pages=1`;
@@ -341,7 +437,7 @@ async function gdstudioSearch(base, keywords) {
   if (!got) return [];
   got.cleanup();
 
-  const list = Array.isArray(got.body) ? got.body : [];
+  const list = unwrapGdList(got.body);
   const out = [];
   for (const item of list) {
     if (!item || typeof item !== 'object' || !item.name) continue;
@@ -350,9 +446,9 @@ async function gdstudioSearch(base, keywords) {
     out.push({
       id: `mt-${rawId}`,
       name: clip(item.name),
-      artist: clip(Array.isArray(item.artist) ? item.artist.join(' / ') : item.artist),
-      album: clip(item.album || ''),
-      duration: 0,
+      artist: clip(gdArtistOf(item)),
+      album: clip(gdAlbumOf(item)),
+      duration: gdDurationOf(item),
       source: '网易云',
     });
     if (out.length >= SOURCE_FETCH_LIMIT) break;
@@ -360,14 +456,25 @@ async function gdstudioSearch(base, keywords) {
   return out;
 }
 
-/** GD Studio 的播放地址。返回真实音频直链（实测 320kbps 完整歌曲）。 */
+/**
+ * GD Studio 的播放地址。返回真实音频直链（老基址实测 320kbps 完整歌曲）。
+ *
+ * 这里用 `parse: 'text'` 而不是 `'json'`：新版基址有直接回**一行 URL 文本**的可能，
+ * 用 json 解析会整条丢掉。读到文本后先试 JSON，失败就把原文当 URL —— 两种都认。
+ */
 async function gdstudioResolve(base, songId) {
   const url = `${base}?types=url&source=netease&id=${encodeURIComponent(songId)}&br=320`;
-  const got = await fetchBounded(url, {}, { parse: 'json' });
+  const got = await fetchBounded(url, {}, { parse: 'text' });
   if (!got) return null;
   got.cleanup();
 
-  const direct = got.body && got.body.url;
+  let payload = got.body;
+  const text = String(payload || '').trim();
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try { payload = JSON.parse(text); } catch { /* 不是合法 JSON：下面按纯文本 URL 处理 */ }
+  }
+
+  const direct = unwrapGdUrl(payload);
   return typeof direct === 'string' && /^https?:\/\//i.test(direct) ? direct : null;
 }
 
@@ -825,27 +932,41 @@ function buildSources(env, keywords) {
     });
   }
 
-  // 网易云官方接口直连：**排在苹果之后、第三方中转站之前**。
-  // 它给的是完整歌曲（比苹果的 30 秒片段长），但公开搜索接口隐藏了
-  // 主流版权曲（原唱排名不如苹果），所以并列存在、结果合并，
-  // 苹果负责"找得到原唱"、它负责"能听完整版"。
-  if (mode !== 'apple') {
-    sources.push({
-      name: 'netease-native',
-      order: mode === 'meting' ? 0 : storefronts(env).length,
-      resolve: () => neteaseSearch(keywords),
-    });
-  }
-
   if (mode !== 'apple') {
     const storefrontCount = mode === 'meting' ? 0 : storefronts(env).length;
-    metingBases(env).forEach((base, index) => {
+    const bases = metingBases(env);
+
+    /**
+     * 中转源（GD Studio 等）：**排在苹果之后、网易云官方接口之前**。
+     *
+     * 2026-10-07 由用户要求"优先用 GD Studio 这个 API"后从末位提上来。
+     * 为什么提一级、而不是提到最前（这个位置是权衡过的，改之前先读）：
+     *   · 提到网易云官方之前 —— 两者其实都是"网易云抓取"，但中转站的覆盖面
+     *     更宽（官方公开搜索接口会隐藏主流版权曲），候选质量不差且更全，
+     *     所以让它先说话是纯收益。
+     *   · 不提到苹果之前 —— 苹果是**官方目录**，是"搜周杰伦能出周杰倫原唱"
+     *     的唯一保证；第三方抓取排到它前面，就会退回"搜七里香出来的是无名
+     *     翻唱"那个已经修过一轮的老问题上（见本文件顶部与 mergeCandidates 的说明）。
+     *   想让它**连苹果也压过去**（完全以中转源为准）不需要改这里，设
+     *   `MUSIC_PROVIDER=meting` 即可 —— 那个模式下没有苹果源，它就是第一位。
+     *
+     * order 同时也是**去重时的胜出顺序**：同名同歌手的条目只有第一条能进候选池，
+     * 所以把中转源提前意味着"同一首歌同时被中转站与官方接口搜到时，用中转站那条"。
+     * 这正好是我们要的：中转站给的是完整歌曲，官方接口常常只给片段。
+     */
+    bases.forEach((base, index) => {
       sources.push({
         name: `meting:${hostOf(base)}:${index}`,
-        // 排在最后：只在前面几家都拿不到时才用（公共中转站目前基本都挂了）
-        order: storefrontCount + 1 + index,
+        order: storefrontCount + index,
         resolve: () => metingSearch(base, keywords),
       });
+    });
+
+    // 网易云官方接口直连：排在苹果与中转源之后，负责"官方那条路能拿到时的兜底与补充"。
+    sources.push({
+      name: 'netease-native',
+      order: storefrontCount + bases.length,
+      resolve: () => neteaseSearch(keywords),
     });
   }
 
@@ -937,6 +1058,11 @@ function trustedAudioHosts(env) {
   // 网易云官方接口与它的音频 CDN —— outer/url 会 302 到 m*.music.126.net。
   // 少了这两条，网易云源能搜到却播不了（中间跳会被判成不可信主机）。
   for (const host of ['music.163.com', 'music.126.net', '126.net']) add(host);
+  // GD Studio 家的音频转发域（出现在它自己播放器的 player.js 里）。
+  // GD 的 url 接口有时把音频交给它中转，那一跳必须在这个集合里 ——
+  // 否则会被 A9 的逐跳校验拦成"音源地址不可信"（502），表现为"搜得到、播不了"。
+  // 只收这一个具体主机，不写成 *.gdstudio.org：信任面越小越好。
+  add('music-proxy.gdstudio.org');
   return hosts;
 }
 
@@ -1340,7 +1466,7 @@ export async function onRequestGet(context) {
    * （它不泄露用户数据，而"能直接打开"正是它的价值）。
    */
   if (url.searchParams.get('probe') === '1') {
-    const report = { build: MUSIC_BUILD, provider: providerMode(env), apple: null, netease: null };
+    const report = { build: MUSIC_BUILD, provider: providerMode(env), apple: null, netease: null, gdstudio: null };
     const keyword = '七里香';
 
     // 苹果
@@ -1370,9 +1496,42 @@ export async function onRequestGet(context) {
       report.netease = { ok: false, count: 0, error: 'unreachable' };
     }
 
+    /**
+     * GD Studio / 中转源：逐个配置基址试一次搜索，再拿第一条候选试一次"能不能取到播放地址"。
+     *
+     * 为什么值得单独报：用户指定接入的 `music.gdstudio.org` 在本机探测时回
+     * `401 {"detail":"Invalid request."}`，但**本机通不代表 Cloudflare 出口通、
+     * 本机不通也不代表出口不通**（上游常按来源 IP 分别对待）。所以给它一个
+     * 能在真实部署上直接看结论的口子。
+     *
+     * 口径与上面两段一致：只回**序号 / 通不通 / 几条候选 / 能否取到地址**，
+     * 不回域名、不回 id、不回歌名 —— 所以它仍然可以公开访问。
+     */
+    try {
+      const bases = metingBases(env);
+      const detail = [];
+      let total = 0;
+      for (let index = 0; index < bases.length; index++) {
+        // 顺序探测（基址只有个位数），失败不影响后面的基址
+        // eslint-disable-next-line no-await-in-loop
+        const songs = await metingSearch(bases[index], keyword);
+        total += songs.length;
+        let resolvable = null;
+        const first = songs.find((s) => /^mt-[A-Za-z0-9_-]{1,40}$/.test(String(s.id || '')));
+        if (first) {
+          // eslint-disable-next-line no-await-in-loop
+          resolvable = Boolean(await metingResolve(bases[index], String(first.id).slice(3)));
+        }
+        detail.push({ index, ok: songs.length > 0, count: songs.length, resolvable });
+      }
+      report.gdstudio = { ok: total > 0, count: total, bases: bases.length, detail };
+    } catch {
+      report.gdstudio = { ok: false, count: 0, error: 'unreachable' };
+    }
+
     return json({
       ...report,
-      verdict: (report.apple && report.apple.ok) || (report.netease && report.netease.ok)
+      verdict: (report.apple && report.apple.ok) || (report.netease && report.netease.ok) || (report.gdstudio && report.gdstudio.ok)
         ? 'at-least-one-source-works'
         : 'all-sources-unreachable',
     });

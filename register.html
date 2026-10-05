@@ -413,10 +413,17 @@
   /* ------------------------------------------------------------
      一、亮色令牌（覆盖现有令牌名，全站立刻换肤）
      ------------------------------------------------------------ */
+  /* 浅色文字三档在 2026-10-07 一起收口，**规则是"每一档都要在页面最暗的那层底上过 AA"**
+     —— 页面底是 body 的那条 linear-gradient，最暗一档 #e7ecf5，
+     比卡片白底(--surface #ffffff)还暗，所以只按白底挑色是不够的：
+       · --ink-3 原 #586180 在白底 6.1:1 过，在 #e7ecf5 上 5.15:1 也过 —— 保留；
+       · --ink-4 原 #6d7694 在白底就只有 4.35:1（不过），在 #e7ecf5 上更低 —— 必须加深。
+     现在两档都留出余量，且彼此仍有可见的层级差（#333b52 → #4f5878 → #5b6480）。
+     用户 2026-10-07 说"不要求原样保留了"，这一类遗留色因此可以一次改到位。 */
   :root{
     --brand:#5b3df5;--brand-strong:#4326d8;--brand-soft:#eeeaff;--brand-line:#d3caff;
     --brand-ink:#2f1a9e;--accent:#06b6d4;--accent-soft:#e6fbff;
-    --ink:#0b0e18;--ink-2:#333b52;--ink-3:#586180;--ink-4:#6d7694;
+    --ink:#0b0e18;--ink-2:#333b52;--ink-3:#4f5878;--ink-4:#5b6480;
     --canvas:#eef3f9;--surface:#ffffff;--surface-2:#fafbff;--surface-3:#f1f4fb;--surface-4:#e8ecf7;
     --line:#e6e9f4;--line-soft:#eef1f9;--line-strong:#ccd2e6;
     --danger:#e5484d;--danger-soft:#fff1f1;--warn:#b45309;--warn-soft:#fff7e8;
@@ -581,8 +588,13 @@
     color:var(--ink-3);font-size:14px;font-weight:var(--fw-medium);
   }
   /* 分段控件的未选中态：--ink-3 on --surface-3 实测 4.2:1，差一点点，
-     这里单独压到 --ink-2（#app 前缀用来盖过原版同特异性规则）。 */
-  #app .mobile-tabs button,.mobile-tabs button:not(.active){color:var(--ink-2);}
+     这里单独压到 --ink-2（#app 前缀用来盖过原版同特异性规则）。
+     【必须带 :not(.active)】"#app .mobile-tabs button" 的特异性是 (1,1,1)，
+     它**盖得过**下面 button.active 的 (0,2,1)（id 数优先于 class 数）。
+     最初漏了这个 :not()，于是**选中的那个页签文字是深色、压在深紫渐变上**，
+     浅色下只有 1.41:1、深色下 4.18:1 —— 用户看到的"选中项反而看不清"就是这个。
+     这个 bug 一直是靠 check-contrast 的渐变盲区躲过检查的，2026-10-07 修好盲区后立刻暴露。 */
+  #app .mobile-tabs button:not(.active),.mobile-tabs button:not(.active){color:var(--ink-2);}
   .mobile-tabs button.active{background:var(--v6-grad);color:#fff;box-shadow:var(--v6-sh-2);}
   /* 宽屏下分段控件的槽也收成透明（1080 以上后台是左导航） */
   @media(min-width:1080px){
@@ -643,8 +655,12 @@
   #rulesBox .panel>div:first-child{border-bottom:1px solid var(--line);}
   #rulesBox .rules-toggle{background:transparent;border:0;color:var(--brand);font-size:var(--fs-sub);font-weight:var(--fw-medium);}
   footer img{box-shadow:none;background:transparent;opacity:.4;}
-  #siteVersion{color:var(--ink-3);}
-  #beianFooter{background:var(--surface-2);}
+  #siteVersion{color:var(--ink-4);}
+  /* 页脚**不再是一个方框**（用户 2026-10-07："最底下有个方框，那里面的东西能不能融入背景"）：
+     备案号与版权本来就是页面的收尾语，套一层白底卡片反而像一块没做完的模块，
+     还把视线从内容上拉走。去掉底色、描边与阴影，文字直接落在页面背景上。
+     深色那一节里有同样一条声明，必须一起改（否则只有浅色融入、深色还是方框）。 */
+  #beianFooter{background:transparent;border:0;box-shadow:none;border-radius:0;}
   p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
   #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
   .song-acts:empty{display:none;}
@@ -718,18 +734,24 @@
   /* ------------------------------------------------------------
      十四之二、排期页的标题尺度
      ------------------------------------------------------------
-     用户反馈：排期页那个「每周歌单」四个字太大，压过了页面内容。
-     专用性说明：body>div.header h1 的特异性是 (0,1,2)，压得过 v6 上面
-     那条 .header h1 (0,1,1)；而且只有排期页的 .header 是 body 的直接子级
-     （其它页的 .header 在 #app / .box 里），所以这条天然只命中排期页。
-     不去改原版那条 19px —— 那是 R1 要求原样保留的规则，这里只做覆盖。
+     用户反馈（三轮，最终形态也来自用户）：
+       ① "那个每周歌单四个字太大了" → 从 v6 继承的 34px 压到 22px；
+       ② "缩小点，看着太不合理了，太难看了" → 再压到 18px、字重 800→700、去负字距；
+       ③ **"应该是一行内放每周歌单……还有那下面一段小文字，放一行，然后一行居中"**
+          → 最终形态：标题与副标题**同一行**、整行**居中**。
+     所以这里覆盖两处：原版那条 .header 是 display:flex +
+     justify-content:space-between（标题贴最左、副标题被推到最右，中间空一整条），
+     v6 上面又把 h1 放大到 34px —— 两条一起才造成"太不合理"。
+     现在改成 flex + center + baseline 对齐 + 10px 间距，其余（底色、圆角、内边距）保持 v6。
+     专用性说明：body>div.header 的特异性是 (0,1,3)，压得过 v6 上面那条 .header (0,1,1)；
+     而且只有排期页的 .header 是 body 的直接子级（其它页的 .header 在 #app / .box 里），
+     所以这一组天然只命中排期页。
+     （原版那条 19px 仍然原样保留在样式表靠前的位置，这里只做覆盖 —— R1 守卫照旧能过。）
      ------------------------------------------------------------ */
-  body>div.header h1{font-size:22px;font-weight:800;letter-spacing:-.02em;}
-  /* 22px 标题 + 13px 副标题并排会挤（实测手机上要换行），
-     所以排期页的副标题缩到 12px、并给标题留出收缩空间。 */
-  body>div.header h1{min-width:0;}
-  body>div.header p{font-size:12px;white-space:nowrap;}
-  @media(min-width:900px){ body>div.header h1{font-size:24px;} }
+  body>div.header{display:flex;justify-content:center;align-items:baseline;gap:10px;text-align:center;}
+  body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
+  body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
+  @media(min-width:900px){ body>div.header h1{font-size:19px;} }
 
   /* ------------------------------------------------------------
      十五、深色模式：暖黑分层 + 紫青提亮
@@ -822,7 +844,8 @@
     .top-bar .btn-quiet,.top-bar .btn-quiet:hover,.top-bar .btn-quiet:active{
       background:var(--surface-3);color:var(--ink-2);border-color:var(--line);
     }
-    #beianFooter{background:var(--surface-2);}
+    /* 页脚在深色下也**不套方框**（与上面浅色那条一致，改一处必须改两处）。 */
+    #beianFooter{background:transparent;border:0;box-shadow:none;border-radius:0;}
   }
 
   /* ------------------------------------------------------------
@@ -851,7 +874,7 @@
   <input id="inviteCode" placeholder="如 ABCD-EFGH-JKLM">
   <button id="regBtn" onclick="doRegister()">注册</button>
   <p id="regMsg" class="msg"></p>
-  <p class="sub" style="margin-bottom:0;">已经有账号了？<a href="/admin.html" style="color:#0284c7;text-decoration:none;">去登录</a></p>
+  <p class="sub" style="margin-bottom:0;">已经有账号了？<a href="/admin.html" style="color:var(--brand);text-decoration:none;">去登录</a></p>
 </div>
 
 
@@ -860,20 +883,20 @@
 
 
 
-<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:#94a3b8;">
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:var(--ink-3);">
   <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
   <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
     <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
-       style="color:#94a3b8;text-decoration:none;">苏ICP备2026011040号</a>
-    <span style="color:#cbd5e1;">|</span>
+       style="color:var(--ink-3);text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:var(--ink-4);">|</span>
     <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
-       style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+       style="color:var(--ink-3);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
       <img src="/assets/gongan-badge.png" alt="" width="14" height="15"
            style="flex:0 0 auto;vertical-align:-2px;display:block;">
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:#a8b4c4;letter-spacing:.02em;">版本 beta1.1</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.0.0</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
