@@ -20,7 +20,7 @@
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
     --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
   }
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
+  body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','HarmonyOS Sans SC','MiSans','PingFang SC','Hiragino Sans GB','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
   input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
   button{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;cursor:pointer;font-weight:bold;box-shadow:0 4px 14px rgba(14,165,233,0.3);transition:transform 0.2s;}
   button:active{transform:scale(0.97);}
@@ -184,9 +184,8 @@
     <span style="color:#cbd5e1;">|</span>
     <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
        style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
-      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
-        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
-      </svg>
+      <img src="/assets/gongan-badge.png" alt="" width="14" height="15"
+           style="flex:0 0 auto;vertical-align:-2px;display:block;">
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>

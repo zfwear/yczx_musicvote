@@ -20,7 +20,7 @@
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
     --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
   }
-  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
+  body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','HarmonyOS Sans SC','MiSans','PingFang SC','Hiragino Sans GB','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
   .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
   .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
@@ -131,9 +131,11 @@
      「去投稿」= 主要（实心蓝、无投影），「查看每周排期」= 次要（浅底描边） */
   a.btn[href="/vote.html"]{background:var(--brand);border:1px solid var(--brand);box-shadow:none;}
   a.btn[href="/schedule.html"]{background:rgba(255,255,255,0.86);color:#075985;border:1px solid var(--brand-line);box-shadow:none;}
-  .gate-enter{padding:14px 16px;font-size:16px;border-radius:var(--r-md);background:var(--brand);box-shadow:none;}
-  #rulesBox .rules-toggle{background:transparent;border:0;box-shadow:none;color:var(--brand);font-size:13px;padding:2px 4px;margin:0;min-height:44px;display:inline-flex;align-items:center;}
+  .gate-enter{padding:14px 16px;font-size:16px;border-radius:var(--r-md);background:var(--brand);box-shadow:none;color:#fff;font-weight:600;}
+  #rulesBox .rules-toggle{background:transparent;border:0;box-shadow:none;color:var(--brand);font-size:13px;padding:2px 4px;margin:0;min-height:44px;display:inline-flex;align-items:center;width:auto;flex:0 0 auto;white-space:nowrap;}
   #rulesBox .rules-toggle:hover{color:var(--brand-strong);}
+  /* 须知标题不参与收缩：右侧按钮曾因全局 width:100% 把标题挤成两行 */
+  #rulesBox .panel>div>h3{flex:1 1 auto;min-width:0;}
 
   /* ============================================================
      视觉重构 · 第三档：降低背景、阴影、毛玻璃的存在感
@@ -234,9 +236,8 @@
     <span style="color:#cbd5e1;">|</span>
     <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
        style="color:#94a3b8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
-      <svg width="12" height="13" viewBox="0 0 12 13" aria-hidden="true" style="flex:0 0 auto;vertical-align:-1px;">
-        <path fill="#94a3b8" d="M6 0 1 2v4.2C1 9.3 3.1 11.9 6 13c2.9-1.1 5-3.7 5-6.8V2L6 0Zm0 2.3 3 1.2v2.7c0 1.9-1.2 3.5-3 4.4-1.8-.9-3-2.5-3-4.4V3.5l3-1.2Z"/>
-      </svg>
+      <img src="/assets/gongan-badge.png" alt="" width="14" height="15"
+           style="flex:0 0 auto;vertical-align:-2px;display:block;">
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>

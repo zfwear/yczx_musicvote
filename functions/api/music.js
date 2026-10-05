@@ -421,27 +421,44 @@ function bestScore(songs, title) {
 
 /**
  * 一个关键词要问哪些音源。
- * order 决定优先级：Meting（完整歌曲）优先于苹果（30 秒试听）。
+ *
+ * ⚠️ 优先级于 2026-10-05 调整过。原因是实测发现学生"搜不到想要的歌"：
+ *
+ *   搜「七里香」——
+ *     · 苹果官方   → 第一条就是 七里香 / **周杰倫**（原唱）
+ *     · 网易云抓取 → 第一条是 七里香 / **Xai小爱**（翻唱），整页都是无名翻唱
+ *
+ *   原设计把 Meting 排在前面，理由是"完整歌曲优于 30 秒试听"。
+ *   但点歌场景里**歌手对不对远比时长重要** —— 学生要的是周杰伦那首，
+ *   审核老师听到翻唱也会直接驳回。而且 Meting 是第三方抓取，
+ *   苹果是官方接口（更稳、不会突然失效），30 秒试听对审核完全够用。
+ *
+ *   所以现在**苹果优先（order 0）**，Meting 退为兜底：
+ *   苹果目录里没有的歌（部分华语冷门曲）仍能从 Meting 找到。
+ *   想改回去就设 MUSIC_PROVIDER=meting。
  */
 function buildSources(env, keywords) {
   const mode = providerMode(env);
   const sources = [];
 
-  if (mode !== 'apple') {
-    metingBases(env).forEach((base, index) => {
+  if (mode !== 'meting') {
+    storefronts(env).forEach((cc, index) => {
       sources.push({
-        name: `meting:${hostOf(base)}:${index}`,
-        order: 0,
-        resolve: () => metingSearch(base, keywords),
+        name: `apple:${cc}`,
+        // 多个 storefront 之间也要有先后：hk 的华语覆盖最好，放最前
+        order: index,
+        resolve: () => appleSearch(keywords, cc),
       });
     });
   }
-  if (mode !== 'meting') {
-    storefronts(env).forEach((cc) => {
+  if (mode !== 'apple') {
+    const storefrontCount = mode === 'meting' ? 0 : storefronts(env).length;
+    metingBases(env).forEach((base, index) => {
       sources.push({
-        name: `apple:${cc}`,
-        order: 1,
-        resolve: () => appleSearch(keywords, cc),
+        name: `meting:${hostOf(base)}:${index}`,
+        // 排在所有苹果源之后：只在苹果找不到时才用
+        order: storefrontCount + index,
+        resolve: () => metingSearch(base, keywords),
       });
     });
   }
