@@ -693,6 +693,191 @@
     *{transition-duration:.01ms !important;animation-duration:.01ms !important;}
     button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
   }
+
+  /* ============================================================
+     视觉系统 v5：蓝色主体 + 重做背景 + 搜索面板重排
+     ============================================================
+     这一层**只覆盖三件事**，不动 v4 已经铺好的排版尺度与深色映射：
+       1. 颜色族：玉青 → **蓝**（用户点名要"蓝色按钮主体"）；
+       2. 背景：斜向细网格 + 顶部蓝色渐晕（不是单纯的色带渐变）；
+       3. 几处"看着别扭"的布局：搜索候选面板、表单单元、票数徽章。
+     ============================================================ */
+
+  /* ------------------------------------------------------------
+     一、换成蓝色族（主按钮 = 实心蓝）
+     ------------------------------------------------------------ */
+  :root{
+    /* 蓝：比原版天蓝更沉一档，白字对比度 5.4:1（过 AA） */
+    --brand:#2f5cf5;--brand-strong:#2447d4;--brand-soft:#eef2ff;--brand-line:#c5d2fb;
+    --brand-ink:#1e3aa8;
+    --accent:#5b7cfa;                 /* 浅一档，用于强调数字/描边 */
+    /* 中性层仍走暖灰（和蓝色搭起来不发脏），但把底调浅一点让蓝色更跳 */
+    --canvas:#f3f4f8;--surface-2:#f8f9fc;--surface-3:#eff1f7;--surface-4:#e7eaf3;
+    --line:#e4e7f0;--line-soft:#eef0f7;--line-strong:#ccd2e4;
+    /* 危险保持砖红（不刺眼），提示保持琥珀 */
+    --ring:0 0 0 4px rgba(47,92,245,.16);
+  }
+
+  /* 主按钮：实心蓝 + 一道顶部高光，按下轻微收缩 */
+  .btn,.box>button[onclick="vote()"],.gate-enter,.btn-primary,
+  .song-acts .act-primary,a.btn[href="/vote.html"]{
+    background:linear-gradient(180deg,#3a67f7,#2f5cf5);
+    border:1px solid #2447d4;color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 16px -10px rgba(47,92,245,.6);
+  }
+  .btn:hover,.box>button[onclick="vote()"]:hover,.btn-primary:hover,
+  a.btn[href="/vote.html"]:hover{background:linear-gradient(180deg,#2f5cf5,#2447d4);border-color:#1e3aa8;}
+  .btn-danger{color:var(--danger);border-color:#e6c8c3;}
+  .tabs button.active,.mobile-tabs button.active{color:var(--ink);}
+  .tabs button.active{background:linear-gradient(180deg,#3a67f7,#2f5cf5);border-color:#2447d4;color:#fff;}
+  input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:var(--ring);}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(47,92,245,.42);outline-offset:2px;}
+
+  /* ------------------------------------------------------------
+     二、背景重做：斜向细网格 + 顶部蓝色渐晕
+     ------------------------------------------------------------
+     测试要求背景里必须有 radial-gradient、linear-gradient 与 #eef3f9
+     三样（防止回到"四团彩色光斑"）。这里保留它们，但把网格画出来 ——
+     网格用 45° 的极细线，几乎看不见，只在浅色区给一点"纸纹"的质感。
+     ------------------------------------------------------------ */
+  body{
+    background-color:#eef3f9;
+    background-image:
+      repeating-linear-gradient(45deg,rgba(47,92,245,.030) 0 1px,transparent 1px 12px),
+      radial-gradient(960px 460px at 50% -220px,rgba(47,92,245,.13),rgba(47,92,245,0) 68%),
+      linear-gradient(180deg,#f7f9fd 0%,#eef3f9 55%,#e8ecf5 100%);
+    background-attachment:fixed;
+  }
+
+  /* ------------------------------------------------------------
+     三、卡片分组：更清晰的层次（1px 描边 + 极轻投影）
+     ------------------------------------------------------------ */
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box{
+    background:var(--surface);border:1px solid var(--line);
+    box-shadow:0 1px 2px rgba(23,32,64,.04),0 10px 26px -22px rgba(23,32,64,.22);
+  }
+  .header{background:linear-gradient(180deg,rgba(47,92,245,.06),rgba(47,92,245,0));
+         border-color:var(--brand-line);}
+  #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
+  #announceBox .panel h3{color:var(--brand-ink);}
+
+  /* ------------------------------------------------------------
+     四、搜索候选面板重排（截图里最别扭的那块）
+     ------------------------------------------------------------
+     它是 JS 拼出来的内联样式，所以这里用属性选择器接管：
+       · 行改成"编号 + 信息 + 时长 + 操作"的**四列网格**，不再用虚线分隔；
+       · 编号从彩色方块改成安静的小圆点数字；
+       · 操作按钮靠右对齐成一组，不再和文字抢位置；
+       · 每行 ≥54px，手机上够点。
+     ------------------------------------------------------------ */
+  [data-track-row]{
+    display:grid !important;
+    grid-template-columns:26px minmax(0,1fr) auto auto;
+    align-items:center;gap:10px;
+    padding:12px 4px !important;
+    border-top:1px solid var(--line-soft) !important;
+    border-radius:0;
+    min-height:54px;
+    transition:background-color var(--d1) var(--ease);
+  }
+  [data-track-row]:first-child{border-top:0 !important;}
+  [data-track-row]:hover{background:var(--surface-2);}
+  /* 编号：小圆点数字 */
+  [data-track-row]>span:first-child{
+    width:24px !important;height:24px !important;border-radius:999px !important;
+    background:var(--surface-3) !important;color:var(--ink-3) !important;
+    font-size:12px !important;font-weight:600 !important;
+  }
+  /* 信息块：歌名与歌手都允许换行收缩，不再 nowrap 截断 */
+  [data-track-row]>div{min-width:0;}
+  [data-track-row]>div>div:first-child{
+    white-space:normal !important;color:var(--ink) !important;font-size:15px !important;font-weight:600 !important;
+  }
+  [data-track-row]>div>div+div{
+    white-space:normal !important;color:var(--ink-4) !important;font-size:13px !important;margin-top:2px;
+  }
+  /* 时长 */
+  [data-track-row]>span:nth-of-type(2){color:var(--ink-4) !important;font-size:13px !important;}
+  /* 操作组 */
+  [data-track-row]>div:last-child{gap:8px !important;}
+  [data-track-row] button{
+    min-height:36px !important;
+    background:var(--surface) !important;color:var(--ink-2) !important;
+    border:1.5px solid var(--line-strong) !important;box-shadow:none !important;
+    font-size:13px !important;padding:7px 14px !important;
+  }
+  /* "选这首"是主操作 -> 实心蓝（它排在前一个 button） */
+  [data-track-row] button[data-name]{
+    background:linear-gradient(180deg,#3a67f7,#2f5cf5) !important;
+    border-color:#2447d4 !important;color:#fff !important;
+  }
+  /* 面板外框：去掉"竖条 + 半透明底"，改成规整的分组卡片 */
+  div[style*="border-left:4px solid #0ea5e9"]{
+    border-left:1px solid var(--brand-line) !important;
+    border-radius:var(--r-card) !important;
+    background:var(--surface) !important;
+    margin:12px 0 18px !important;
+    box-shadow:0 1px 2px rgba(23,32,64,.04);
+  }
+  /* 面板头部的"收起"按钮安静一点 */
+  div[style*="border-left:4px solid #0ea5e9"] button{min-height:32px !important;font-size:12px !important;}
+  /* 播放器槽位：做成一条"正在播放"的横条 */
+  div[id^="player-"]{
+    border-radius:var(--r-md) !important;
+    background:var(--surface-2) !important;
+    border:1px solid var(--line) !important;
+  }
+
+  /* ------------------------------------------------------------
+     五、表单单元聚成一组（原来零散地各占一行）
+     ------------------------------------------------------------ */
+  .box>label.field-label{margin-top:var(--s4);}
+  .box>label.field-label:first-of-type{margin-top:0;}
+  .box>input,.box>select{margin-bottom:var(--s2);}
+  #picked:empty{display:none;}
+
+  /* ------------------------------------------------------------
+     六、票数徽章：蓝色描边（和主体一致）
+     ------------------------------------------------------------ */
+  .song-votes{background:var(--surface);border:1.5px solid var(--brand-line);}
+  .song-votes .rank-votes{color:var(--brand-ink);}
+
+  /* ------------------------------------------------------------
+     七、双端适配（必须重述宽屏隐藏切换按钮那条）
+     ------------------------------------------------------------ */
+  @media(min-width:900px){
+    .mobile-tabs{display:none;}
+    body{max-width:1140px;}
+  }
+
+  /* ------------------------------------------------------------
+     八、深色模式：换成"暗蓝底"
+     ------------------------------------------------------------ */
+  @media(prefers-color-scheme:dark){
+    :root{
+      --canvas:#0f1219;--surface:#171b24;--surface-2:#1d222c;--surface-3:#242a36;--surface-4:#2b323f;
+      --ink:#f2f5fa;--ink-2:#cbd3e0;--ink-3:#9fa9b8;--ink-4:#78828f;
+      --line:#272e3a;--line-soft:#212734;--line-strong:#3b4351;
+      --brand:#6b8cff;--brand-strong:#8aa3ff;--brand-soft:#161f38;--brand-line:#2b3d6e;
+      --brand-ink:#a9bcff;--accent:#8aa3ff;
+      --ring:0 0 0 4px rgba(107,140,255,.22);
+    }
+    body{
+      background-color:var(--canvas);
+      background-image:
+        repeating-linear-gradient(45deg,rgba(107,140,255,.045) 0 1px,transparent 1px 12px),
+        radial-gradient(960px 460px at 50% -220px,rgba(107,140,255,.16),rgba(107,140,255,0) 68%),
+        linear-gradient(180deg,#131826 0%,var(--canvas) 55%,#0a0d13 100%);
+    }
+    .header{background:linear-gradient(180deg,rgba(107,140,255,.10),rgba(107,140,255,0));
+            border-color:var(--brand-line);}
+    [data-track-row]>span:first-child{background:var(--surface-3) !important;color:var(--ink-3) !important;}
+    [data-track-row] button{background:var(--surface-2) !important;color:var(--ink-2) !important;border-color:var(--line-strong) !important;}
+    [data-track-row] button[data-name]{background:linear-gradient(180deg,#6b8cff,#4a6ef0) !important;border-color:#3f5fd0 !important;color:#0f1219 !important;}
+    div[style*="border-left:4px solid #0ea5e9"]{background:var(--surface) !important;border-color:var(--brand-line) !important;}
+    div[id^="player-"]{background:var(--surface-2) !important;border-color:var(--line) !important;}
+  }
 /* ==== 设计层 · 终点 ==== */
 </style>
 </head>

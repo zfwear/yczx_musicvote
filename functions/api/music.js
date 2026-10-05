@@ -41,6 +41,16 @@ const AUDIO_TIMEOUT_MS = 15000;
 const MAX_RESULTS = 8;
 const MAX_FIELD_LENGTH = 120;
 
+/**
+ * 这一份 music.js 的构建标识。
+ *
+ * 为什么要有它：排查"改了没生效"时，最费时间的一步是**确认线上跑的是哪份代码**。
+ * 有了这个常量，打开 `/api/music?probe=1` 就能看到它 ——
+ * 数字不对就说明部署的不是这一包，不必再猜别的可能。
+ * 每次改动本文件时把它 +1（或改日期），交付时与版本号保持一致。
+ */
+const MUSIC_BUILD = '2026-10-05-f+multi-source';
+
 /* ------------------------------------------------------------------
  * 上游调用的资源护栏（审计 C3）
  *
@@ -1206,20 +1216,21 @@ export async function onRequestGet(context) {
   if (url.searchParams.get('status') === '1') {
     return json({ configured: true, provider: providerMode(env) });
   }
-
   /**
    * 音源自检：`/api/music?probe=1`
    *
-   * 为什么需要它：免费套餐的出口在 Cloudflare 侧，**我在本机测通不代表
-   * 部署后也通**（上游可能对数据中心 IP 另有策略）。所以给一个能从
-   * 真实部署上一键验证的口子 —— 部署完打开这个地址，就能看到
-   * "苹果能不能搜到 / 网易云能不能搜到、能不能拿到音频"。
+   * 为什么需要它：免费套餐的出口在 Cloudflare 侧，**本机测通不代表部署后也通**
+   * （上游可能对数据中心 IP 另有策略）。所以给一个能从真实部署上一键验证的口子：
+   * 部署完打开这个地址，就能看到"苹果能不能搜到 / 网易云能不能搜到、能不能拿到音频"。
    *
-   * 安全：只回**结论与计数**，不回任何上游地址、id、歌名；不需要登录
-   * （它不泄露任何用户数据，而"能直接打开"正是它的价值）。
+   * 还带一个 `build` 版本号：**用来确认线上跑的到底是哪一份代码** ——
+   * 排查"改了没生效"时，第一件事就是看这个数字，而不是猜。
+   *
+   * 安全：只回结论、计数与版本号，不回任何上游地址、id、歌名；不需要登录
+   * （它不泄露用户数据，而"能直接打开"正是它的价值）。
    */
   if (url.searchParams.get('probe') === '1') {
-    const report = { provider: providerMode(env), apple: null, netease: null };
+    const report = { build: MUSIC_BUILD, provider: providerMode(env), apple: null, netease: null };
     const keyword = '七里香';
 
     // 苹果
