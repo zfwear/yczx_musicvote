@@ -1,4 +1,3 @@
-<<<<<<< HEAD:public/assets/css/admin.css
 
   /* ============================================================
      设计令牌（四个页面各自内联一份完全相同的副本）
@@ -1041,7 +1040,6 @@
     .btn:hover,.btn-primary:hover{transform:none !important;}
   }
 /* ==== 设计层 · 终点 ==== */
-=======
 /* ============================================================
    管理后台液态玻璃专有样式 (admin.css - Liquid Glass Redesign)
    ============================================================ */
@@ -1319,4 +1317,3 @@
     padding: 20px 16px;
   }
 }
->>>>>>> ab0d0ce (refactor: move frontend to project root):assets/css/admin.css
