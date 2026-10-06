@@ -1,3 +1,4 @@
+<<<<<<< HEAD:public/assets/css/admin.css
 
   /* ============================================================
      设计令牌（四个页面各自内联一份完全相同的副本）
@@ -15,181 +16,145 @@
     --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
   }
   body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','HarmonyOS Sans SC','MiSans','PingFang SC','Hiragino Sans GB','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
-  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
-  .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
-  .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
-  .badge{width:44px;height:44px;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
-  .btn{display:block;width:100%;padding:16px;border:0;border-radius:14px;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-size:16px;font-weight:bold;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:24px;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);transition:transform 0.2s ease;}
-  .btn:active{transform:scale(0.97);}
-  .rank-card{background:rgba(255,255,255,0.85);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);display:flex;justify-content:space-between;align-items:center;animation:fadeInUp 0.4s ease forwards;opacity:0;}
-  @keyframes fadeInUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
-  .rank-info h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;}
-  .rank-info p{margin:0;font-size:13px;color:#64748b;}
-  .rank-votes{color:#e11d48;font-weight:800;font-size:18px;}
-  footer{text-align:center;margin-top:48px;padding-bottom:24px;}
-  footer img{width:80px;height:80px;border-radius:50%;opacity:0.6;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
-  footer p{color:#94a3b8;font-size:11px;margin-top:12px;letter-spacing:1px;}
-  #gate{background:rgba(255,255,255,0.8);backdrop-filter:blur(10px);padding:20px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.05);margin-top:40px;}
-  #app{display:none}
   input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
-  .err{color:#e11d48;font-size:13px;text-align:center;min-height:18px;}
-  /* ==== 设计层 · 起点（由 _harness/apply-design.mjs 生成，勿手改） ==== */
-/* ---- 双端适配：手机上用顶部按钮切换，宽屏上左右分栏同时显示 ---- */
-  .mobile-tabs{display:flex;gap:8px;margin-bottom:16px;}
-  .mobile-tabs button{margin:0;padding:10px;font-size:14px;font-weight:600;background:rgba(255,255,255,0.7);backdrop-filter:blur(8px);color:var(--ink-3);border:1px solid rgba(255,255,255,0.9);box-shadow:none;}
-  .mobile-tabs button.active{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);}
-  .col{display:none;}
-  .col.active{display:block;}
-  .col-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 12px 0;padding-left:10px;border-left:4px solid #0ea5e9;letter-spacing:0.5px;}
-  .col-title span{font-weight:400;font-size:12px;color:var(--ink-4);letter-spacing:0;}
-  @media(min-width:900px){
-    body{max-width:1080px;}
-    .mobile-tabs{display:none;}
-    #rankList{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;}
-    .col{display:block;}
-    .col-title{margin-top:0;}
+  button{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:0;cursor:pointer;font-weight:bold;box-shadow:0 4px 14px rgba(14,165,233,0.3);transition:transform 0.2s;}
+  button:active{transform:scale(0.97);}
+  .card{background:rgba(255,255,255,0.85);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);}
+  .card h3{margin:0 0 6px 0;font-size:15px;color:#1e293b;}
+.card p{margin:0 0 10px 0;font-size:13px;color:#64748b;}
+  .card .actions{display:flex;gap:10px;}
+  .card .actions button{margin:0;padding:10px;font-size:14px;}
+  /* ---- 操作行修正：**追加覆盖**，不删改上面两条原版规则 ----
+     上面第 24 行有一条全局 input,button{width:100%}，在 flex 行里它会被当成
+     flex-basis，于是按钮互相挤压。实测（1194px 平板，未修正时）：
+     「通过」被撑到 **332px** 宽的巨型药丸，而同一行的「加入黑名单」只剩
+     **47px 宽 × 94px 高** —— 中文逐字竖排成 加/入/黑/名/单。
+     用户的原话是"UI 有点夸张"。
+     选择器 .card .actions button 特异性高于裸 button，所以这里能稳定压过它。 */
+  .card .actions{flex-wrap:wrap;align-items:center;}
+  .card .actions button{width:auto;flex:0 0 auto;white-space:nowrap;}
+  /* 通过 / 拒绝 是这一行里最该被一眼看到的两个：给一个舒服的最小宽度，
+     但**给上限** —— 没有上限时它会跟着容器一起变宽，在大屏上就变成巨型色块。 */
+  .card .actions .btn-pass,.card .actions .btn-reject{min-width:96px;max-width:200px;}
+  .btn-pass{background:#059669;box-shadow:0 4px 14px rgba(5,150,105,0.3);}
+  .btn-reject{background:#e11d48;box-shadow:0 4px 14px rgba(225,29,72,0.3);}
+  .hidden{display:none;}
+  .msg{text-align:center;font-size:14px;min-height:20px;color:#e11d48;}
+  .tabs{display:flex;gap:10px;margin-bottom:20px;}
+  .tabs button{background:#e2e8f0;color:#475569;padding:10px;font-size:14px;margin:0;box-shadow:none;border-radius:8px;}
+  .tabs button.active{background:#0284c7;color:#fff;}
+.sub{color:#94a3b8;font-size:12px;text-align:center;}
+  .login-box{background:rgba(255,255,255,0.8);backdrop-filter:blur(10px);padding:24px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.05);margin-top:40px;}
+  .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+  .top-bar h2{color:#0f172a;margin:0;font-size:20px;}
+  .top-bar button{width:auto;padding:8px 14px;background:#64748b;font-size:13px;box-shadow:none;}
+  /* ---- 窄屏适配（仅在手机宽度生效，桌面渲染完全不受影响）---- */
+  @media(max-width:560px){
+    /* 5 个页签在手机上会溢出（需约 364px，而 360px 手机只有约 328px 可用）：
+       允许换行，并让按钮按内容宽度收缩，而不是被全局的 width:100% 撑爆 */
+    .tabs{flex-wrap:wrap;gap:8px;}
+    .tabs button{width:auto;flex:1 1 auto;min-width:72px;padding:9px 10px;}
+    /* 卡片下方最多有 5~6 个操作按钮，同理允许换行 */
+    .card .actions{flex-wrap:wrap;}
+    .card .actions button{width:auto;flex:1 1 auto;min-width:72px;}
+    /* 顶部栏在窄屏上把标题和退出按钮排得更紧凑 */
+    .top-bar{gap:10px;}
   }
-  /* ============================================================
-     视觉重构 · 第一档：手机歌曲卡片与行内按钮尺寸
-     —— 只追加，不动上面任何一条原有规则。
-
-     为什么要改：
-       原版卡片是**单行 flex**：左边 .rank-info、右边「票数 + 试听 + 举报 + 投票」。
-       在 390px 下实测（_harness/layout-audit.mjs，按真实字宽算）：
-         · 右侧那组（票数 33px + 三个 60px 按钮 + 3×6px 间隔）固有宽度 249px
-         · 卡片内容区只有 318px → 分给 .rank-info 只剩 68.7px
-         · 歌名「起风了（Live 版）」固有 132.8px → 被折成 3 行，歌手行再折 2 行
-         · 票数「128票」中的数字与「票」之间没有不断行保护 → 断成两行
-         · 行内按钮继承全局 input,button{padding:14px}，被压窄时文字折行
-
-     怎么改：
-       卡片改成**上下两层**：
-         上层 = 歌曲信息（可收缩，最少让歌名放得下） + 票数（flex:none，锁在一行）
-         下层 = 操作区（试听 / 举报 / 投票，允许换行，按钮文字永不折行）
-       这样"挤"发生在该让步的地方（歌曲信息允许换行），
-       而不是所有元素一起被压扁。
-     ============================================================ */
-  .rank-card{flex-direction:column;align-items:stretch;gap:12px;padding:14px 16px;}
-  .rank-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
-  /* min-width:0 是这里的关键：flex 项默认 min-width:auto，会被内容顶住不肯收缩，
-     于是"两个都不让"就变成两边一起溢出。允许收缩之后，宽度分配才有意义。 */
-  .song-main{min-width:0;flex:1 1 auto;}
-  .song-main h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;line-height:1.4;overflow-wrap:anywhere;}
-  .song-main p{margin:0;font-size:13px;color:var(--ink-3);line-height:1.5;}
-  /* 票数不参与收缩：它是这块区域里唯一"绝对不能断行"的内容 */
-  .song-votes{flex:0 0 auto;display:inline-flex;align-items:baseline;gap:2px;padding:2px 8px;border-radius:6px;background:rgba(225,29,72,0.08);}
-  .song-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
-  /* 行内按钮的尺寸规则：原版只有全局 input,button{width:100%;padding:14px}，
-     没有给小按钮的规则，所以这里的 width:auto + 固定最小高度是必需的。
-     min-height 44px = 触控目标下限；white-space:nowrap = 文字永不折行。 */
-  .song-acts button{width:auto;flex:0 0 auto;min-height:44px;margin:0;padding:9px 14px;font-size:14px;font-weight:600;
-    border-radius:10px;white-space:nowrap;line-height:1.35;box-shadow:none;}
-  .song-acts .act-secondary{background:rgba(255,255,255,0.9);color:#0c4a6e;border:1px solid #bae6fd;}
-  .song-acts .act-quiet{background:transparent;color:var(--ink-3);border:1px solid #e2e8f0;}
-  .song-acts .act-primary{background:#0284c7;color:#fff;border:1px solid #0284c7;font-weight:700;}
 
   /* ============================================================
      视觉重构 · 第二档：统一「主要 / 次要 / 危险」三层按钮
 
-     问题：原来同一屏里所有按钮都是"饱和蓝渐变 + 投影"，
-     局部再各自覆盖成红/绿/灰 —— 主要与次要长得一模一样，
-     谁也看不出该先点哪个；主按钮的投影还偏重。
+     原来后台每一个按钮都继承全局的"饱和蓝渐变 + 投影"，
+     再各自覆盖成红/绿/灰 —— 于是通过、拒绝、试听、复制、
+     往前/往后、全选/清空……**权重完全一样**，屏幕上一片彩色，
+     看不出哪一步才是当前该做的。
 
-     三层：
-       主要 = 实心品牌蓝、几乎无阴影（一个页面通常只有一个：
-              进入 / 去投稿 / 提交点歌 / 投票 / 保存）
-       次要 = 浅底或描边（试听 / 搜索 / 退出 / 编辑 / 取消…）
-       危险 = 红色文字或轻量红描边（删除 / 清空 / 拒绝）
-     —— 举报归到"安静"层，刻意不与投票抢注意力。
+     三层（与学生端同一套 token）：
+       主要 = 实心品牌蓝、无投影（登录、修改口令、保存）
+       次要 = 浅底或描边（试听、复制、往前/往后、编辑、取消）
+       危险 = 红色文字 + 轻量红描边（彻底删除、清空回收站）
      ============================================================ */
   .btn-primary,.btn-secondary,.btn-quiet,.btn-danger{
     width:auto;box-sizing:border-box;font-family:inherit;font-weight:600;
-    border-radius:var(--r-md);cursor:pointer;transition:background-color .16s,color .16s,border-color .16s,box-shadow .16s;
+    border-radius:var(--r-md);cursor:pointer;transition:background-color .16s,color .16s,border-color .16s;
   }
   .btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);box-shadow:none;}
   .btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
   .btn-secondary{background:#fff;color:#0c4a6e;border:1px solid var(--brand-line);box-shadow:none;}
   .btn-secondary:hover{background:var(--brand-soft);}
   .btn-quiet{background:transparent;color:var(--ink-3);border:1px solid var(--line);box-shadow:none;}
-  .btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
-  .btn-danger{background:#fff;color:var(--danger);border:1px solid #fecdd3;box-shadow:none;}
+.btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
+.btn-danger{background:#fff;color:var(--danger);border:1px solid #fecdd3;box-shadow:none;}
   .btn-danger:hover{background:var(--danger-soft);}
   .btn-sm{padding:9px 14px;font-size:13px;}
-  .btn-block{display:block;width:100%;text-align:center;padding:14px 16px;font-size:16px;border-radius:var(--r-lg);text-decoration:none;}
-  /* 站内大按钮：主次要拉开 —— 去投稿是实心，其余是浅底 */
-  .btn{padding:15px 16px;font-size:17px;letter-spacing:.5px;margin-bottom:var(--s3);}
-  .btn.btn-primary{background:var(--brand);border:1px solid var(--brand);}
-  .btn.btn-secondary{background:rgba(255,255,255,0.86);color:var(--brand-ink);border:1px solid var(--brand-line);box-shadow:none;}
-  /* 手机切换页签的选中态：原版是"渐变 + 投影"，统一成实心品牌蓝（与后台页签一致） */
-  .mobile-tabs button.active{background:var(--brand);box-shadow:none;}
-  /* 首页两个入口链接的主次（不改标记，用属性选择器定位，避免动到被逐字钉住的 DOM）：
-     「去投稿」= 主要（实心蓝、无投影），「查看每周排期」= 次要（浅底描边） */
-  a.btn[href="/vote.html"]{background:var(--brand);border:1px solid var(--brand);box-shadow:none;}
-  a.btn[href="/schedule.html"]{background:rgba(255,255,255,0.86);color:var(--brand-ink);border:1px solid var(--brand-line);box-shadow:none;}
-  .gate-enter{padding:14px 16px;font-size:16px;border-radius:var(--r-md);background:var(--brand);box-shadow:none;color:#fff;font-weight:600;}
-  #rulesBox .rules-toggle{background:transparent;border:0;box-shadow:none;color:var(--brand);font-size:13px;padding:2px 4px;margin:0;min-height:44px;display:inline-flex;align-items:center;width:auto;flex:0 0 auto;white-space:nowrap;}
-  #rulesBox .rules-toggle:hover{color:var(--brand-strong);}
-  /* 须知标题不参与收缩：右侧按钮曾因全局 width:100% 把标题挤成两行 */
-  #rulesBox .panel>div>h3{flex:1 1 auto;min-width:0;}
+  .btn-xs{padding:5px 10px;font-size:12px;}
+  /* 主要操作：比次要略大一点，看一眼就知道当前该点哪个 */
+  .btn-lg{padding:12px 18px;font-size:15px;font-weight:700;}
+  /* 审核动作是清单里唯一成对出现的"决策按钮"：保留语义色，但把投影去掉，
+     不让它比页面上的主要操作更抢眼。 */
+  .btn-pass{box-shadow:none;}
+  .btn-reject{box-shadow:none;}
+  .card .actions button{min-height:44px;box-shadow:none;}
+  /* 页签：选中态用实心品牌蓝，hover 有一档浅底反馈 */
+  .tabs button{border:1px solid transparent;}
+.tabs button:hover:not(.active){background:#dbe4ee;color:var(--ink-2);}
+  .tabs button.active{background:var(--brand);box-shadow:none;}
 
   /* ============================================================
-     视觉重构 · 第三档：降低背景、阴影、毛玻璃的存在感
+     视觉重构 · 第四 / 五档：间距节奏、字号层级、后台宽屏工作台
 
-     评审原话：「缺的不是更多效果，而是"安静的地方"」。
-     做法：
-       · 背景从"蓝紫青粉四团光斑"改成**一处**品牌蓝渐变 + 线性基色
-       · 歌曲列表从"每首歌一个浮起的大盒子"改成
-         **一个白色列表容器 + 内部轻分隔线**（更像音乐产品，也更紧凑）
-       · 阴影只留给真正需要与背景分离的元素：
-         悬浮的试听播放器、候选面板、弹窗、登录卡
+     评审原话：「后台的问题不是丑，而是像一张越来越长的表单」。
+     窄列 520px 在电脑上两边很空、中间很挤。
+
+     做法：≥900px 时后台变成**工作台布局** —— 左侧导航固定，
+     右侧内容区占满剩余宽度；课堂口令与管理员的密集数据用紧凑表格；
+     更窄的屏幕完全回到单列卡片，不受影响。
+     学生端（index / vote / schedule）保持 520px 的"音乐列表"形态，
+     它们是消费内容的，不是干活的。
+
+     **门槛从 1080 降到 900**（2026-10-07 实测）：
+       原来定 1080 时，**iPad 横屏（1024×768）实测仍走单列卡片**，
+       管理员拿到的是横排页签、左导航根本不出现 —— 而这正是"平板适配"要解决的问题。
+       降到 900 后 1024 也有左导航；834 的竖屏 iPad 仍然是单列，不会被挤坏。
+       另外这里原来的 `body{max-width:1180px}` 是**死规则**：样式表更后面的
+       `@media(min-width:900px){body{max-width:1140px}}` 特异性相同、位置更后，
+       把 1180 整个盖掉了（实测 1440 下仍是 1140）。这种"改了没反应"的层叠
+       最容易骗人，所以直接删掉，只在 900 那档保留唯一一个容器宽度。
      ============================================================ */
-  /* 列表容器：唯一的"白底 + 圆角 + 边框"，内部不再有盒子 */
-  .list-panel{margin-bottom:var(--s3);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
-  /* 面板：公告、投稿须知这类"独立成块"的内容（与列表行区分开） */
-  .panel{margin-bottom:var(--s3);padding:var(--s4) var(--s4);border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);}
-  /* 覆盖第一档给 .rank-card 的圆角与投影：行不再是"卡片"，而是列表项。
-     padding 左右 16px 与卡片内容宽度一致，所以第一档的宽度预算不变。 */
-  .rank-card{margin-bottom:0;border:0;border-radius:0;background:var(--surface);box-shadow:none;backdrop-filter:none;}
-  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
-  /* 悬浮元素才配拥有明显阴影：试听播放器与候选面板 */
-  #auditionBox audio{display:block;width:100%;}
+  @media(min-width:900px){
+    .workspace{display:grid;grid-template-columns:210px minmax(0,1fr);gap:var(--s5);align-items:start;}
+    .workspace-main{min-width:0;}
+    /* 左导航：竖排页签 */
+    .tabs{flex-direction:column;gap:var(--s1);margin-bottom:0;position:sticky;top:20px;
+      padding:var(--s3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);}
+    .tabs button{width:100%;text-align:left;padding:11px 14px;font-size:14px;min-height:44px;border-radius:var(--r-sm);}
+    .tabs button.active{background:var(--brand);color:#fff;}
+    /* 内容区更宽之后，卡片里的说明文字也跟着放宽一点，不再挤成窄条 */
+    .card{padding:var(--s4) var(--s5);}
+    /* 系统设置从"一张越来越长的表单"变成两列工作台：
+       display:contents 让分组卡片里的子卡片直接参与栅格，
+       否则"卡片里再套卡片"在宽屏上会又长又空。 */
+    .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4);align-items:start;}
+    .settings-grid>.card{margin-bottom:0;}
+  }
 
-  /* ============================================================
-     视觉重构 · 第四档：统一字体 / 间距 / 圆角，并补上无障碍
-
-     评审原话：「说明文字太多，而且有些太淡、太小」。
-     要减少的是说明的**数量**，而不是把它一律缩小变淡。
-     所以：辅助文字最低 12px、颜色从 #94a3b8 提到 #64748b；
-     间距统一走 --s1..--s6 的节奏；键盘焦点必须看得见。
-     ============================================================ */
-  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+  /* ==== 设计层 · 起点（由 _harness/apply-design.mjs 生成，勿手改） ==== */
+/* ---------- 第四档：字体 / 间距 / 圆角统一 + 无障碍 ---------- */
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{
     outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
-  .header{margin-bottom:var(--s5);}
-  .col-title{margin-bottom:var(--s3);padding-left:var(--s3);}
-  .mobile-tabs{gap:var(--s2);margin-bottom:var(--s4);}
-  .mobile-tabs button{min-height:44px;border-radius:var(--r-md);}
-  /* 持久标签：口令输入框原来只有 placeholder，一输入就没了提示 */
+  /* 辅助文字：12px 起步（原来 11px + 很浅的灰在手机上读不清） */
+  .sub{font-size:12px;color:var(--ink-3);}
+  .card p{font-size:13px;line-height:1.65;color:var(--ink-3);}
+  .tabs button{min-height:44px;}
   .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
-  /* 无障碍：系统开了"减少动态效果"就全部静态化 */
   @media(prefers-reduced-motion:reduce){
-    .rank-card{animation:none;opacity:1;transform:none;}
     *{transition:none !important;animation:none !important;}
   }
 
-  /* ============================================================
-     游客模式：只读身份的禁用态与提示条
-     
-     置灰不靠"把颜色调淡"实现（那样键盘和读屏仍能操作）：
-       · 投票 / 举报是 <button>，直接上 disabled 属性 —— 浏览器不再派发点击；
-       · 「去投稿」是 <a>，disabled 属性对链接不生效，所以去掉 href
-         （没有 href 的链接既不响应点击、也进不了 Tab 顺序），
-         再补 aria-disabled 让辅助技术读得出"这是被禁用的"；
-       · pointer-events:none 是第三层兜底，触控与鼠标一起挡住。
-     ============================================================ */
-  #guestNotice{margin:0 0 var(--s3);padding:var(--s3) var(--s4);border:1px solid var(--brand-line);border-left:3px solid var(--brand);border-radius:var(--r-lg);background:var(--brand-soft);color:var(--brand-ink);font-size:13px;line-height:1.7;}
-  a.btn[disabled],button[disabled]{pointer-events:none;cursor:not-allowed;}
-  a.btn[disabled]{background:var(--line-soft);color:var(--ink-4);border:1px solid var(--line);box-shadow:none;}
-  .btn-upvote[disabled]{background:var(--surface-2);color:var(--ink-4);border:1px solid var(--line);box-shadow:none;}
+  /* 后台设置页：静默刷新的淡入（设计层 v2 追加） */
+  @keyframes settleIn2{from{opacity:.55}to{opacity:1}}
+  .settle{animation:settleIn2 .24s var(--ease,ease)}
+  @media(prefers-reduced-motion:reduce){.settle{animation:none}}
 /* ============================================================
      视觉系统 v3
      ------------------------------------------------------------
@@ -775,13 +740,6 @@
            min-width:26px;height:26px;padding:0 6px;border-radius:var(--v6-r-sm);
            background:var(--surface-3);color:var(--ink-3);font-size:13px;font-weight:700;
            font-variant-numeric:tabular-nums;}
-  /* 「已加入排期 · 本周 / 下周」徽章：刻意沿用分类标签那一套令牌
-     （品牌色文字 + 品牌浅底 + 药丸圆角），不引入新的颜色体系。
-     上周的歌已经被 /api/rank 移出正式榜，所以这里不会出现"上周"。 */
-  .sched-badge{display:inline-flex;align-items:center;flex:0 0 auto;margin-left:var(--s2);
-               padding:1px 8px;border-radius:var(--r-pill);border:1px solid var(--brand-line);
-               background:var(--brand-soft);color:var(--brand-ink);
-               font-size:var(--fs-cap);font-weight:var(--fw-medium);white-space:nowrap;}
   .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
   .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
   .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
@@ -837,7 +795,7 @@
   .cand-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
               border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .cand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 4px;}
-  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;}
+  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;min-width:0;}
   .cand-hint{font-size:12px;color:var(--ink-4);padding:0 14px 8px;line-height:1.6;}
   .cand-hint>button{margin:8px 0 0;}
   .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
@@ -858,7 +816,7 @@
               background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
   .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
   .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
-  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
+  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;flex:0 0 auto;width:auto;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
   /* 「无试听」是**状态标记**（disabled 按钮），不是可点的操作。
      用户要求"就算无音频，还是要加上选这首这个按钮"，所以旁边那颗
@@ -916,33 +874,30 @@
     .rank-card{padding:18px 22px;}
     .song-acts button{min-height:40px;}
     .mobile-tabs{display:none;}
+    /* 大屏上把说明文字的行宽收住。实测（1194px，容器 804px）：举报收件箱正文
+       最长行 710px，按 15.5px 字号算约 **45 个汉字一行** —— 读起来会"串行"。
+       中文正文一行 30~40 字最舒服，所以限到 66ch（约 33 字）。
+       注意 .sub 本来是居中的：光限宽它会贴在左边，所以那一类要补回自动外边距。 */
+    .card p{max-width:66ch;}
+    .card p.sub{margin-left:auto;margin-right:auto;}
   }
 
-  /* 十七、平板/大屏可读性（2026-10-07）。实测（_harness/probe-tablet-pages.mjs，改动前）：
-       · 页脚免责声明最长行 960 / 1128 / 1140px（1024 / 1194 / 1440），
-         11px 字一行接近 100 个汉字，远超"一行 ~40 字"的可读上限；
-       · 「退出登录」被全局 `input,button{width:100%}`（本页第 40 行）拉成 968~1140px 整行宽。
-     页脚用 660px 上限：11px 正文一行约 55 个汉字、12px 备案行约 43 个，
-     且 768/820 下容器本身只有 520/724px，660 不会生效 —— 手机与竖屏平板观感不变。
-     上界 1079 与 admin.html 的平板档口径一致。 */
+  /* ------------------------------------------------------------
+     十四之一、平板档（561px ~ 1079px）：别直接跳到桌面尺寸
+     ------------------------------------------------------------
+     原来只有「手机 ≤560」与「桌面 ≥900」两档，于是 iPad 横屏
+     （实测 1194×834，但竖屏与 iPad mini 会落在 768~1024）直接吃桌面档：
+     容器被拉到 1140px、页面标题 40px、卡片一片空旷 —— 用户的原话是
+     "UI 有点夸张"。补这一档：容器收窄到 820px、标题降到 28px，
+     让平板看起来是"放大一点的手机"而不是"缩小一点的电脑"。
+     注意上限取 1079px（而不是 899），是为了**不覆盖**下面的桌面档：
+     1200px 以上的真桌面仍然走 1140px 容器 + 40px 标题。 */
   @media(min-width:561px) and (max-width:1079px){
-    body{max-width:820px;padding:24px 22px;}
-  }
-  /* 561 起就收住这几类按钮 —— 768/820 也在这一档里。
-     改动前实测：768 下「去投稿」「查看每周排期」「退出登录」各 724px（= body 整宽），
-     1280/1440 下各 1140px。主操作给 360px、次操作给 220px 上限。
-     `.btn` 是设计层给「去投稿 / 查看每周排期」的整行主按钮类，
-     这里只在大屏收窄；手机（<=560）保持整行，那是设计意图。 */
-  @media(min-width:561px){
-    .btn{width:auto;max-width:360px;margin-left:auto;margin-right:auto;}
-    button[onclick="logoutUser()"]{width:auto;max-width:220px;margin-left:auto;margin-right:auto;display:block;}
-    /* 「待审核榜 / 正式榜」这一对切换按钮在宽屏是隐藏的（>=900 由 .mobile-tabs{display:none} 接管），
-       但 768/820 下会显示，实测各 381px（`flex:1 1 0` 平分了一整行）。
-       给它们一个上限，别再各占半屏。 */
-    .mobile-tabs button{max-width:220px;}
-    /* 页脚免责声明：11px 正文一行别超过 660px。
-       改动前实测 768/820/1024/1194/1440 分别是 720/768/960/1128/1140px。 */
-    footer,#disclaimerBox{max-width:660px;margin-left:auto;margin-right:auto;}
+    /* 960 而不是 820：后台在 ≥900 就有 210px 的左导航，
+       容器太窄的话内容区只剩五百多 px，卡片会被挤成窄条。
+       960 - 210 - 间隙/内边距 ≈ 680px，正好够卡片舒展。 */
+    body{max-width:960px;padding:24px 22px;}
+    .header h1,.top-bar h2{font-size:28px;}
   }
 
   /* ------------------------------------------------------------
@@ -1086,3 +1041,282 @@
     .btn:hover,.btn-primary:hover{transform:none !important;}
   }
 /* ==== 设计层 · 终点 ==== */
+=======
+/* ============================================================
+   管理后台液态玻璃专有样式 (admin.css - Liquid Glass Redesign)
+   ============================================================ */
+
+.admin-container {
+  max-width: 1240px;
+}
+
+/* 管理员登录卡片 */
+.admin-login-card {
+  max-width: 440px;
+  margin: 10vh auto 0;
+  padding: 38px 32px 32px;
+  position: relative;
+  z-index: 10;
+}
+
+.admin-login-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.admin-icon-bubble {
+  width: 58px;
+  height: 58px;
+  line-height: 58px;
+  font-size: 28px;
+  margin: 0 auto 16px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(59, 130, 246, 0.15));
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.8), 0 8px 20px -6px var(--liquid-accent-glow);
+}
+
+.admin-login-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+.admin-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.btn-submit-admin {
+  width: 100%;
+  padding: 13px;
+  font-size: 16px;
+  margin-top: 6px;
+}
+
+/* 顶部栏 */
+.admin-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.admin-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.admin-brand h2 {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+.badge-status {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.admin-user-act {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-sm {
+  padding: 7px 16px;
+  font-size: 13.5px;
+}
+
+.btn-logout {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.btn-logout:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 工作台大框架：宽屏左侧固定磨砂侧边栏 + 右侧主内容卡片 */
+.workspace {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.admin-sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 6px;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tab-item:hover {
+  background: var(--glass-surface-subtle);
+  color: var(--liquid-primary);
+}
+
+.tab-item.active {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(6, 182, 212, 0.1));
+  color: var(--liquid-primary);
+  border-color: rgba(59, 130, 246, 0.28);
+  box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.15);
+}
+
+.tab-icon {
+  font-size: 16px;
+}
+
+.admin-content-panel {
+  padding: 28px 30px;
+  min-height: 520px;
+}
+
+/* 歌曲卡片与操作群组（由 admin-2.js 动态局部刷新的容器） */
+.song-card, [id^="song-card-"] {
+  padding: 18px 20px;
+  border-radius: var(--r-md);
+  background: var(--glass-surface-subtle);
+  border: 1px solid var(--glass-border-subtle);
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.song-card:hover, [id^="song-card-"]:hover {
+  background: var(--glass-surface);
+  border-color: var(--glass-border);
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.08);
+}
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.card-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.card-acts button, .card-acts select {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.act-approve {
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.act-approve:hover {
+  background: var(--success);
+  color: #fff;
+}
+
+.act-reject {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+.act-reject:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* 举报折叠卡片 */
+.report-panel {
+  padding: 12px 16px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* 系统设置与数据表格排版 */
+.settings-section {
+  margin-bottom: 30px;
+}
+
+.settings-section h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--glass-border-subtle);
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 960px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .admin-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 8px;
+    border-radius: var(--r-pill);
+  }
+
+  .tab-item {
+    padding: 8px 14px;
+    font-size: 13.5px;
+    white-space: nowrap;
+    border-radius: var(--r-pill);
+  }
+
+  .admin-content-panel {
+    padding: 20px 16px;
+  }
+}
+>>>>>>> ab0d0ce (refactor: move frontend to project root):assets/css/admin.css

@@ -17,7 +17,7 @@
  * 环境变量（支持同目录的 `.env` 文件，格式 KEY=VALUE，`#` 开头为注释）：
  *   PORT        监听端口，默认 8788
  *   DB_FILE     SQLite 文件路径，默认 ./data/yczx.db；`:memory:` 表示不落盘
- *   SITE_ROOT   静态文件根。默认自动判断：有 public/ 就用 public/，否则用仓库根
+ *   SITE_ROOT   静态文件根。默认使用仓库根，可用环境变量覆盖
  *   （其余同名环境变量原样透传给处理器，例如 AUTH_PEPPER / RECAPTCHA_SECRET /
  *     POW_ENABLED / ALLOWED_HOSTS … 与 Cloudflare 上的名字完全一致）
  */
@@ -70,12 +70,10 @@ const envOf = (name, dflt) => {
 
 /* ---------------- 静态文件 ---------------- */
 
-/** 只在 public/ 存在时才用它 —— 前端分离前后这一行都不用改。 */
+/** 静态文件默认与项目根一致；SITE_ROOT 仅用于自定义部署目录。 */
 function pickSiteRoot() {
   const explicit = envOf('SITE_ROOT', '');
-  if (explicit) return path.resolve(HERE, explicit);
-  const pub = path.join(HERE, 'public');
-  return fs.existsSync(pub) ? pub : HERE;
+  return explicit ? path.resolve(HERE, explicit) : HERE;
 }
 
 const SITE_ROOT = pickSiteRoot();
@@ -120,9 +118,7 @@ function resolveStatic(urlPath) {
   /**
    * 敏感文件黑名单（2026-10-08 补，审计指出）。
    *
-   * 为什么必须有：`pickSiteRoot()` 在没有 `public/` 时会**回退到仓库根**。
-   * 那本来是给"还没做前端分离"的旧目录留的兼容路径，但只把
-   * `server.mjs / _lib / functions / sql` 拷到 VPS、没带 `public/` 的人也会走到那儿。
+   * 静态根默认是仓库根，因此必须阻止后端目录和运行时文件被静态暴露。
    * 那一刻静态服务就对着**整个仓库**：`GET /.env` 会把 `AUTH_PEPPER`、
    * `RECAPTCHA_SECRET` 原样发出去，`/data/yczx.db` 能把整库下载走。
    * `resolveStatic` 只检查"是否落在静态根之内"，对这类文件毫无防备。
