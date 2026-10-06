@@ -119,11 +119,27 @@ export function parseBannedKeyword(raw, { maxLength = BANNED_KEYWORD_MAX } = {})
 /**
  * 音源标识（点歌时锁定的那一版）。
  *
- * 形如 `ap-1234567890`（苹果）或 `mt-xxxx`（Meting）。
- * 它会被拼进 /api/music?play=... 交给上游，所以严格收窄字符集，
+ * 形如 `ap-1234567890`（苹果）/ `mt-2712018330`（网易云、Meting、GD 形状的中转）
+ * / `mg-600902000006889366`（咪咕的 contentId）。
+ * 它会被拼进 `/api/music?play=...` 交给上游，所以严格收窄字符集，
  * 杜绝任何意外的 URL 注入。
  * 空值合法（历史数据没有这个字段），表示前端要走"搜索候选"的老流程。
+ *
+ * ⚠️ 2026-10-07 修：这个白名单**漏了 `mg-`**，于是加了咪咕源之后，
+ *   咪咕的候选在搜索结果里**点「选这首」时拿不到选曲凭据**（`signTrackToken` 里
+ *   `parseTrackId` 不通过 → 返回 null → 前端 `data-token` 是空串），
+ *   学生一提交就被自己的前端拦住并显示「选曲凭据缺失（可能是页面停留太久
+ *   或列表是旧版）」—— 报错文案还把矛头指向"停留太久"，完全指错了方向。
+ *
+ *   教训：**加音源必须同时加这个白名单**。为了不再漏第四次，这里的注释里
+ *   写明"前缀清单有三个使用点"：
+ *     1. 本函数（凭据签发与提交校验）；
+ *     2. `functions/api/music.js` 的 `resolveAudioUrl` / `audioRoutes`（播放解析）；
+ *     3. `_lib/playable.js` 的 `neteaseIdOf`（只认 mt-，因为只有 mt- 是网易云 id）。
+ *   加新前缀时三处都要看一遍，并有测试盯着（`api.test.mjs` 的"音源前缀"那一组）。
  */
+const TRACK_ID_PATTERN = /^(ap|mt|mg)-[A-Za-z0-9_-]{1,64}$/;
+
 export function parseTrackId(raw) {
   if (raw === null || raw === undefined || raw === '') return { ok: true, value: '' };
   if (typeof raw !== 'string') return { ok: false, error: '音源标识不合法' };
@@ -131,7 +147,7 @@ export function parseTrackId(raw) {
   const value = raw.trim();
   if (!value) return { ok: true, value: '' };
 
-  if (!/^(ap|mt)-[A-Za-z0-9_-]{1,64}$/.test(value)) {
+  if (!TRACK_ID_PATTERN.test(value)) {
     return { ok: false, error: '音源标识不合法' };
   }
   return { ok: true, value };

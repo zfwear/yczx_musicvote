@@ -1444,9 +1444,17 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
     //    再过一道"这一版能不能播"的过滤（见 keepPlayableNetease）。
     //
     //    判据注入的是**和播放完全同一条链**（resolveAudioUrl）——
-    //    咪咕走它自己的接口、mt- 走"网易云 -> 中转源"，这正是"说能播就得真能播"的前提。
+    //    咪咕走它自己的接口、mt- 走"网易云 -> 各中转源"，这正是"说能播就得真能播"的前提。
     //    注入真值（而不是 trackPlayable 的三态）是刻意的：这里的语义只有
     //    "这条路拿不到音频"要被标出来；探测本身出错不算"没音频"（见 playable.js 的三种返回值）。
+    //
+    //    ⚠️ **必须收窄**（2026-10-07 加了"验真"之后补的）：
+    //      resolveAudioUrl 现在会对每条候选**真发一次 Range 请求**确认能出音频 ——
+    //      一次搜索最多 40 条候选，全探一遍就是 40+ 次上游请求、最坏把搜索拖到 4 秒，
+    //      而搜索结果只是用来"标一下哪条无试听"。所以只探**排序最前的这几条**：
+    //      学生真正会点的就是前几条，40 条翻到第 30 条的情况极少。
+    //      未探到的候选保持"没有标记"（= 允许试听），播放时那条链**照样会验真并逐路回退**，
+    //      所以不会出现"标着能播却播不出来"。
     const merged = mergeCandidates(settled, titleForMatch || keywords, artist);
     const ranked = await keepPlayableNetease(merged, {
       resolve: async (trackId) => {
@@ -1456,6 +1464,9 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
           return null;                    // 探测出错 -> 不确定，不打"无音频"标记
         }
       },
+      limit: 8,           // 只探最前面的 8 条
+      concurrency: 4,
+      deadlineMs: 1800,   // 到点就用已探到的结论，剩下的当"不确定"
     });
     cacheSet(cacheKey, ranked);
     return ranked;
@@ -1541,57 +1552,254 @@ async function attachTrackTokens(env, songs) {
 
 /* ======================= 音频转发 ======================= */
 
-async function resolveAudioUrl(env, prefixedId) {
+/**
+ * 「播放地址」的候选链：**先给出所有可能拿到音频的路，再逐条验真**。
+ *
+ * ⚠️ 2026-10-07 第二次大修（用户反馈"音源还是播放不了，以能播放优先"）。
+ *    旧实现的三个毛病，一个都不留：
+ *
+ *    1. **只有两条路就放弃**。旧代码是"网易云那条不行 → 问一遍中转源 → 还是没有就
+ *       把网易云那条交回去"。现在多了一路能用的（咪咕），而它**没被利用** ——
+ *       咪咕拿到的是原创 CDN 直链，覆盖面比中转站宽得多。
+ *    2. **拿不到 ≠ 播不出**。旧代码只看"有没有解析出地址"，不看那个地址**到底能不能出音频**。
+ *       网易云 `outer/url` 对版权受限曲会 302 回它自己的页面 —— 解析"成功"了，
+ *       播的时候才失败。所以现在每条候选都要**亲自试一次**才算数。
+ *    3. **每次失败都重新走一遍**。旧代码没有任何"这条路在这个 id 上不行"的记忆，
+ *       而 `<audio>` 放一首歌会发十几个 Range 请求 —— 每个失败请求都重跑整条链。
+ *
+ *    现在的形状：候选链 + 逐个验真 + 30 分钟记忆。
+ *    代价是"第一次播这首歌多一次只读 1 字节的探测"（`Range: bytes=0-0`），
+ *    换来的是"能播就播出来"——这正是用户要的优先级。
+ */
+
+/** 同一个音源 id 的"哪条路能用"记多久。 */
+const AUDIO_ROUTE_TTL_MS = 30 * 60 * 1000;
+/**
+ * 记住"这条路的直链长这样"，下次直接用它（省掉逐个上游解析）。
+ * 只留地址与体积，不留任何用户信息。
+ */
+const audioRouteCache = new Map();     // trackId -> { url, bytes, at }
+/** 记住"这些路在这个 id 上不行"（负数记忆），避免每个 Range 请求重跑整条链。 */
+const audioDeadCache = new Map();      // trackId -> { paths: Set<string>, at }
+const AUDIO_ROUTE_MAX = 300;
+
+function routeCachePrune(map, now) {
+  if (map.size <= AUDIO_ROUTE_MAX) return;
+  for (const [key, value] of map) {
+    if (now - value.at > AUDIO_ROUTE_TTL_MS || map.size > AUDIO_ROUTE_MAX) map.delete(key);
+    if (map.size <= AUDIO_ROUTE_MAX - 50) break;
+  }
+}
+
+function deadPaths(trackId, now = Date.now()) {
+  const hit = audioDeadCache.get(trackId);
+  if (!hit) return new Set();
+  if (now - hit.at > AUDIO_ROUTE_TTL_MS) {
+    audioDeadCache.delete(trackId);
+    return new Set();
+  }
+  return hit.paths;
+}
+
+function markDead(trackId, path) {
+  const now = Date.now();
+  const hit = audioDeadCache.get(trackId);
+  const paths = hit && now - hit.at <= AUDIO_ROUTE_TTL_MS ? hit.paths : new Set();
+  paths.add(path);
+  audioDeadCache.set(trackId, { paths, at: now });
+  routeCachePrune(audioDeadCache, now);
+  // 已经换过路了：旧的正数缓存不再可信
+  audioRouteCache.delete(trackId);
+}
+
+/**
+ * 这个地址**真的能出音频吗**。
+ *
+ * 判据（都必须是"亲眼看到"，不靠猜）：
+ *   · HTTP 200/206；
+ *   · Content-Type 是音频（或上游没声明 —— 有些 CDN 只给 octet-stream）；
+ *   · **总字节数不能明显小于这首歌应有的体积**（低于 96kbps 反算出来的量就判废）。
+ *     最后这条专门防"上游把完整曲换成几十秒试听"——实测过 kuwo 给 ~181KB 的片段、
+ *     vkeys 给 28kbps 的试听，光看状态码是看不出来的。
+ *
+ * @returns {Promise<{ok: boolean, bytes: number} | null>} null = 连不上/被安全策略拦下
+ */
+async function probeAudioSource(env, url, durationSeconds) {
+  let res;
+  try {
+    res = await fetchAudioUpstream(env, url, { Range: 'bytes=0-0' }, 8000);
+  } catch {
+    return null;
+  }
+  if (!res) return null;                                  // 中间跳不可信 / 最终跳不合规
+  if (!res.ok && res.status !== 206) {
+    try { await res.body?.cancel(); } catch { /* 已经关了 */ }
+    return { ok: false, bytes: 0 };
+  }
+
+  const type = (res.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  const contentRange = res.headers.get('Content-Range') || '';
+  const declared = Number(res.headers.get('Content-Length'));
+  const total = Number((contentRange.match(/\/(\d+)/) || [])[1])
+    || (Number.isFinite(declared) ? declared : 0);
+  try { await res.body?.cancel(); } catch { /* 只读 1 个字节，立刻关掉 */ }
+
+  if (type && !/^(audio\/|application\/octet-stream|application\/vnd\.apple\.mpegurl)/.test(type)) {
+    return { ok: false, bytes: total };                   // 上游回了个网页
+  }
+
+  // 体积下限：整曲至少该有 时长 × 96kbps / 8 字节。取不到总长（0）时不判 —— 宁可放行。
+  //
+  // ⚠️ 这里的时长**只能来自上游返回的时长**，不能从库里查：`songs` 表**没有**
+  //    duration 列（只有 id/class_id/title/artist/category_id/status/votes/
+  //    is_reported/created_at），查它只会得到一次必然的 "no such column" 失败。
+  //    所以调用方传 0 是常态，这条检查在有真实时长时才生效（目前用于 `?probe=1`
+  //    与搜索阶段的候选探测）。
+  if (total > 0 && durationSeconds > 0) {
+    const floor = durationSeconds * 96000 / 8;
+    if (total < floor) return { ok: false, bytes: total };
+  }
+
+  return { ok: true, bytes: total };
+}
+
+/**
+ * 这首曲子**按优先级列出所有可能拿到音频的路**。
+ *
+ * ⚠️ 顺序就是"以能播放优先"里的优先级：**先把最可能真出音频的排前面**。
+ *    用户 2026-10-07 的反馈是"音源还是播放不了，以能播放优先" ——
+ *    所以判据不是"哪个源搜得准"，而是"哪个源真能放出声音"：
+ *
+ *      1. `netease-outer` —— 它给的是**完整整曲**，而且我们**只在这一首歌的
+ *         探测结论不是"确定拿不到"时才把它列为候选**。命中率最高、代价最小。
+ *      2. `relay*` —— 中转（qijieya 等）自带 cookie，连网易云官方拿不到的
+ *         版权曲都能给完整 320kbps；按配置顺序逐个别试。
+ *      3. 咪咕（`mg-` 前缀）单独一条链：它是**官方 CDN 直链**，但它的搜索与
+ *         取链都依赖上游对来源 IP 的态度 —— 本机通不代表 Cloudflare 出口也通，
+ *         所以它会进入候选、由**验真**决定留不留（验不过就自动落到别的路）。
+ *
+ *    每项：`{ path, fetchUrl }`。path 是稳定标识，用来记"这条路在这个 id 上不行"。
+ */
+function audioRoutes(env, prefixedId, prefix, realId) {
+  const routes = [];
+
+  if (prefix === 'ap') return routes;                     // 苹果单独处理（官方 previewUrl）
+  if (prefix === 'mg') {
+    routes.push({ path: 'migu', fetchUrl: () => miguResolve(realId) });
+    // 咪咕的 contentId 不是网易云 id，别的路都用不上
+    return routes;
+  }
+
+  // 网易云官方直链：**先看搜索阶段已经探过的结论**，只有明确拿不到才跳过。
+  // （探测命中 10 分钟缓存，几乎不花时间；返回 null = 不确定，那就试。）
+  if (/^\d{1,20}$/.test(realId)) {
+    routes.push({
+      path: 'netease-outer',
+      fetchUrl: async () => {
+        const verdict = await probeNeteasePlayable(realId);
+        return verdict === false ? null : neteaseOuterUrl(realId);
+      },
+    });
+  }
+
+  // 中转源（qijieya 等）：能给完整 320kbps，连网易云官方拿不到的版权曲都能拿到
+  metingBases(env).forEach((base, index) => {
+    routes.push({
+      path: `relay${index}`,
+      fetchUrl: () => metingResolve(base, realId),
+    });
+  });
+
+  return routes;
+}
+
+/**
+ * 解析出**一个确认能出音频的**播放地址，并带回"是哪条路成的"。
+ *
+ * 「以能播放优先」这句话的落地：候选链逐个**验真**，第一个验过的就用它，
+ * 而不是"解析到地址就交回去、播不出来再说"。后者正是用户反馈
+ * "音源还是播放不了"的成因。
+ *
+ * @returns {Promise<{url: string, path: string, bytes: number} | null>}
+ *
+ * @param {boolean} [opts.rememberDead] 验真失败时要不要**把这条路记成死路**（30 分钟）。
+ *   · 真正播放（`?play=`）时传 true：一次播放会发十几个 Range 请求，
+ *     必须记住哪条路不行，否则每个请求都要重新试一遍死路；
+ *   · **搜索阶段探"哪条无试听"时传 false**：那时只是一次性判断，
+ *     而网络抖动、上游限流都会让验真失败 —— 记成死路会让这首歌在
+ *     接下来半小时里**白白少一条可用音源**（正是"能播却播不出来"的成因）。
+ */
+async function resolveAudioDetailed(env, prefixedId, durationSeconds = 0, opts = {}) {
+  const rememberDead = opts.rememberDead === true;
   const separator = prefixedId.indexOf('-');
   if (separator < 0) return null;
   const prefix = prefixedId.slice(0, separator);
   const realId = prefixedId.slice(separator + 1);
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(realId)) return null;
 
-  if (prefix === 'ap') return appleResolve(realId);
-
-  // 咪咕：contentId 是长数字串，走它自己的 official CDN（实测完整整曲）。
-  // 与 mt- 分开成两个前缀是**必要的**，不是命名洁癖：mt- 的数字 id 语义是
-  // "网易云歌曲 id"，_lib/playable.js 会拿它去拼 outer/url（neteaseIdOf 只认 mt-）。
-  // 若把咪咕也写成 mt-，那串 contentId 会被当成网易云 id 去探测，**必然全部判成
-  // 拿不到音频**，于是所有咪咕候选都被标上"无音频"。
-  if (prefix === 'mg') return miguResolve(realId);
-
-  // 网易云官方接口：**纯数字 id** 才可能是它（网易云歌曲 id 都是数字）。
-  //
-  // mt- 前缀同时被几种源使用，而它们的 id 形态不同 ——
-  //   · 网易云官方  → 纯数字（如 mt-2712018330）
-  //   · GD Studio   → 通常也是网易云的数字 url_id，偶尔带字母
-  //   · Meting      → 数字，但它是自建服务、用户自己配的
-  // 所以纯数字 id 先按网易云官方解析。
-  //
-  // ⚠️ 2026-10-07 修掉一个"搜得到却播不了、还被标成无音频"的成因：
-  //   旧代码对纯数字 id **直接返回网易云那条地址就完事**。可网易云对受版权
-  //   限制的歌只会把你导回它自己的页面（拿不到音频），而此时**中转源往往是
-  //   能拿到的**（用户原话："我能找到资源免费的音乐也显示无音频"，
-  //   举的例子是《希望有羽毛和翅膀》）。所以：
-  //     先看探测结论（搜索时已经探过，命中 10 分钟缓存，几乎不花时间）；
-  //     网易云明确拿不到 -> 逐个问中转源；都拿不到才把网易云那条交回去，
-  //     让转发层给出统一的失败提示（总比返回 null 变成"这首歌不存在"诚实）。
-  if (prefix === 'mt' && /^\d{1,20}$/.test(realId)) {
-    if (await probeNeteasePlayable(realId) !== false) return neteaseOuterUrl(realId);
-    const viaRelay = await metingResolveAny(env, realId);
-    return viaRelay || neteaseOuterUrl(realId);
+  // 苹果给的是官方 previewUrl，必有音频，不必验真
+  if (prefix === 'ap') {
+    const url = await appleResolve(realId);
+    return url ? { url, path: 'apple', bytes: 0 } : null;
   }
 
-  if (prefix === 'mt') {
-    return metingResolveAny(env, realId);
+  const now = Date.now();
+
+  // 1) 已经走过并成功过的路：直接复用（它的直链在几分钟内是稳定的）
+  const cached = audioRouteCache.get(prefixedId);
+  if (cached && now - cached.at <= AUDIO_ROUTE_TTL_MS) {
+    return { url: cached.url, path: cached.path || 'cached', bytes: cached.bytes || 0 };
+  }
+
+  const dead = deadPaths(prefixedId, now);
+
+  // 2) 逐个候选验真
+  for (const route of audioRoutes(env, prefixedId, prefix, realId)) {
+    if (dead.has(route.path)) continue;
+    let url = null;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      url = await route.fetchUrl();
+    } catch {
+      url = null;
+    }
+    if (!url) {
+      // 解析不出地址：**不当成"这条路死了"** —— 上游抖动也会这样，
+      // 记死会让这首歌在 30 分钟内再也不试这条路。
+      continue;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const probed = await probeAudioSource(env, url, durationSeconds);
+    if (probed && probed.ok) {
+      audioRouteCache.set(prefixedId, { url, path: route.path, bytes: probed.bytes, at: now });
+      routeCachePrune(audioRouteCache, now);
+      return { url, path: route.path, bytes: probed.bytes };
+    }
+    // 解析出来了但出不了音频：这条路在这个 id 上确定不行。
+    // 只有"真在播放"时才记死 —— 搜索阶段的探测不记（见函数头的说明）。
+    if (rememberDead) markDead(prefixedId, route.path);
   }
 
   return null;
 }
 
 /**
+ * 多数调用方只要地址。
+ *
+ * 注意这里**默认不记死路**：搜索阶段的探测走的就是这条。真正播放时
+ * `proxyAudio` 会调 `resolveAudioDetailed(..., { rememberDead: true })`。
+ */
+async function resolveAudioUrl(env, prefixedId, durationSeconds = 0, opts = {}) {
+  const hit = await resolveAudioDetailed(env, prefixedId, durationSeconds, opts);
+  return hit ? hit.url : null;
+}
+
+/**
  * 逐个问中转源要直链，返回第一个拿到的。
  *
- * 抽出来是为了两处共用同一条顺序：**播放解析**（resolveAudioUrl）与
- * **可播性判断**（trackPlayable）—— 判断和播放必须走同一批源，
- * 否则又会出现"说能播却播不了"或反过来的分歧。
+ * 保留它是因为**可播性判断**（trackPlayable）要用"拿到地址就算这条路通"的弱判据 ——
+ * 审核列表只想知道"有没有希望播"，不该为每一首都真发一次音频请求。
  */
 async function metingResolveAny(env, songId) {
   for (const base of metingBases(env)) {
@@ -1646,9 +1854,14 @@ export async function trackPlayable(env, trackId) {
  * 那条"调用的助手必须真的存在"的测试现在守着 fetchAudioUpstream（本轮 A9 的替身）。
  */
 
-async function proxyAudio(env, prefixedId, request) {
-  const directUrl = await resolveAudioUrl(env, prefixedId);
-  if (!directUrl) return error('这首暂时没有可试听的片段，换一首试试', 404);
+async function proxyAudio(env, prefixedId, request, durationSeconds = 0) {
+  // 传时长进去是为了让"验真"能判断拿到的体积是否合理
+  // （防上游把完整曲偷偷换成几十秒试听）。库里有就传，没有就 0（不判体积）。
+  //
+  // `rememberDead: true` —— 这是**真正的播放**，一次播放会发十几个 Range 请求，
+  // 必须把"这条路上游出不了音频"记下来，否则每个分段请求都要重新试一遍死路。
+  const directUrl = await resolveAudioUrl(env, prefixedId, durationSeconds, { rememberDead: true });
+  if (!directUrl) return error('这一版暂时播不出来，换一个版本试试', 404);
 
   const headers = {};
   const range = request.headers.get('Range');

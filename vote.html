@@ -722,7 +722,16 @@
   .cand-hint>button{margin:8px 0 0;}
   .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
   .cand-rows{padding:0 14px 12px;}
-  .cand-panel [data-track-row]{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;align-items:center;gap:10px;
+  /* 操作列**不许被压扁**（2026-10-07 用户截图：中文逐字断行 -> 「选这首」竖成一列）。
+     根因：桌面/宽屏那套 grid 是 `26px minmax(0,1fr) auto auto`，最后两列是 auto
+     （按内容定宽）；而 .cand-acts 是 flex 容器、按钮又写了 `flex:1 1 auto`，
+     于是当 1fr 那一列把宽度吃满时，操作列会被压到**内容最小宽度**（约 41px）——
+     中文在 41px 里逐字断行，看起来就是竖排。所以这里三件事一起做：
+       1. 操作列的 grid 轨道改成 `max-content`（按内容定宽，不再被压缩）；
+       2. 按钮 `flex:0 0 auto`（不缩）+ `white-space:nowrap`（中文不许逐字断）；
+       3. 加 min-width 兜底（即使将来轨道又写回 auto，也不会塌到那个宽度）。
+     窄屏那套（`@media(max-width:560px)`）仍然把操作行整行给按钮。 */
+  .cand-panel [data-track-row]{display:grid;grid-template-columns:26px minmax(0,1fr) auto max-content;align-items:center;gap:10px;
               padding:12px 4px;border-top:1px solid var(--line-soft);min-height:54px;flex-wrap:wrap;
               transition:background-color var(--d1) var(--ease);}
   .cand-panel [data-track-row]:first-child{border-top:0;}
@@ -734,10 +743,16 @@
   .cand-sub{color:var(--ink-4);font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cand-dur{flex:0 0 auto;color:var(--ink-4);font-size:13px;}
   .cand-acts{flex:0 0 auto;display:flex;gap:8px;align-items:center;}
-  .cand-acts button,[data-track-row] button{min-height:36px;font-size:13px;padding:7px 14px;
-              background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
-  .cand-acts button[data-name],[data-track-row] button[data-name]{flex:1 1 auto;background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
-  .cand-acts button[data-target],[data-track-row] button[data-target]{flex:0 0 auto;background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
+  /* `width:auto` 与 `box-sizing:border-box` 是必须的，不是啰嗦：
+     页面有一条全局 `input,button{width:100%;box-sizing:border-box;...}`，
+     而候选行的按钮靠 **flex** 分配宽度 —— 留着 `width:100%` 会让每个按钮都
+     以"容器宽度"为 flex-basis（实测「播放」被撑成 268px、把主操作挤到 96px）。 */
+  .cand-acts button,[data-track-row] button{width:auto;box-sizing:border-box;min-height:36px;font-size:13px;padding:7px 14px;
+              white-space:nowrap;background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
+  .cand-acts button[data-name],[data-track-row] button[data-name]{flex:0 0 auto;min-width:96px;
+              background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
+  .cand-acts button[data-target],[data-track-row] button[data-target]{flex:0 0 auto;min-width:64px;
+              background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
   .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;flex:0 0 auto;width:auto;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
   /* 「无试听」是个**不可点的状态标记**，不是按钮（用户要求：无音频也要能选这首，
@@ -764,9 +779,16 @@
        播放/无试听按内容宽度靠右，触控下限 40px。 */
     .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
     .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
-    .cand-acts button[data-name]{width:100%;}
-    .cand-acts button[data-target]{width:auto;}
-    .cand-noop{width:auto;}
+    /* 窄屏：主操作「选这首」**吃掉剩余宽度**，次操作（播放 / 无试听）按内容宽靠右，
+       两者同一行。两条都必须用 `.cand-acts button[data-*]` 这个**特异性**去写 ——
+       上面那条 `[data-track-row] button` 的权重与它相同、又排在后面，
+       写成更短的 `.cand-acts button[data-name]` 会被它整个盖掉（本轮就踩了：
+       flex 改了但 computed 里一直是 `1 1 auto`，像是"改了没生效"）。
+       另外也不要用 `flex-basis:100%`：那会让「选这首」占满整行、把「播放」挤到下一行，
+       同时自己因为 min-width:0 被压到 28px（探针实测过）。 */
+    .cand-acts button[data-name],[data-track-row] button[data-name]{flex:1 1 auto;min-width:96px;}
+    .cand-acts button[data-target],[data-track-row] button[data-target]{flex:0 0 auto;min-width:0;}
+    .cand-acts .cand-noop,[data-track-row] .cand-noop{flex:0 0 auto;width:auto;}
   }
   .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
@@ -1885,22 +1907,37 @@ function pickSong(button){
 /**
  * 音源 P0-1：`<audio>` 的失败兜底。
  *
- * `/api/music?play=` 失败时返回的是 JSON（404 无片段 / 502 地址不可信 /
+ * `/api/music?play=` 失败时返回的是 JSON（404 全部音源都取不到 / 502 地址不可信 /
  * 502 不是音频 / 504 超时），`<audio>` 只会静默失败 —— 表现就是"点了没反应"。
  * 这里监听 error / stalled，就地给一条说明 + 一个重试按钮。
+ *
+ * 2026-10-07 修掉"兜底提示**叠成五张卡**"的 bug（用户截图里一眼可见）。
+ *    根因有两层，两层都得治：
+ *      1. `hint` 是 **appendChild** 到播放器槽里的，而清空只清 `.audio-fallback`
+ *         那一个类 —— 只要有一次没被清掉（或类名变了），就会往上垒；
+ *      2. 更关键：点「重试这一版」会 `replaceWith(next)` 换掉 audio，**但旧的 audio
+ *         还在加载中**！旧节点被替换后它的 error/stalled 仍会触发，而它的
+ *         `parentElement` 已经是 null（或指向同一个 box），于是又 append 一张。
+ *         点几次就垒几张 —— 正是截图里那五张。
+ *    治法是**结构性的**：改成"槽里只允许有一个播放器 + 最多一条提示"，
+ *    每次渲染先把槽整个重建（`slot.innerHTML = ''`），并且**先取消旧播放器的加载**
+ *    （`audio.removeAttribute('src'); audio.load();`）再替换 —— 断开在途请求，
+ *    旧节点就再也不会冒事件出来。
  */
 function audioFallbackHint(audio){
   if(!audio || audio.dataset.fallbackShown === '1') return;
   audio.dataset.fallbackShown = '1';
 
-  const box = audio.parentElement;
-  if(!box) return;
+  const slot = audio.parentElement;
+  if(!slot) return;
 
-  const old = box.querySelector('.audio-fallback');
-  if(old) old.remove();
+  // 结构性保证：一个槽里只留一个播放器 + 一条提示。
+  // 不用 querySelector 找旧的删 —— 那依赖类名，改名或漏一次就垒起来。
+  Array.from(slot.querySelectorAll('.audio-fallback')).forEach((el) => el.remove());
+  Array.from(slot.querySelectorAll('audio')).forEach((el) => { if(el !== audio) el.remove(); });
 
   const hint = document.createElement('div');
-  hint.className = 'cand-hint';
+  hint.className = 'audio-fallback cand-hint';
   hint.style.cssText = 'margin-top:8px;';
 
   const text = document.createElement('span');
@@ -1915,19 +1952,37 @@ function audioFallbackHint(audio){
   retry.addEventListener('click', () => {
     const track = audio.dataset.trackId || '';
     if(!track) return;
-    const next = document.createElement('audio');
-    next.controls = true;
-    next.preload = 'metadata';
-    next.style.width = '100%';
-    next.dataset.trackId = track;
-    next.src = '/api/music?play=' + encodeURIComponent(track) + '&retry=' + Date.now();
-    audio.replaceWith(next);
-    bindAudioFallback(next);
-    next.play().catch(() => { /* 可能被自动播放策略拦截，忽略 */ });
+    replacePlayerWith(audio, '/api/music?play=' + encodeURIComponent(track) + '&retry=' + Date.now());
   });
   hint.appendChild(retry);
 
-  box.appendChild(hint);
+  slot.appendChild(hint);
+}
+
+/**
+ * 换掉一个播放器，**并断开旧的那个**。
+ *
+ * `audio.removeAttribute('src'); audio.load();` 这两步是必须的：
+ * 只做 `replaceWith` 的话，旧节点上已经发出的音频请求还在跑，
+ * 它随后触发的 error/stalled 会再冒一次事件 —— 每点一次重试就多一张提示卡
+ * （这正是用户截图里"五张重试卡"的成因）。先把 src 摘掉并 load() 一次，
+ * 浏览器会中止那次加载，旧节点从此安静。
+ */
+function replacePlayerWith(audio, src){
+  const next = document.createElement('audio');
+  next.controls = true;
+  next.preload = 'metadata';
+  next.style.width = '100%';
+  next.dataset.trackId = audio.dataset.trackId || '';
+  next.src = src;
+  audio.replaceWith(next);
+  try {
+    audio.removeAttribute('src');
+    audio.load();
+  } catch(e) { /* 旧节点已经脱离文档，忽略 */ }
+  bindAudioFallback(next);
+  next.play().catch(() => { /* 可能被自动播放策略拦截，忽略 */ });
+  return next;
 }
 
 function bindAudioFallback(audio){
@@ -2003,6 +2058,14 @@ function playTrack(trackId, boxId){
 
   box.querySelectorAll('[data-track-row]').forEach((row) => {
     row.style.background = row.dataset.trackRow === trackId ? 'rgba(14,165,233,0.14)' : 'transparent';
+  });
+
+  // 换曲之前先把**上一个播放器断开**：只做 slot.innerHTML='' 的话，
+  // 旧节点上在途的音频请求还在跑，它随后触发的 error/stalled 会再冒一次事件，
+  // 于是"点了几个不同的版本"就攒出几张失败提示卡（用户截图里是五张）。
+  // 摘掉 src 再 load() 一次，浏览器会中止加载，旧节点从此安静。
+  Array.from(slot.querySelectorAll('audio')).forEach((old) => {
+    try { old.removeAttribute('src'); old.load(); } catch(e) { /* 已脱离文档，忽略 */ }
   });
 
   slot.innerHTML = '<div class="cand-hint" style="margin-bottom:6px;">正在试听</div>';

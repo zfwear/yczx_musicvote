@@ -207,17 +207,29 @@ export async function playableMapForIds(trackIds, { resolve, limit = 40, concurr
  *
  * 2026-10-07（用户："无音频的是能入选的"）：打了标记的候选**仍然可以选**，
  * 只是不能试听；审核界面会明确告诉管理员"这一版没有音频"。
+ *
+ * ⚠️ 2026-10-07 晚：**调用方必须能传 limit / concurrency / deadlineMs**。
+ *    因为判据从"看一下网易云那条重定向"升级成了"对候选**真发一次 Range 请求**
+ *    确认能出音频"（用户要求"以能播放优先"），代价从"几乎免费"变成"每条一次上游请求"。
+ *    一次搜索最多 40 条候选，全探一遍最坏拖到 4 秒 —— 所以调用方要能收窄范围。
+ *    以前的写法只解构 `resolve`、把其余参数**静默丢掉**，调用方设了 limit 也不生效
+ *    （看起来"改了没效果"，最难查的一类）。
+ *
+ * @param {Array} songs
+ * @param {{resolve?: Function, limit?: number, concurrency?: number, deadlineMs?: number}} [opts]
  */
-export async function keepPlayableNetease(songs, { resolve } = {}) {
+export async function keepPlayableNetease(songs, opts = {}) {
+  const { resolve, limit, concurrency, deadlineMs } = opts;
   if (!Array.isArray(songs) || !songs.length) return songs;
   const targets = songs.filter((s) => /^mt-/.test(String(s.id || '')));
   if (!targets.length) return songs;
 
   const verdicts = await playableMapForIds(targets.map((s) => s.id), {
     resolve: resolve || ((id) => probeNeteasePlayable(neteaseIdOf(id))),
-    limit: targets.length,          // 搜索候选本来就只有几十条
-    concurrency: 6,
-    deadlineMs: 4000,               // 别把搜索拖慢
+    // 搜索候选本来就只有几十条；调用方给得比候选数小就按它来（省上游请求）
+    limit: Number.isFinite(limit) ? Math.max(1, Number(limit)) : targets.length,
+    concurrency: Number.isFinite(concurrency) ? Math.max(1, Number(concurrency)) : 6,
+    deadlineMs: Number.isFinite(deadlineMs) ? Math.max(200, Number(deadlineMs)) : 4000,
   });
 
   return songs.map((s) => (verdicts.get(String(s.id)) === false ? { ...s, playable: false } : s));
