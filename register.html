@@ -5,28 +5,29 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>管理员注册 - 盐中之声</title>
 <link rel="stylesheet" href="assets/css/liquid-glass.css">
-<link rel="stylesheet" href="assets/css/register.css">
+<link rel="stylesheet" href="assets/css/schedule.css">
 </head>
 <body>
-<!-- 流体环境光斑 -->
+<!-- 全景流体光斑 -->
 <div class="liquid-mesh-layer" aria-hidden="true">
   <div class="liquid-orb liquid-orb-1"></div>
   <div class="liquid-orb liquid-orb-2"></div>
   <div class="liquid-orb liquid-orb-3"></div>
+  <div class="liquid-orb liquid-orb-4"></div>
 </div>
 
 <div class="layout-container">
-  <div class="glass-panel register-card login-box">
+  <div class="glass-panel register-card register-container">
     <div class="register-header">
       <div class="register-icon-bubble">🛡️</div>
-      <h2>管理员注册</h2>
-      <p class="sub">请向高级管理员索取「动态口令」，核验后即可分配管理权限</p>
+      <h2 style="font-size:22px;font-weight:700;color:var(--ink);">管理员注册</h2>
+      <p style="font-size:13px;color:var(--ink-3);margin-top:4px;">请向高级管理员索取「动态邀请口令」，核验后分配控制台权限</p>
     </div>
 
     <div class="register-form">
       <div class="form-group">
         <label class="field-label" for="username">登录账号</label>
-        <input id="username" class="input-liquid" placeholder="中文/字母/数字，2-24 位" value="">
+        <input id="username" class="input-liquid" placeholder="字母/数字/中文，2-24 位" value="">
       </div>
 
       <div class="form-group">
@@ -36,7 +37,7 @@
 
       <div class="form-group">
         <label class="field-label" for="password2">确认密码</label>
-        <input id="password2" class="input-liquid" type="password" placeholder="再次输入密码进行确认">
+        <input id="password2" class="input-liquid" type="password" placeholder="再次输入密码确认">
       </div>
 
       <div class="form-group">
@@ -44,9 +45,9 @@
         <input id="inviteCode" class="input-liquid" placeholder="格式如 ABCD-EFGH-JKLM">
       </div>
 
-      <button id="regBtn" class="btn-liquid btn-primary btn-submit-reg" onclick="doRegister()">立即注册</button>
-      <p id="regMsg" class="msg"></p>
-      <p class="sub-footer">已经拥有管理员账号？<a href="/admin.html">前往登录</a></p>
+      <button id="regBtn" class="btn-liquid btn-primary" onclick="doRegister()">立即注册</button>
+      <p id="regMsg" class="err-msg"></p>
+      <p class="sub-footer">已有管理员账号？<a href="/admin.html">前往登录</a></p>
     </div>
   </div>
 
@@ -60,7 +61,7 @@
         <span id="beianGonganText">苏公网安备32090302000745号</span>
       </a>
     </div>
-    <div id="siteVersion" class="site-version">版本 2.0.0 · Liquid Glass Edition</div>
+    <div id="siteVersion" class="site-version">版本 2.0.0 · Ultra Liquid Edition</div>
   </div>
 </div>
 

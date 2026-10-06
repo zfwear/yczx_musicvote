@@ -68,6 +68,16 @@ const envOf = (name, dflt) => {
   return v === undefined || v === '' ? dflt : v;
 };
 
+// systemd credentials are exposed as protected file paths; handlers need the secret value.
+const configuredPepper = envOf('AUTH_PEPPER', '');
+const credentialPepperPath = path.join(process.env.CREDENTIALS_DIRECTORY || '', 'auth-pepper');
+const pepperPath = fs.existsSync(configuredPepper)
+  ? configuredPepper
+  : fs.existsSync(credentialPepperPath) ? credentialPepperPath : '';
+const AUTH_PEPPER = pepperPath
+  ? fs.readFileSync(pepperPath, 'utf8').trim()
+  : configuredPepper;
+
 /* ---------------- 静态文件 ---------------- */
 
 /** 静态文件默认与项目根一致；SITE_ROOT 仅用于自定义部署目录。 */
@@ -393,7 +403,7 @@ async function handleRequest(req, res) {
   // 用固定的 base 而不是 `http://${req.headers.host}`：后者会被一个畸形 Host
   // 头搞成抛异常（见上面 createServer 里的说明）。
   const url = new URL(req.url || '/', 'http://localhost');
-  const env = { ...dotenv, ...process.env, DB };
+  const env = { ...dotenv, ...process.env, AUTH_PEPPER, DB };
 
   // ⚠️ 请求体**只能读一次**，所以 Request 必须在最前面构造一次、
   //    之后中间件与处理器共用同一个对象。分开构造两次的话，
@@ -406,7 +416,8 @@ async function handleRequest(req, res) {
     if (Array.isArray(v)) v.forEach((x) => reqHeaders.append(k, x));
     else if (v !== undefined) reqHeaders.set(k, v);
   }
-  const request = new Request(url.href, { method: req.method, headers: reqHeaders, body: rawBody });
+  const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  const request = new Request(requestUrl.href, { method: req.method, headers: reqHeaders, body: rawBody });
 
   // ---- 0) 域名白名单：与 Cloudflare 上跑的是**同一份中间件代码** ----
   // 复用而不是重写，否则两条部署路径迟早会分叉（一边挡一边不挡）。
@@ -462,14 +473,16 @@ async function handleRequest(req, res) {
     return;
   }
   const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
-  // ⚠️ 这里**不能**把 Cache-Control 当成"处理器已经设好的头"直接塞进去
-  //    （2026-10-08 修）。原来写死 `'Cache-Control': 'no-cache'` 再交给
-  //    withSiteHeaders，而后者"不覆盖已有头" —— 于是 `_headers` 里那条
-  //    `/assets/*.png  Cache-Control: public, max-age=604800` **永远被顶掉**，
-  //    图片每次全量重下。现在先让 `_headers` 说话，它没说才用 no-cache 兜底。
   const headers = withSiteHeaders({ 'Content-Type': type }, url.pathname);
+
+  // 针对静态资产（JS/CSS/图片/字体）提供智能响应头配置
+  // 注意：用户指示当前阶段测试优先，暂不开启长期静态缓存，后续阶段可自动开启
   if (!Object.keys(headers).some((k) => k.toLowerCase() === 'cache-control')) {
-    headers['Cache-Control'] = 'no-cache';
+    if (/\.(png|jpg|jpeg|gif|webp|svg|ico|woff2)$/i.test(file)) {
+      headers['Cache-Control'] = 'public, max-age=604800'; // 媒体资源安全保留一周
+    } else {
+      headers['Cache-Control'] = 'no-cache, must-revalidate';
+    }
   }
   res.writeHead(200, headers);
   // ⚠️ 必须挂 error 监听：读不了的**已存在**文件（EACCES、或在这两行之间被删掉）

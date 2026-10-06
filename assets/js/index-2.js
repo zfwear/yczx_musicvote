@@ -425,7 +425,7 @@ function showGate(reason){
 }
 function showApp(){
   document.getElementById('gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
+  document.getElementById('app').style.display = 'flex';
 
   // 规定放在显眼位置，免责声明放页脚；两者都从常量渲染，避免和后台的副本走样。
   renderRules();
@@ -671,12 +671,13 @@ function renderPendingList(){
   const box = document.getElementById('pendingList');
   if(!box) return;
   if(!pendingSongs.length){
-    box.innerHTML = '<p style="text-align:center;color:var(--ink-4);padding:20px 0;">暂无待审核歌曲</p>';
+    box.innerHTML = '<p style="text-align:center;color:var(--ink-4);padding:40px 0;">暂无待审核歌曲</p>';
     return;
   }
-  // 外层套一个白色列表容器：整个列表只有一个圆角与一条边框，行与行之间用
-  // 轻分隔线区分（第三档）—— 比"每首歌一个浮起的大盒子"更紧凑、更像音乐列表。
-  box.innerHTML = '<div class="list-panel">' + pendingSongs.map(renderPendingCard).join('') + '</div>';
+  box.innerHTML = '<div class="cards-list">' + pendingSongs.map(renderPendingCard).join('') + '</div>';
+  if(window.LiquidMotion && typeof window.LiquidMotion.staggerIn === 'function'){
+    window.LiquidMotion.staggerIn(box.querySelectorAll('.rank-card'));
+  }
 }
 
 /**
@@ -814,7 +815,10 @@ async function loadApproved(){
       <div id="audition-${id}"></div>
     `;
     }).join('');
-    box.innerHTML = '<div class="list-panel">' + box.innerHTML + '</div>';
+    box.innerHTML = '<div class="cards-list">' + box.innerHTML + '</div>';
+    if(window.LiquidMotion && typeof window.LiquidMotion.staggerIn === 'function'){
+      window.LiquidMotion.staggerIn(box.querySelectorAll('.rank-card'));
+    }
   } catch(e) { box.innerHTML = '<p style="text-align:center;color:var(--danger);">网络错误</p>'; }
 }
 
@@ -1467,6 +1471,11 @@ async function upvote(id, btn){  if(!await uiConfirm('确认给这首歌投一�
       if(song){
         song.votes = safeInt(song.votes) + 1;
         patchPendingCard(id);
+        const cardEl = document.querySelector('#pendingList [data-song="' + safeInt(id) + '"]');
+        if(cardEl && window.LiquidMotion && typeof window.LiquidMotion.bounceNumber === 'function'){
+          const badge = cardEl.querySelector('.rank-votes');
+          window.LiquidMotion.bounceNumber(badge);
+        }
       }
       uiToast('投票成功', 'ok');
     }

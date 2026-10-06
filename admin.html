@@ -13,15 +13,16 @@
   <div class="liquid-orb liquid-orb-1"></div>
   <div class="liquid-orb liquid-orb-2"></div>
   <div class="liquid-orb liquid-orb-3"></div>
+  <div class="liquid-orb liquid-orb-4"></div>
 </div>
 
-<div class="layout-container admin-container">
+<div class="layout-container">
   <!-- 登录卡片 -->
-  <div id="loginBox" class="glass-panel login-box admin-login-card">
+  <div id="loginBox" class="glass-panel admin-login-card">
     <div class="admin-login-header">
-      <div class="admin-icon-bubble">🎛️</div>
+      <div class="gate-icon-bubble">🎛️</div>
       <h2>广播站后台管理</h2>
-      <p class="sub">请输入管理员凭证进入工作台</p>
+      <p class="gate-sub">请输入管理员凭证进入运维工作台</p>
     </div>
     <div class="admin-login-form">
       <div class="form-group">
@@ -32,52 +33,52 @@
         <label class="field-label" for="password">管理员密码</label>
         <input id="password" class="input-liquid" type="password" placeholder="密码">
       </div>
-      <button class="btn-liquid btn-primary btn-submit-admin" onclick="adminLogin()">登录管理系统</button>
-      <p id="loginMsg" class="msg"></p>
+      <button class="btn-liquid btn-primary" onclick="adminLogin()">登录管理系统</button>
+      <p id="loginMsg" class="err-msg"></p>
       <p class="sub-footer">没有账号？<a href="/register.html">用动态口令注册</a></p>
     </div>
   </div>
 
   <!-- 工作台面板 -->
-  <div id="adminBox" class="hidden">
+  <div id="adminBox" class="admin-layout hidden">
     <header class="glass-panel admin-top-bar">
       <div class="admin-brand">
         <h2>盐中之声 · 广播站控制台</h2>
-        <span class="badge-liquid badge-status">在线运维中</span>
+        <span class="badge-liquid badge-success">在线运维</span>
       </div>
-      <div class="admin-user-act">
+      <div class="header-actions">
         <a href="/" class="btn-liquid btn-secondary btn-sm" target="_blank">预览前台</a>
-        <button onclick="logout()" class="btn-liquid btn-secondary btn-sm btn-logout">安全退出</button>
+        <button onclick="logout()" class="btn-liquid btn-secondary btn-sm">退出登录</button>
       </div>
     </header>
 
     <div class="workspace">
-      <!-- 磨砂侧边导航 / 移动端顶置胶囊滑动条 -->
+      <!-- 左侧胶囊导航栏（移动端顶部滚动，桌面端垂直侧边） -->
       <nav class="tabs glass-panel admin-sidebar" id="adminNav" role="tablist" aria-label="后台功能">
         <button class="tab-item active" role="tab" aria-current="page" onclick="switchTab('pending', this)">
-          <span class="tab-icon">⏳</span> 待审核
+          <span>⏳</span> 待审核
         </button>
         <button class="tab-item" role="tab" onclick="switchTab('approved', this)">
-          <span class="tab-icon">✅</span> 已通过
+          <span>✅</span> 已通过
         </button>
         <button class="tab-item" role="tab" onclick="switchTab('rejected', this)">
-          <span class="tab-icon">🗑️</span> 回收站
+          <span>🗑️</span> 回收站
         </button>
         <button class="tab-item" role="tab" onclick="switchTab('schedule', this)">
-          <span class="tab-icon">📅</span> 排期管理
+          <span>📅</span> 排期管理
         </button>
         <button class="tab-item" role="tab" onclick="switchTab('banned', this)">
-          <span class="tab-icon">🚫</span> 黑名单
+          <span>🚫</span> 违禁词库
         </button>
         <button class="tab-item" role="tab" onclick="switchTab('settings', this)">
-          <span class="tab-icon">⚙️</span> 系统设置
+          <span>⚙️</span> 系统设置
         </button>
       </nav>
 
       <!-- 核心工作区面板（纯局部刷新挂载点） -->
       <main class="workspace-main">
         <div id="listBox" class="glass-panel admin-content-panel" role="tabpanel">
-          <p class="sub" style="text-align:center;padding:40px 0;">加载中...</p>
+          <p class="col-hint" style="text-align:center;padding:40px 0;">加载中...</p>
         </div>
       </main>
     </div>
@@ -93,7 +94,7 @@
         <span id="beianGonganText">苏公网安备32090302000745号</span>
       </a>
     </div>
-    <div id="siteVersion" class="site-version">版本 2.0.0 · Liquid Glass Edition</div>
+    <div id="siteVersion" class="site-version">版本 2.0.0 · Ultra Liquid Edition</div>
   </div>
 </div>
 

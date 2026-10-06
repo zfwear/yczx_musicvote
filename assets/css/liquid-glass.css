@@ -1,54 +1,64 @@
 /* ============================================================
-   液态玻璃设计系统（Liquid Glass Design Tokens & Foundations）
+   极致优雅液态玻璃设计系统 (Refined Liquid Glass Design System)
+   - 雅致低饱和度、自然透光折射、克制的高级感排版
+   - 充足呼吸间距，杜绝拥挤与过度艳丽
+   - 完美适配大屏宽屏工作流与移动端掌上交互
    ============================================================ */
 
 :root {
-  /* 基础品牌调色板 */
-  --liquid-primary: #3b82f6;
-  --liquid-primary-strong: #2563eb;
-  --liquid-primary-glow: rgba(59, 130, 246, 0.45);
-  --liquid-accent: #06b6d4;
-  --liquid-accent-glow: rgba(6, 182, 212, 0.4);
-  --liquid-violet: #8b5cf6;
-  --liquid-violet-glow: rgba(139, 92, 246, 0.35);
+  /* 优雅克制的调色板：高级石蓝、薄雾灰、雅青与柔绯 */
+  --liquid-primary: #2563eb;
+  --liquid-primary-hover: #1d4ed8;
+  --liquid-primary-glow: rgba(37, 99, 235, 0.22);
+  --liquid-primary-soft: rgba(37, 99, 235, 0.08);
 
-  /* 文字墨水系统 */
+  --liquid-accent: #6366f1;
+  --liquid-accent-soft: rgba(99, 102, 241, 0.08);
+
+  --liquid-emerald: #059669;
+  --liquid-emerald-soft: rgba(5, 150, 105, 0.09);
+
+  --liquid-rose: #e11d48;
+  --liquid-rose-soft: rgba(225, 29, 72, 0.08);
+
+  --liquid-amber: #d97706;
+  --liquid-amber-soft: rgba(217, 119, 6, 0.08);
+
+  /* 墨水层次：注重对比度与可读性 */
   --ink: #0f172a;
   --ink-2: #334155;
   --ink-3: #64748b;
   --ink-4: #94a3b8;
   --ink-inverse: #ffffff;
 
-  /* 浅色模式液态玻璃晶格 */
-  --canvas-bg: #eef2f9;
-  --glass-surface: rgba(255, 255, 255, 0.68);
-  --glass-surface-subtle: rgba(255, 255, 255, 0.42);
-  --glass-surface-solid: rgba(255, 255, 255, 0.88);
-  --glass-border: rgba(255, 255, 255, 0.75);
-  --glass-border-subtle: rgba(255, 255, 255, 0.4);
-  --glass-border-color: rgba(226, 232, 240, 0.8);
-  --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.95);
-  --glass-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
-  --glass-shadow-hover: 0 18px 40px -12px rgba(15, 23, 42, 0.14), 0 8px 16px -4px rgba(15, 23, 42, 0.06);
-  --glass-blur: blur(20px) saturate(190%);
+  /* 浅色模式液态晶格：轻盈、高透、柔光 */
+  --canvas-bg: #f8fafc;
+  --glass-surface: rgba(255, 255, 255, 0.72);
+  --glass-surface-hover: rgba(255, 255, 255, 0.88);
+  --glass-surface-subtle: rgba(255, 255, 255, 0.48);
+  --glass-surface-solid: rgba(255, 255, 255, 0.96);
 
-  /* 状态颜色 */
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.12);
-  --danger-border: rgba(239, 68, 68, 0.3);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.12);
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --glass-border-subtle: rgba(226, 232, 240, 0.7);
+  --glass-border-color: #e2e8f0;
 
-  /* 圆角规范 */
-  --r-sm: 8px;
+  --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 1px 0 rgba(148, 163, 184, 0.08);
+  --glass-shadow: 0 12px 32px -8px rgba(15, 23, 42, 0.05), 0 4px 12px -2px rgba(15, 23, 42, 0.02);
+  --glass-shadow-hover: 0 20px 40px -10px rgba(15, 23, 42, 0.09), 0 6px 16px -3px rgba(15, 23, 42, 0.03);
+  --glass-blur: blur(24px) saturate(180%);
+
+  /* 尺寸与圆角曲线 */
+  --r-xs: 6px;
+  --r-sm: 10px;
   --r-md: 14px;
   --r-lg: 20px;
   --r-xl: 28px;
   --r-pill: 9999px;
 
-  /* 字体与字号 */
+  /* 缓动动效 */
+  --ease-elastic: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
 }
 
@@ -61,16 +71,19 @@
     --ink-inverse: #0f172a;
 
     --canvas-bg: #090d16;
-    --glass-surface: rgba(17, 24, 39, 0.72);
-    --glass-surface-subtle: rgba(17, 24, 39, 0.48);
-    --glass-surface-solid: rgba(22, 30, 46, 0.88);
-    --glass-border: rgba(255, 255, 255, 0.14);
-    --glass-border-subtle: rgba(255, 255, 255, 0.07);
+    --glass-surface: rgba(17, 24, 39, 0.68);
+    --glass-surface-hover: rgba(24, 34, 58, 0.82);
+    --glass-surface-subtle: rgba(17, 24, 39, 0.42);
+    --glass-surface-solid: rgba(22, 30, 46, 0.94);
+
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-border-subtle: rgba(255, 255, 255, 0.06);
     --glass-border-color: rgba(51, 65, 85, 0.6);
-    --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.2);
-    --glass-shadow: 0 12px 35px -10px rgba(0, 0, 0, 0.6), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
-    --glass-shadow-hover: 0 20px 48px -12px rgba(0, 0, 0, 0.8), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
-    --glass-blur: blur(24px) saturate(200%);
+
+    --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.15), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.3);
+    --glass-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 4px 14px -2px rgba(0, 0, 0, 0.4);
+    --glass-shadow-hover: 0 24px 50px -12px rgba(0, 0, 0, 0.75), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+    --glass-blur: blur(28px) saturate(190%);
   }
 }
 
@@ -79,6 +92,12 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
 }
 
 body {
@@ -93,188 +112,445 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 流体环境光光斑容器（Ambient Liquid Orbs） */
+/* 自然低饱和流体背景光斑 (Ambient Orbs) - 纯雅调色，低透明度 */
 .liquid-mesh-layer {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
+  contain: strict;
 }
 
 .liquid-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.6;
-  mix-blend-mode: normal;
+  filter: blur(100px);
+  opacity: 0.38;
+  will-change: transform;
 }
 
 .liquid-orb-1 {
-  width: 520px;
-  height: 520px;
-  top: -120px;
-  left: -80px;
-  background: radial-gradient(circle, var(--liquid-primary-glow) 0%, rgba(59, 130, 246, 0) 70%);
+  width: 600px;
+  height: 600px;
+  top: -160px;
+  left: -120px;
+  background: radial-gradient(circle, rgba(147, 197, 253, 0.5) 0%, rgba(219, 234, 254, 0) 70%);
 }
 
 .liquid-orb-2 {
-  width: 480px;
-  height: 480px;
-  top: 15%;
-  right: -100px;
-  background: radial-gradient(circle, var(--liquid-accent-glow) 0%, rgba(6, 182, 212, 0) 70%);
+  width: 650px;
+  height: 650px;
+  top: 25%;
+  right: -180px;
+  background: radial-gradient(circle, rgba(199, 210, 254, 0.45) 0%, rgba(238, 242, 255, 0) 70%);
 }
 
 .liquid-orb-3 {
-  width: 600px;
-  height: 600px;
-  bottom: -150px;
-  left: 20%;
-  background: radial-gradient(circle, var(--liquid-violet-glow) 0%, rgba(139, 92, 246, 0) 70%);
+  width: 550px;
+  height: 550px;
+  bottom: -120px;
+  left: 25%;
+  background: radial-gradient(circle, rgba(167, 243, 208, 0.35) 0%, rgba(236, 253, 245, 0) 70%);
 }
 
-/* 液态玻璃核心材质类 */
+.liquid-orb-4 {
+  width: 480px;
+  height: 480px;
+  top: 15%;
+  right: 30%;
+  background: radial-gradient(circle, rgba(254, 205, 211, 0.3) 0%, rgba(255, 241, 242, 0) 70%);
+}
+
+/* 核心布局容器 */
+.layout-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 100vh;
+  padding: 36px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .layout-container {
+    padding: 16px 14px 48px;
+  }
+}
+
+/* 液态玻璃核心面板组件 */
 .glass-panel {
   background: var(--glass-surface);
-  -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-rim), var(--glass-shadow);
-  border-radius: var(--r-lg);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+  box-shadow: var(--glass-shadow), var(--glass-rim);
+  border-radius: var(--r-xl);
+  transition: transform 0.28s var(--ease-smooth), box-shadow 0.28s var(--ease-smooth), background 0.28s ease, border-color 0.28s ease;
+  position: relative;
 }
 
 .glass-panel:hover {
-  box-shadow: var(--glass-rim), var(--glass-shadow-hover);
+  box-shadow: var(--glass-shadow-hover), var(--glass-rim);
 }
 
 .glass-subtle {
   background: var(--glass-surface-subtle);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border-subtle);
+  border-color: var(--glass-border-subtle);
 }
 
-/* 按钮与交互控件 */
-.btn-liquid {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  padding: 10px 22px;
-  border-radius: var(--r-pill);
-  border: 1px solid transparent;
-  cursor: pointer;
-  text-decoration: none;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  user-select: none;
-  white-space: nowrap;
+.glass-solid {
+  background: var(--glass-surface-solid);
 }
 
-.btn-liquid:active {
-  transform: scale(0.96);
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, var(--liquid-primary) 0%, var(--liquid-primary-strong) 100%);
-  color: #ffffff;
-  box-shadow: 0 6px 20px -4px var(--liquid-primary-glow), inset 0 1px 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-.btn-primary:hover {
-  box-shadow: 0 10px 28px -4px var(--liquid-primary-glow), inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
-  transform: translateY(-2px);
-}
-
-.btn-secondary {
-  background: var(--glass-surface-subtle);
-  color: var(--ink);
-  border-color: var(--glass-border);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-
-.btn-secondary:hover {
-  background: var(--glass-surface);
-  color: var(--liquid-primary);
-  border-color: var(--liquid-primary);
-  transform: translateY(-2px);
-}
-
-/* 优雅输入框 */
+/* 全局表单输入控件：清爽、通透、低饱和 */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+select,
+textarea,
 .input-liquid {
-  width: 100%;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 14.5px;
+  line-height: 1.5;
   color: var(--ink);
-  background: var(--glass-surface-subtle);
-  border: 1px solid var(--glass-border-color);
-  border-radius: var(--r-md);
-  padding: 12px 18px;
-  outline: none;
-  transition: all 0.25s ease;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid var(--glass-border-color) !important;
+  border-radius: var(--r-md) !important;
+  padding: 11px 16px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  outline: none !important;
+  transition: all 0.2s var(--ease-smooth) !important;
 }
 
+@media (prefers-color-scheme: dark) {
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  select,
+  textarea,
+  .input-liquid {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border-color: rgba(51, 65, 85, 0.65) !important;
+    color: var(--ink) !important;
+  }
+}
+
+input:focus,
+select:focus,
+textarea:focus,
 .input-liquid:focus {
-  border-color: var(--liquid-primary);
-  background: var(--glass-surface);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.16), var(--glass-rim);
+  border-color: var(--liquid-primary) !important;
+  background: var(--glass-surface-solid) !important;
+  box-shadow: 0 0 0 3px var(--liquid-primary-glow) !important;
 }
 
-.input-liquid::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--ink-4);
 }
 
-/* 标签徽章 */
+/* 下拉菜单 */
+select {
+  appearance: none !important;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 14px center !important;
+  background-size: 14px !important;
+  padding-right: 38px !important;
+  cursor: pointer;
+}
+
+/* 复选框 */
+input[type="checkbox"] {
+  width: 17px !important;
+  height: 17px !important;
+  accent-color: var(--liquid-primary) !important;
+  cursor: pointer;
+  border-radius: var(--r-xs) !important;
+}
+
+/* 全局所有交互按钮统一液态基类兜底 */
+button,
+input[type="button"],
+input[type="submit"],
+.btn-liquid {
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--r-md);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface);
+  color: var(--ink-2);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.04), var(--glass-rim);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  text-decoration: none;
+  line-height: 1.25;
+  transition: all 0.22s var(--ease-smooth);
+}
+
+button:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover,
+.btn-liquid:hover {
+  background: var(--glass-surface-hover);
+  border-color: var(--liquid-primary);
+  color: var(--liquid-primary);
+  transform: translateY(-1.5px);
+  box-shadow: var(--glass-shadow), var(--glass-rim);
+}
+
+button:active,
+input[type="button"]:active,
+input[type="submit"]:active,
+.btn-liquid:active {
+  transform: scale(0.97) translateY(1px);
+}
+
+button:disabled,
+.btn-liquid:disabled,
+button[aria-disabled="true"],
+.btn-liquid[aria-disabled="true"] {
+  opacity: 0.52;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* 按钮主次层级 (精致低饱和度) */
+.btn-primary,
+.btn-upvote,
+.act-primary,
+.btn-pass,
+.gate-enter {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.35), inset 0 1px 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+.btn-primary:hover,
+.btn-upvote:hover,
+.act-primary:hover,
+.btn-pass:hover,
+.gate-enter:hover {
+  filter: brightness(1.05) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 18px -2px rgba(37, 99, 235, 0.45) !important;
+}
+
+.act-secondary,
+.btn-secondary {
+  background: var(--glass-surface) !important;
+  color: var(--ink-2) !important;
+  border-color: var(--glass-border-subtle) !important;
+}
+
+.act-secondary:hover,
+.btn-secondary:hover {
+  background: var(--glass-surface-hover) !important;
+  border-color: var(--liquid-primary) !important;
+  color: var(--liquid-primary) !important;
+}
+
+.act-quiet,
+.btn-quiet,
+.cand-quiet {
+  background: var(--glass-surface-subtle) !important;
+  color: var(--ink-3) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.act-quiet:hover,
+.btn-quiet:hover,
+.cand-quiet:hover {
+  background: var(--glass-surface-hover) !important;
+  color: var(--ink) !important;
+  border-color: var(--glass-border-subtle) !important;
+}
+
+.btn-reject,
+.btn-danger {
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 4px 14px -2px rgba(225, 29, 72, 0.35) !important;
+}
+
+.btn-reject:hover,
+.btn-danger:hover {
+  filter: brightness(1.06) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 18px -2px rgba(225, 29, 72, 0.45) !important;
+}
+
+.btn-sm {
+  padding: 7px 14px !important;
+  font-size: 13px !important;
+  border-radius: var(--r-sm) !important;
+}
+
+.btn-xs {
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  border-radius: var(--r-xs) !important;
+}
+
+.cand-noop {
+  opacity: 0.45;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 优雅胶囊徽标 */
 .badge-liquid {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
   border-radius: var(--r-pill);
+  border: 1px solid var(--glass-border);
   background: var(--glass-surface-subtle);
-  border: 1px solid var(--glass-border-subtle);
   color: var(--ink-2);
+  line-height: 1.4;
+  backdrop-filter: blur(12px);
 }
 
-/* 通用全屏遮罩与模态框 */
-.ui-dialog-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  z-index: 9999;
+.badge-primary {
+  background: var(--liquid-primary-soft);
+  color: var(--liquid-primary);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.badge-success {
+  background: var(--liquid-emerald-soft);
+  color: var(--liquid-emerald);
+  border-color: rgba(5, 150, 105, 0.2);
+}
+
+.badge-danger {
+  background: var(--liquid-rose-soft);
+  color: var(--liquid-rose);
+  border-color: rgba(225, 29, 72, 0.2);
+}
+
+.badge-warning {
+  background: var(--liquid-amber-soft);
+  color: var(--liquid-amber);
+  border-color: rgba(217, 119, 6, 0.2);
+}
+
+/* 浮动提示通知条 Banner */
+.notice-banner {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: var(--r-lg);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  margin-bottom: 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 20px;
+  gap: 12px;
 }
 
-/* 数字等宽对齐 */
-.num-tabular {
-  font-variant-numeric: tabular-nums;
+.notice-guest {
+  background: var(--liquid-amber-soft);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  color: #b45309;
 }
 
-/* 全端自适应容器 */
-.layout-container {
+.notice-paused {
+  background: var(--liquid-rose-soft);
+  border: 1px solid rgba(225, 29, 72, 0.25);
+  color: #be123c;
+}
+
+/* 页脚合规条目 */
+.beian-footer {
+  margin-top: 56px;
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px 20px 80px;
+  max-width: 960px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.8;
+  padding: 20px 16px;
+  border-top: 1px solid var(--glass-border-subtle);
   position: relative;
   z-index: 1;
 }
 
-@media (max-width: 768px) {
-  .layout-container {
-    padding: 16px 14px 60px;
-  }
+.beian-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
 }
+
+.beian-links a {
+  color: var(--ink-3);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s ease;
+}
+
+.beian-links a:hover {
+  color: var(--liquid-primary);
+}
+
+.site-version {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-4);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.hidden { display: none !important; }
+
+/* Aurora Glass 02: shared visual language for the duplicated experience. */
+:root {
+  --canvas-bg: #07101d; --ink: #eef7ff; --ink-2: #c4d4e3; --ink-3: #8396aa; --ink-4: #536679;
+  --glass-surface: rgba(17, 31, 49, .68); --glass-surface-hover: rgba(26, 47, 70, .82);
+  --glass-surface-subtle: rgba(13, 27, 44, .5); --glass-surface-solid: rgba(18, 34, 54, .94);
+  --glass-border: rgba(182, 226, 255, .17); --glass-border-subtle: rgba(182, 226, 255, .09); --glass-border-color: rgba(182, 226, 255, .22);
+  --liquid-primary: #70e5ff; --liquid-primary-strong: #2ab8df; --liquid-accent: #b49cff;
+  --glass-shadow: 0 24px 70px -28px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.025);
+  --glass-shadow-hover: 0 30px 90px -26px rgba(0,0,0,.9), 0 0 40px rgba(72,196,255,.1);
+}
+body { background: #07101d; }
+body::before { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .3; background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px); background-size: 56px 56px; mask-image: linear-gradient(to bottom, #000, transparent 75%); }
+.liquid-orb { filter: blur(110px); opacity: .42; }
+.liquid-orb-1 { background: radial-gradient(circle, rgba(37,188,238,.42), transparent 70%); }
+.liquid-orb-2 { background: radial-gradient(circle, rgba(143,113,255,.34), transparent 70%); }
+.liquid-orb-3 { background: radial-gradient(circle, rgba(40,222,182,.22), transparent 70%); }
+.liquid-orb-4 { background: radial-gradient(circle, rgba(255,133,190,.18), transparent 70%); }
+.layout-container { padding: clamp(18px, 3vw, 48px) clamp(16px, 4vw, 68px) 48px; }
+.glass-panel { border-color: var(--glass-border); box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.08); }
+button, input[type="button"], input[type="submit"], .btn-liquid { box-shadow: 0 8px 24px -12px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.1); }
+.btn-primary, .btn-upvote, .act-primary, .btn-pass, .gate-enter { background: linear-gradient(135deg,#8beaff,#218fca) !important; color: #03121d !important; border-color: rgba(190,246,255,.6) !important; box-shadow: 0 12px 28px -12px rgba(42,184,223,.7), inset 0 1px 0 rgba(255,255,255,.75) !important; }
+.input-liquid, input[type="text"], input[type="password"], input[type="number"], input[type="search"], select, textarea { background: rgba(4,15,28,.55) !important; color: var(--ink) !important; border-color: var(--glass-border-color) !important; }
+.input-liquid::placeholder { color: #62778c; }

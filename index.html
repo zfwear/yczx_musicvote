@@ -8,46 +8,60 @@
 <link rel="stylesheet" href="assets/css/index.css">
 </head>
 <body>
-<!-- 流体环境光斑 -->
+<!-- 全景流体光斑 -->
 <div class="liquid-mesh-layer" aria-hidden="true">
   <div class="liquid-orb liquid-orb-1"></div>
   <div class="liquid-orb liquid-orb-2"></div>
   <div class="liquid-orb liquid-orb-3"></div>
+  <div class="liquid-orb liquid-orb-4"></div>
 </div>
 
 <div class="layout-container">
-  <!-- 门禁卡片 -->
+  <!-- 门禁验证卡片 -->
   <div id="gate" class="glass-panel gate-card">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="gate-header">
-      <div class="gate-icon-bubble">🎵</div>
+      <div class="eyebrow">YANCHENG RADIO / 02</div>
+      <div class="gate-icon-bubble">♪</div>
       <h2>盐中之声音乐投稿</h2>
       <p class="gate-sub">北校区广播站 · 请输入班级口令进入</p>
     </div>
     <div class="gate-form">
       <label class="field-label" for="pw">班级口令</label>
-      <input id="pw" class="input-liquid" type="password" placeholder="输入口令…" onkeydown="if(event.key==='Enter')checkPw()">
+      <input id="pw" class="input-liquid" type="password" placeholder="输入班级口令…" onkeydown="if(event.key==='Enter')checkPw()">
       <button class="btn-liquid btn-primary gate-enter" onclick="checkPw()">进入系统</button>
-      <p id="gateMsg" class="err"></p>
+      <p id="gateMsg" class="err-msg"></p>
     </div>
     <div id="gateAnnounceBox"></div>
   </div>
 
-  <!-- 主程序应用面板 -->
-  <div id="app" style="display:none;">
+  <!-- 主程序工作台 -->
+  <div id="app" class="app-container" style="display:none;">
     <header class="glass-panel app-header">
-      <div class="header-main">
-        <div class="header-brand">
+      <div class="header-brand">
+        <img src="/assets/school-badge.png" alt="校徽" class="header-badge">
+        <div class="header-titles">
           <h1>盐中之声音乐投稿</h1>
-          <p class="header-sub">北校区 · 广播站音乐投票系统</p>
+          <p>北校区 · 广播站音乐投票系统</p>
         </div>
-        <img src="/assets/school-badge.png" alt="校徽" class="badge">
       </div>
+      <div class="header-signal"><i></i><span>LIVE BOARD</span></div>
       <div class="header-actions">
         <a id="goVoteBtn" href="/vote.html" class="btn-liquid btn-primary">去投稿</a>
-        <a href="/schedule.html" class="btn-liquid btn-secondary">查看每周排期</a>
-        <button class="btn-liquid btn-secondary btn-logout" onclick="logoutUser()">退出登录</button>
+        <a href="/schedule.html" class="btn-liquid btn-secondary">每周排期</a>
+        <button class="btn-liquid btn-secondary" onclick="logoutUser()">退出</button>
       </div>
     </header>
+
+    <section class="hero-strip">
+      <div class="hero-copy">
+        <p class="eyebrow">YOUR SOUND, OUR FREQUENCY</p>
+        <h2>让下一首旋律，<em>由你决定。</em></h2>
+        <p>浏览同学们的推荐，投出你想在课间听到的那一首。</p>
+      </div>
+      <div class="hero-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="hero-stat"><strong>02</strong><span>LIVE<br>CHANNELS</span></div>
+    </section>
 
     <!-- 游客提示横幅 -->
     <div id="guestNotice" class="glass-panel notice-banner notice-guest" hidden>
@@ -57,48 +71,48 @@
     <!-- 暂停投稿提示横幅 -->
     <div id="pausedNotice" class="glass-panel notice-banner notice-paused" hidden></div>
 
-    <!-- 规定与公告折叠区 -->
+    <!-- 须知与通知折叠区 -->
     <div id="rulesBox" class="rules-container"></div>
     <div id="announceBox" class="announce-container"></div>
 
-    <!-- 移动端选项卡 -->
-    <div class="mobile-tabs glass-panel">
+    <!-- 移动端胶囊选项卡 -->
+    <div class="mobile-tabs glass-panel glass-subtle">
       <button id="tabPending" class="tab-btn active" onclick="switchMobileTab('pending')">待审核榜</button>
       <button id="tabApproved" class="tab-btn" onclick="switchMobileTab('approved')">正式榜</button>
     </div>
 
-    <!-- 榜单主体网格（双列并排/移动端选项卡切换） -->
+    <!-- 核心榜单主体 (超大屏分栏/移动端平滑折叠) -->
     <main id="rankList" class="rank-grid">
-      <section id="pendingCol" class="col active glass-panel">
+      <section id="pendingCol" class="glass-panel col-panel active">
         <div class="col-header">
           <div class="col-title-group">
             <h2 class="col-title">待审核榜</h2>
-            <span class="col-badge">投票推荐</span>
+            <span class="badge-liquid badge-primary">学生热推</span>
           </div>
-          <span class="col-hint">投票选出你想在校园听到的旋律</span>
+          <span class="col-hint">票选课间校园之声</span>
         </div>
         <div id="pendingList" class="cards-list">
-          <p style="text-align:center;color:var(--ink-4);padding:30px 0;">加载中...</p>
+          <p style="text-align:center;color:var(--ink-4);padding:40px 0;">正在装载榜单…</p>
         </div>
       </section>
 
-      <section id="approvedCol" class="col glass-panel">
+      <section id="approvedCol" class="glass-panel col-panel">
         <div class="col-header">
           <div class="col-title-group">
             <h2 class="col-title">正式榜</h2>
-            <span class="col-badge col-badge-success">审核通过</span>
+            <span class="badge-liquid badge-success">审核通过</span>
           </div>
-          <span class="col-hint">播音员精选排期曲目库</span>
+          <span class="col-hint">广播站排期曲目库</span>
         </div>
         <div id="approvedList" class="cards-list">
-          <p style="text-align:center;color:var(--ink-4);padding:30px 0;">加载中...</p>
+          <p style="text-align:center;color:var(--ink-4);padding:40px 0;">正在装载榜单…</p>
         </div>
       </section>
     </main>
 
-    <footer class="app-footer glass-panel glass-subtle">
-      <img src="/assets/radio-logo.png" alt="盐中之声" class="footer-logo">
-      <p class="footer-copy">江苏省盐城中学 · 盐中之声广播站</p>
+    <footer class="glass-panel glass-subtle" style="padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;">
+      <img src="/assets/radio-logo.png" alt="盐中之声" style="width:48px;height:48px;opacity:0.8;">
+      <p style="font-size:13px;color:var(--ink-3);font-weight:600;">江苏省盐城中学 · 盐中之声广播站</p>
       <div id="disclaimerBox"></div>
     </footer>
   </div>
@@ -113,7 +127,7 @@
         <span id="beianGonganText">苏公网安备32090302000745号</span>
       </a>
     </div>
-    <div id="siteVersion" class="site-version">版本 2.0.0 · Liquid Glass Edition</div>
+    <div id="siteVersion" class="site-version">版本 2.0.0 · Ultra Liquid Edition</div>
   </div>
 </div>
 

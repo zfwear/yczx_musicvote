@@ -8,19 +8,20 @@
 <link rel="stylesheet" href="assets/css/vote.css">
 </head>
 <body>
-<!-- 流体环境光斑 -->
+<!-- 全景流体光斑 -->
 <div class="liquid-mesh-layer" aria-hidden="true">
   <div class="liquid-orb liquid-orb-1"></div>
   <div class="liquid-orb liquid-orb-2"></div>
   <div class="liquid-orb liquid-orb-3"></div>
+  <div class="liquid-orb liquid-orb-4"></div>
 </div>
 
 <div class="layout-container">
-  <div class="glass-panel vote-card box">
+  <div class="glass-panel vote-card vote-container">
     <div class="vote-header">
       <div class="vote-icon-bubble">✨</div>
       <h2>音乐投稿</h2>
-      <p class="sub">每人每周只能投稿一首，请慎重挑选你最喜爱的曲目</p>
+      <p class="sub">每人每周可投稿一首推荐曲目，请慎重挑选你最喜爱的旋律</p>
     </div>
 
     <!-- 暂停接收投稿时的提示条 -->
@@ -30,8 +31,8 @@
       <div class="form-group">
         <label class="field-label" for="title">歌名或歌手（实时联动搜索）</label>
         <div class="input-action-group">
-          <input id="title" class="input-liquid" placeholder="输入歌名或歌手，回车快速搜索…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();searchSongs();}">
-          <button class="btn-liquid btn-secondary btn-search" onclick="searchSongs()">🔍 搜索</button>
+          <input id="title" class="input-liquid" placeholder="输入歌名或关键词，回车搜索…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();searchSongs();}">
+          <button class="btn-liquid btn-secondary btn-sm" onclick="searchSongs()">🔍 搜索</button>
         </div>
       </div>
 
@@ -40,7 +41,7 @@
 
       <div class="form-group">
         <label class="field-label" for="artist">歌手（由所选曲目自动填入）</label>
-        <input id="artist" class="input-liquid" placeholder="从搜索结果中点击「选这首」，歌手会自动填入" readonly>
+        <input id="artist" class="input-liquid" placeholder="从搜索结果中点击「选这首」自动填入" readonly>
       </div>
 
       <input id="trackId" type="hidden" value="">
@@ -62,18 +63,18 @@
       </div>
 
       <div class="vote-actions-primary">
-        <button id="submitVoteBtn" class="btn-liquid btn-primary btn-submit-vote" onclick="vote()" disabled aria-disabled="true" title="正在确认身份，请稍候">提交点歌</button>
-        <button class="btn-liquid btn-secondary btn-audition" onclick="auditionInput()">▶ 先试听一下</button>
+        <button id="submitVoteBtn" class="btn-liquid btn-primary" onclick="vote()" disabled aria-disabled="true" title="正在核验身份，请稍候">提交投稿</button>
+        <button class="btn-liquid btn-secondary" onclick="auditionInput()">▶ 试听音源</button>
       </div>
 
       <p id="msg" class="vote-msg"></p>
 
       <!-- 试听面板挂载区 -->
-      <div id="auditionBox" class="audition-box-wrap"></div>
+      <div id="auditionBox" class="audition-box-wrap" style="display:none;"></div>
 
       <div class="vote-actions-nav">
-        <button class="btn-liquid btn-secondary back" onclick="location.href='/'">返回主页</button>
-        <button class="btn-liquid btn-secondary back" onclick="logoutUser()">退出登录</button>
+        <button class="btn-liquid btn-secondary btn-sm" onclick="location.href='/'">返回主页</button>
+        <button class="btn-liquid btn-secondary btn-sm" onclick="logoutUser()">退出登录</button>
       </div>
     </div>
   </div>
@@ -88,7 +89,7 @@
         <span id="beianGonganText">苏公网安备32090302000745号</span>
       </a>
     </div>
-    <div id="siteVersion" class="site-version">版本 2.0.0 · Liquid Glass Edition</div>
+    <div id="siteVersion" class="site-version">版本 2.0.0 · Ultra Liquid Edition</div>
   </div>
 </div>
 

@@ -449,12 +449,7 @@ function fadeRemoveCard(songId){
   const el = document.getElementById('song-card-' + safeInt(songId));
   if(!el) return;
 
-  el.style.transition = 'opacity .22s ease, transform .22s ease';
-  el.style.opacity = '0';
-  el.style.transform = 'translateY(-6px)';
-  setTimeout(() => {
-    el.remove();
-    // 全删空之后给个占位提示，免得留下一片空白
+  const onEmptyCheck = () => {
     const box = document.getElementById('listBox');
     if(box && !box.querySelector('.card')){
       const p = document.createElement('p');
@@ -462,6 +457,19 @@ function fadeRemoveCard(songId){
       p.textContent = '这里已经空了';
       box.appendChild(p);
     }
+  };
+
+  if(window.LiquidMotion && typeof window.LiquidMotion.collapseRemove === 'function'){
+    window.LiquidMotion.collapseRemove(el, onEmptyCheck);
+    return;
+  }
+
+  el.style.transition = 'opacity .22s ease, transform .22s ease';
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(-6px)';
+  setTimeout(() => {
+    el.remove();
+    onEmptyCheck();
   }, 240);
 }
 
