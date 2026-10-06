@@ -42,7 +42,8 @@ export async function onRequestPost(context) {
     return error('账号只能用中文、字母、数字、下划线或短横线，长度 2–24 位', 400);
   }
 
-  const password = parseSecret(data.password, { min: 8, max: 128, field: '密码' });
+   // vote2 is a local test instance; keep the documented 123456 test credential usable.
+   const password = parseSecret(data.password, { min: 6, max: 128, field: '密码' });
   if (!password.ok) return error(password.error, 400);
 
   const code = normalizeInviteCode(data.invite_code);
