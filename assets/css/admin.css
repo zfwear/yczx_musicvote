@@ -12,12 +12,26 @@
   gap: 24px;
 }
 
+@media (max-width: 600px) {
+  .admin-login-card { margin: 3vh auto 0; padding: 30px 18px; }
+  .admin-top-bar { padding: 16px; }
+  .admin-brand { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .admin-brand h2 { font-size: 17px; }
+  .admin-top-bar .header-actions { width: 100%; }
+  .admin-top-bar .header-actions .btn-liquid { flex: 1; }
+  .admin-content-panel { min-height: 420px; padding: 16px 12px; }
+  .admin-card-actions .btn-liquid { flex: 1 1 120px; min-height: 42px; }
+}
+
 .admin-login-card {
   width: 100%;
   max-width: 420px;
   margin: 12vh auto;
   padding: 44px 36px;
   text-align: center;
+}
+@media (max-width: 600px) {
+  .admin-login-card { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
 }
 
 .admin-login-header {
@@ -30,6 +44,8 @@
   gap: 18px;
   text-align: left;
 }
+.admin-login-form .form-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.admin-login-form .input-liquid { width: 100%; min-width: 0; }
 
 /* 控制台顶栏 */
 .admin-top-bar {

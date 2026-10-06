@@ -529,6 +529,20 @@ button[aria-disabled="true"],
   text-transform: uppercase;
 }
 
+/* Shared Aurora Glass page primitives. Keep dynamic business markup flexible. */
+.form-group { min-width: 0; }
+.input-action-group { min-width: 0; }
+.input-action-group > input { min-width: 0; }
+.glass-panel, .layout-container, .app-container, .schedule-container, .admin-layout { min-width: 0; }
+button, a, input, select, textarea { max-width: 100%; }
+
+@media (max-width: 640px) {
+  .layout-container { padding: 14px 12px 32px; }
+  .beian-footer { margin-top: 32px; padding: 18px 4px; font-size: 11px; overflow-wrap: anywhere; }
+  .beian-links { gap: 8px; }
+  .site-version { font-size: 10px; }
+}
+
 .hidden { display: none !important; }
 
 /* Aurora Glass 02: shared visual language for the duplicated experience. */

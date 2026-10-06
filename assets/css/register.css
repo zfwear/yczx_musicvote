@@ -1,2 +1,10 @@
 /* 引入通用 schedule 样式 */
 @import url('/assets/css/schedule.css');
+
+.register-container { margin: 5vh auto 0; }
+.register-form .form-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.register-form .input-liquid { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .register-card { padding: 28px 18px; }
+  .register-container { margin-top: 2vh; }
+}

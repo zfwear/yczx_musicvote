@@ -137,12 +137,18 @@
 }
 
 @media (max-width: 600px) {
+  .vote-container { margin: 2vh auto 0; }
   .vote-card {
-    padding: 28px 20px;
+    padding: 28px 18px;
+    border-radius: 22px;
   }
 
   .vote-actions-primary {
     flex-direction: column;
     gap: 10px;
   }
+  .input-action-group { flex-direction: column; }
+  .input-action-group .btn-liquid { width: 100%; min-height: 44px; }
+  .vote-actions-nav { gap: 8px; flex-wrap: wrap; }
+  .vote-actions-nav .btn-liquid { flex: 1 1 140px; min-height: 42px; }
 }

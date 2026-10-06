@@ -66,11 +66,19 @@
     });
   }
 
+  function initPageReveal() {
+    if (hasReducedMotion || typeof window.gsap === 'undefined') return;
+    const targets = document.querySelectorAll('.glass-panel, .hero-strip, .schedule-grid > *, .admin-card');
+    if (targets.length) window.gsap.fromTo(targets, { opacity: 0, y: 14 }, {
+      opacity: 1, y: 0, duration: .55, stagger: .055, ease: 'power3.out', clearProps: 'transform'
+    });
+  }
+
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initAmbientOrbs);
+      document.addEventListener('DOMContentLoaded', () => { initAmbientOrbs(); initPageReveal(); });
     } else {
-      initAmbientOrbs();
+      initAmbientOrbs(); initPageReveal();
     }
   }
 

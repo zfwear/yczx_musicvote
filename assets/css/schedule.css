@@ -39,6 +39,17 @@
   gap: 12px;
 }
 
+/* schedule-2.js emits these compact cards directly into scheduleBox. */
+.schedule-grid .card { min-width: 0; padding: 22px; border: 1px solid var(--glass-border); border-radius: var(--r-lg); background: rgba(14,31,49,.62); box-shadow: var(--glass-shadow); }
+.schedule-grid .card h3 { color: var(--ink); font-size: 16px; line-height: 1.5; }
+.schedule-grid .tag, .schedule-grid .range { display: inline-flex; margin-left: 8px; padding: 3px 9px; border-radius: 99px; background: var(--liquid-primary-soft); color: var(--liquid-primary); font-size: 11px; }
+.schedule-grid .range { float: right; color: var(--ink-3); background: var(--glass-surface-subtle); font-weight: 500; }
+.schedule-grid .period { margin-top: 20px; padding: 8px 10px; border-left: 2px solid var(--liquid-primary); color: var(--ink-2); font-size: 12px; font-weight: 700; }
+.schedule-grid .slot { display: grid; grid-template-columns: 24px minmax(0,1fr); gap: 8px; padding: 11px 4px; border-bottom: 1px solid var(--glass-border-subtle); color: var(--ink); font-size: 13px; }
+.schedule-grid .slot .idx { color: var(--liquid-primary); font-variant-numeric: tabular-nums; }
+.schedule-grid .slot .meta { grid-column: 2; color: var(--ink-3); font-size: 11px; overflow-wrap: anywhere; }
+.schedule-grid .empty { color: var(--ink-4); }
+
 /* 注册页卡片 */
 .register-container {
   width: 100%;
@@ -82,6 +93,15 @@
   font-size: 13px;
   color: var(--ink-3);
   margin-top: 6px;
+}
+
+@media (max-width: 600px) {
+  .schedule-header { padding: 16px; align-items: flex-start; gap: 12px; }
+  .schedule-header h1 { font-size: 18px !important; }
+  .schedule-intro { padding: 14px 16px; }
+  .schedule-grid { grid-template-columns: 1fr; gap: 14px; }
+  .schedule-grid .card { padding: 16px; }
+  .schedule-grid .range { float: none; display: block; width: fit-content; margin: 8px 0 0; }
 }
 
 .sub-footer a {
