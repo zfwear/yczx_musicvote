@@ -27,6 +27,19 @@ export function isSeedAdminPassword(plain) {
   return String(plain == null ? '' : plain) === SEED_ADMIN_PASSWORD;
 }
 
+/**
+ * 输入的明文是不是"公开仓库里的示例**班级**口令"。
+ *
+ * 2026-10-08 补：这条防线原先**只有管理员侧有**。
+ * `SEED_CLASS_PASSWORD` 一直导出了却**全仓库没有任何地方使用它** ——
+ * 也就是跑完迁移之后，任何知道这个公开仓库的人都能用 `yczx2026` 登录学生端：
+ * 读榜单、投票、举报、提建议、点歌。管理员进不去、学生端却门户大开，
+ * 这个**不对称**比"两个都开着"更糟 —— 因为没人会意识到还要改它。
+ */
+export function isSeedClassPassword(plain) {
+  return String(plain == null ? '' : plain) === SEED_CLASS_PASSWORD;
+}
+
 /** 是否显式允许使用示例口令（本地测试 / 演练用，生产不要开）。 */
 export function allowSeedCredentials(env) {
   const raw = env && env.ALLOW_DEFAULT_ADMIN_PASSWORD;

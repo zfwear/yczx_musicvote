@@ -1,4 +1,6 @@
 import { error } from '../_lib/http.js';
+import { hmacHex } from '../_lib/crypto.js';
+import { DEFAULT_PEPPER } from '../_lib/auth.js';
 
 /**
  * 只允许通过**指定域名**访问（用户要求：其他途径断掉）。
@@ -41,64 +43,94 @@ const DEFAULT_ALLOWED = ['vote.yzstu.top'];
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 /**
- * "我已经为这个请求跳过一次了"的标记（2026-10-08 加的，用于**彻底杜绝重定向死循环**）。
+ * 防重定向死循环的 URL 标记 + "来过正确域名"的 Cookie。
  *
- * 为什么必须有它：实测发生过 `ERR_TOO_MANY_REDIRECTS`，站点**整个打不开**。
- * 链路是：浏览器 → `vote.yzstu.top` → **阿里云 ESA**（站点前面确实有一层，
- * 响应头里的 `server: ESA` / `eagleid` / `via: ens-cache…` 是它的标志）
- * → 回源到 Cloudflare Pages 时**把 Host 改成了源站主机名** → 中间件看到的主机
- * 既不是 `vote.yzstu.top` 也不在白名单里 → 302 跳到 `vote.yzstu.top`
- * → 又回到 ESA → 又看到源站主机名 → **永远跳不完**。
+ * ## 为什么需要它们（2026-10-08 线上事故）
+ * 实测发生过 `ERR_TOO_MANY_REDIRECTS`，站点**整个打不开**。链路是：
+ * 浏览器 → `vote.yzstu.top` → **阿里云 ESA**（`server: ESA` / `eagleid` /
+ * `via: ens-cache…` 是它的标志）→ 回源 Cloudflare Pages 时**把 Host 改写成
+ * 源站主机名** → 中间件看到的主机既不是 `vote.yzstu.top` 也不在白名单里
+ * → 302 跳到 `vote.yzstu.top` → 又回 ESA → 又被改写 → **永远跳不完**。
  *
- * 关键在于：**源站无法分辨"经 ESA 来的正常用户"和"直接访问源站的人"**，
- * 所以只要跳转目标本身也可能被改写，任何基于"看到的主机名"的判断都可能成环。
- * 标记则不受影响 —— 它跟着**跳转目标 URL** 走，不依赖源站看到什么。
+ * 关键：**源站分不清"经网关来的正常用户"和"直接访问源站的人"**，
+ * 所以任何只看"看到的主机名"的逻辑都可能成环。标记跟着**跳转目标 URL** 走，
+ * 不受源站看到什么影响，所以能一跳终止。
+ * Cookie 则是给页面里后续的 `fetch` 用的（标记只在页面 URL 上，
+ * `/api/*` 不带它 —— 这就是"页面能开、接口全 403、页面上多一行红字"的原因）。
  *
- * 作用范围刻意收窄：只在"看到的主机名看着像源站主机（*.pages.dev）"时才加标记，
- * 因为那才是**无法分辨**的情况。正常配置下（ESA 回源 Host 正确）根本不会跳转，
- * 地址栏里也就不会出现这个参数。
+ * ## ⚠️ 必须签名，而且必须说清它**不是**安全边界
+ * 第一版把标记写成固定字符串 `?__dsh_host=ok`、Cookie 写成 `=1`，
+ * 结果是**任何人手打这四个字符就能整条绕过白名单**，并在源站域名上留住
+ * 一个 7 天的 Cookie。审计当场指出：注释里"直接访问源站域名永远不会挂到
+ * 这个 Cookie"这句话是**假的**（测试恰好没带标记参数，所以还是绿的）。
+ * 现在两者都是 **HMAC 签名值**，凭空构造不出来。
+ *
+ * 但仍要如实说明它的**残留弱点**（不要把它当安全边界用）：
+ *   签名值是**会发出去的** —— 任何未登录的人请求一次非白名单域名，
+ *   都会从 302 的 `Location` 里拿到一个合法签名，然后可以在该域名上重放。
+ *   这是"既要能跳转、又要在被改写 Host 的网关后面活下来"的固有代价。
+ *   真的要挡住 `*.pages.dev` 这条路，**必须在网关/边缘那一层按真实 Host 拦**
+ *   （ESA 看得见真实 Host；或者干脆不把源站域名暴露出去）。
  */
 const LOOP_MARKER = '__dsh_host';
-const LOOP_MARKER_VALUE = 'ok';
-
-/**
- * "这台浏览器已经通过正确域名进来过"的 Cookie。
- *
- * 为什么光有 URL 标记还不够（2026-10-08 实测踩到）：标记只跟着**页面导航**走。
- * 页面打开之后前端会去请求 `/api/config`、`/api/me` —— 那些是 fetch，
- * **不带页面 URL 上的参数**，于是又被判成"域名不认识"，拿到 403。
- * 实测现象就是：页面正常显示、但页面上多出一行红字
- * 「本站只允许通过 vote.yzstu.top 访问（本次请求看到的域名：yczx-musicvote.pages.dev）」。
- *
- * 所以标记放行时要**顺手把状态记在浏览器上**，让后续的 /api/* 也能过。
- *
- * 为什么用 Cookie 而不是别的：
- *   · Cookie 的作用域是**浏览器视角的域名**。跳转目标是 `vote.yzstu.top`，
- *     所以这个 Cookie 属于 `vote.yzstu.top`，**不会发给 `*.pages.dev`** ——
- *     "直接访问源站域名"依然被挡住，需求没有被削弱。
- *   · 不用 Referer：我们自己发的 `_headers` 里有 `Referrer-Policy: no-referrer`，
- *     浏览器根本不会带 Referer，这条路走不通。
- */
 const HOST_OK_COOKIE = 'dsh_host_ok';
 
-/** 浏览器是否已经带着"来过正确域名"的 Cookie。 */
-function hasHostOkCookie(request) {
+/** 签名用的密钥：优先 AUTH_PEPPER，没配就用公开占位值。 */
+function markerPepper(env) {
+  const configured = env && typeof env.AUTH_PEPPER === 'string' ? env.AUTH_PEPPER.trim() : '';
+  return configured || DEFAULT_PEPPER;
+}
+
+/** 与 canonical host 绑定的签名值（截断到 16 字符就够防手打）。 */
+async function hostMarkerFor(env, target) {
+  return (await hmacHex(markerPepper(env), `dsh-host-ok:${target}`)).slice(0, 16);
+}
+
+/** 常量时间比较两份十六进制签名（避免用 `===` 泄露前缀匹配长度）。 */
+function sameSignature(a, b) {
+  const x = String(a == null ? '' : a);
+  const y = String(b == null ? '' : b);
+  if (x.length !== y.length || x.length === 0) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+
+/** 请求 URL 上是不是带着**本服务器签发的**标记。 */
+async function hasValidMarker(request, env, target) {
+  let value;
+  try {
+    value = new URL(request.url).searchParams.get(LOOP_MARKER);
+  } catch {
+    return false;
+  }
+  if (!value) return false;
+  return sameSignature(value, await hostMarkerFor(env, target));
+}
+
+/** 浏览器是不是带着**本服务器签发的**"来过正确域名"Cookie。 */
+async function hasHostOkCookie(request, env, target) {
   const raw = request.headers.get('cookie') || '';
-  return String(raw).split(';').some((p) => p.trim() === `${HOST_OK_COOKIE}=1`);
+  const want = await hostMarkerFor(env, target);
+  return String(raw).split(';').some((p) => {
+    const t = p.trim();
+    if (!t.startsWith(`${HOST_OK_COOKIE}=`)) return false;
+    return sameSignature(t.slice(HOST_OK_COOKIE.length + 1), want);
+  });
 }
 
 /**
- * 放行的同时，往响应上挂一个"来过正确域名"的 Cookie。
+ * 放行的同时，往响应上挂一个签名过的"来过正确域名" Cookie。
  *
- * 只在**标记放行**这一条路上挂：那一刻浏览器请求的域名（也就是 Cookie 的作用域）
- * 正是我们的跳转目标 `vote.yzstu.top`。而"直接访问源站域名"那条路只会 302，
- * 永远不会在源站域名上挂到这个 Cookie —— 所以那条路依旧被挡。
+ * 只在**标记校验通过**这条路上挂：那一刻浏览器请求的域名（也就是 Cookie 的作用域）
+ * 正是我们的跳转目标。而"直接访问源站域名"那条路只会拿到 302，
+ * 不会在源站域名上留下这个 Cookie。
  */
-function withHostOkCookie(response, request) {
-  if (hasHostOkCookie(request)) return response;   // 已经有了，不用重复挂
+async function withHostOkCookie(response, request, env, target) {
+  if (await hasHostOkCookie(request, env, target)) return response;   // 已经有了
   const out = new Response(response.body, response);
   out.headers.append('Set-Cookie',
-    `${HOST_OK_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`);
+    `${HOST_OK_COOKIE}=${await hostMarkerFor(env, target)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`);
   return out;
 }
 
@@ -107,11 +139,19 @@ function withHostOkCookie(response, request) {
 function normalizeHost(raw) {
   let host = String(raw == null ? '' : raw).trim().toLowerCase();
   if (!host) return '';
+  // 尾点：`vote.yzstu.top.` 是合法的 FQDN 写法，与不带点是同一个主机。
+  // 不剥掉的话白名单匹配会失败 —— 白多一跳 302；而 `xxx.pages.dev.` 更糟：
+  // `isPreviewHost` 认不出来，历史上那正是重定向死循环的入口之一。
+  if (host.endsWith('.') && !host.endsWith(']')) host = host.slice(0, -1);
   // IPv6 形如 [::1]:8788
   if (host.startsWith('[')) {
     const end = host.indexOf(']');
     return end > 0 ? host.slice(0, end + 1) : host;
   }
+  // 不带方括号的 IPv6（`::1`、`2001:db8::1`）：冒号不止一个，**不能**按"端口"截断。
+  // 原来一律走 lastIndexOf(':')，于是 `::1` 被切成 `:` ——
+  // `LOCAL_HOSTS` 里的 `'::1'` 永远匹配不上，本机调试会被莫名 302 走。
+  if ((host.match(/:/g) || []).length > 1) return host;
   const colon = host.lastIndexOf(':');
   return colon > 0 ? host.slice(0, colon) : host;
 }
@@ -130,11 +170,20 @@ function allowedHosts(env) {
   return list.length ? list : DEFAULT_ALLOWED.slice();
 }
 
-/** 重定向目标：CANONICAL_HOST 优先，否则白名单第一个。 */
+/**
+ * 重定向目标：CANONICAL_HOST 优先，否则白名单第一个。
+ *
+ * ⚠️ 配置的 CANONICAL_HOST **必须自己也在白名单里**才采用（2026-10-08 修）。
+ * 原来无条件采用它，于是 `CANONICAL_HOST=https://vote.yzstu.top` 这种
+ * 很自然的写法会被 normalizeHost 截成 `https` —— 目标成了 `https`，
+ * 而它不在白名单里，下一段的降级逻辑就把**整道闸关掉了**（一个都不拦）。
+ * 现在配错就退回白名单第一个，降级逻辑只作为最后一道兜底。
+ */
 function canonicalHost(env, allowed) {
   const raw = normalizeHost((env && env.CANONICAL_HOST) || '');
-  if (raw) return raw;
-  return allowed && allowed.length ? allowed[0] : DEFAULT_ALLOWED[0];
+  const list = allowed && allowed.length ? allowed : DEFAULT_ALLOWED;
+  if (raw && list.includes(raw)) return raw;
+  return list[0];
 }
 
 /** 预览域名（`*.pages.dev`，含 `<hash>.<project>.pages.dev`）。 */
@@ -154,6 +203,25 @@ function isNavigation(request) {
 
 export async function onRequest(context) {
   const { request, env, next } = context;
+
+  /**
+   * `/api/health` 例外：**从任何域名都必须能访问**。
+   *
+   * 为什么单开这个口子（2026-10-08 的教训，不是随手加的）：
+   *   那天站点报 HTTP 525 —— **ESA 回源到 Cloudflare 的 TLS 握手失败**。
+   *   而"源站到底还活着吗"这件事当时**没法直接问**：
+   *   直接访问源站域名 `yczx-musicvote.pages.dev/api/health` 被这道闸挡成 403，
+   *   只能从 403 的正文里反推"源站是活的"。绕了一圈。
+   *
+   *   健康检查的内容只有版本号、时间、以及"源站看到的主机名"——
+   *   **不含任何数据、任何密钥**。放开它不会泄露什么，
+   *   却能让"源站活着吗 / 卡在哪一层"变成**一条 curl 就能回答**的问题。
+   *
+   * 注意：只放开**这一个路径**。页面与其它接口仍然按白名单挡。
+   */
+  let earlyPath = '';
+  try { earlyPath = new URL(request.url).pathname; } catch { /* 拿不到就算了 */ }
+  if (earlyPath === '/api/health' || earlyPath === '/api/health/') return next();
 
   /**
    * 这个请求"可能是哪个域名"。**会把所有线索都收集起来**，而不是只信一个。
@@ -194,9 +262,13 @@ export async function onRequest(context) {
   if (!candidates.length && !forwarded.length) return next();
 
   const all = [...candidates, ...forwarded];
-  if (all.some((h) => LOCAL_HOSTS.has(h))) return next();
+  // ⚠️ "本机 / 预览域名"这两条**只按 candidates 判**（2026-10-08 修）。
+  //    原来判的是 `all`（合并了转发头），于是
+  //    `curl -H 'X-Forwarded-Host: localhost'` 就能免掉整道白名单 ——
+  //    连白名单是什么都不用知道。转发头是请求方可控的，不能拿来授予"本机特权"。
+  if (candidates.some((h) => LOCAL_HOSTS.has(h))) return next();
   if (String((env && env.ALLOW_PREVIEWS) || '').trim() === '1'
-      && all.some((h) => isPreviewHost(h))) return next();
+      && candidates.some((h) => isPreviewHost(h))) return next();
 
   const allowed = allowedHosts(env);
   if (allowed === null) return next();                        // ALLOWED_HOSTS=*：应急开关
@@ -206,20 +278,28 @@ export async function onRequest(context) {
   const target = canonicalHost(env, allowed);
 
   // 目标域名自己都不在白名单里：跳过去只会被再跳一次 → **必然死循环**。
-  // 这种情况下宁可放行 —— 把整站跳死比"少拦一个域名"严重得多。
-  if (!allowed.includes(target)) return next();
+  //
+  // 2026-10-08 修：这里原来对**所有**请求 `return next()`（整道闸静默关闭，
+  // 连 API 的 403 都没了）。审计指出：`CANONICAL_HOST` 写成
+  // `https://vote.yzstu.top` 这种很自然的写法就会被 normalizeHost 截成 `https`，
+  // 于是"一个都不拦"。现在降级**只对页面导航**生效 ——
+  // 宁可让人看到页面（不至于对着错误页发呆），但接口仍然照拦。
+  if (!allowed.includes(target)) {
+    if (isNavigation(request)) return next();
+    const seenBad = all.length ? all.join(' / ') : '(空)';
+    return error(`本站只允许通过 ${allowed.join(' / ')} 访问（本次请求看到的域名：${seenBad}）`, 403);
+  }
 
-  // 这次请求是不是"被我们自己跳过一次了"。
-  // 是的话**必须放行**，否则就是那个把整站跳死的循环（见 LOOP_MARKER 的说明）。
-  let marked = false;
-  try { marked = new URL(request.url).searchParams.get(LOOP_MARKER) === LOOP_MARKER_VALUE; }
-  catch { /* 拿不到 URL 就当没标记 */ }
-  if (marked) return withHostOkCookie(await next(), request);
+  // 这次请求是不是"被我们自己跳过一次了"（签名校验，见 LOOP_MARKER 的说明）。
+  // 是的话**必须放行**，否则就是那个把整站跳死的循环。
+  if (await hasValidMarker(request, env, target)) {
+    return withHostOkCookie(await next(), request, env, target);
+  }
 
   // 已经带着"来过正确域名"的 Cookie：放行。
   // 这条是为**页面里后续发出的 fetch**准备的 —— 标记只挂在页面 URL 上，
-  // /api/* 请求不带它，只能靠 Cookie 认出来。
-  if (hasHostOkCookie(request)) return next();
+  // `/api/*` 请求不带它，只能靠 Cookie 认出来。
+  if (await hasHostOkCookie(request, env, target)) return next();
 
   if (!isNavigation(request)) {
     // 诊断信息：把**看到的主机名**写进错误里。这个功能第一次上线就让整站打不开，
@@ -229,14 +309,17 @@ export async function onRequest(context) {
     return error(`本站只允许通过 ${target} 访问（本次请求看到的域名：${seen}）`, 403);
   }
 
-  // 保留路径与查询串，跳到正确域名。
-  // **只有"看到的主机名像源站主机（*.pages.dev）"时才带标记** ——
-  // 那正是源站无法分辨、可能成环的情况。正常配置下不会走到这里，
-  // 地址栏里也就不会多出任何参数。
+  // 保留路径与查询串，跳到正确域名，**并且一定带上签名标记**。
+  //
+  // 2026-10-08 修：原来只在"看到的主机名像 `*.pages.dev`"时才带标记。
+  // 审计指出那是个隐患：只要网关改写成**别的**名字（自有 VPS 上
+  // `proxy_set_header Host <内网名>`、CDN 回源 Host 配错），
+  // "302 不带标记 → 又被改写 → 再 302"就会永远循环 —— 与线上事故一模一样。
+  // 现在无条件带标记：任何被改写 Host 的部署都能一跳终止。
   let url;
   try {
     const src = new URL(request.url);
-    if (candidates.some(isPreviewHost)) src.searchParams.set(LOOP_MARKER, LOOP_MARKER_VALUE);
+    src.searchParams.set(LOOP_MARKER, await hostMarkerFor(env, target));
     url = `https://${target}${src.pathname}${src.search}`;
   } catch {
     url = `https://${target}/`;

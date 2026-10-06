@@ -103,8 +103,18 @@ export async function onRequestGet(context) {
       grade: row.grade || '',
       member_count: Number.isFinite(count) ? count : null,
     };
-    // 口令明文只回给高级管理员；普通管理员拿不到。
-    if (isSuper) {
+    // 口令明文只回给高级管理员，**并且**必须真的允许查看口令。
+    //
+    // 2026-10-08 修：原来这里只判 `isSuper`，没判 `canViewPasswords` ——
+    // 于是"没配私有 AUTH_PEPPER 就整个禁用查看口令"这句话**只在界面上生效**
+    // （前端 admin-2.js 用它决定显不显示），服务端照样把用**公开占位密钥**
+    // 加的密文解开、把明文班级口令下发出去。`canViewPasswords:false`
+    // 于是成了假信号：脚本化的管理员会话、或者打穿管理员页面的 XSS，
+    // 都能直读到全部班级的明文口令。
+    //
+    // 注意：不允许时**整个字段都不出现**（而不是给个 `null`）——
+    // 这是原有的对外形状，前端与测试都依赖它。
+    if (isSuper && canViewPasswords) {
       item.password = row.password_encrypted
         ? await decryptSecret(pepper, row.password_encrypted)
         : null;

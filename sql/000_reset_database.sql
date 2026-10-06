@@ -24,6 +24,13 @@
 -- ============================================================
 
 -- ---------- 1. 删掉全部表 ----------
+--
+-- ⚠️ 这份清单必须覆盖**项目里全部 15 张表**。2026-10-08 补上了漏掉的
+--    `weekly_playlist` —— 漏掉它的后果不是"少清一张表"那么简单：
+--    `songs` 被 DROP 重建后自增 id 从 1 重排，而残留的排期行里
+--    `song_id` 指向的是**已经被删掉的旧歌**，于是那些 id **正好复用**到新歌身上，
+--    rank.js 会把刚提交的新歌误判成"上周已播"、从正式榜踢出去。
+--    （以后新增表时，记得同步这里。）
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS rate_limits;
 DROP TABLE IF EXISTS upvote_logs;
@@ -32,6 +39,7 @@ DROP TABLE IF EXISTS admin_invites;
 DROP TABLE IF EXISTS announcements;
 DROP TABLE IF EXISTS system_settings;
 DROP TABLE IF EXISTS song_suggestions;
+DROP TABLE IF EXISTS weekly_playlist;
 DROP TABLE IF EXISTS songs;
 DROP TABLE IF EXISTS classes;
 DROP TABLE IF EXISTS admins;

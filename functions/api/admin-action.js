@@ -65,9 +65,23 @@ export async function onRequestPost(context) {
   }
 
   if (action.value === 'delete') {
-    const song = await env.DB.prepare('SELECT id, title FROM songs WHERE id = ?')
+    const song = await env.DB.prepare('SELECT id, title, status FROM songs WHERE id = ?')
       .bind(id.value).first();
     if (!song) return error('歌曲不存在', 404);
+
+    // ⚠️ 只能彻底删除**回收站里**的歌（2026-10-08 补上的断言）。
+    //
+    // 原来这里只查 `id, title`，**没有状态判断**；而上面的 `empty_recycle`
+    // 是带 `WHERE status = 'rejected'` 的。两者权限都只要 requireStaff（普通管理员），
+    // 于是普通管理员只要知道歌曲 id，就能**绕过"先移入回收站"这一步**，
+    // 永久删掉一首已通过审核、甚至正在本周歌单里的歌。
+    // 更隐蔽的连带损伤：`cleanSongReferences` 会把 `weekly_playlist.song_id`
+    // 置 NULL —— 本周歌单那个位置当场变成「待排」空位，广播站当天少放一首歌。
+    // 前端本来就只在 `status === 'rejected'` 的卡片上渲染「彻底删除」按钮，
+    // 所以这条只是把界面上的约定补到服务端，不改变正常用法。
+    if (song.status !== 'rejected') {
+      return error('只能彻底删除回收站里的歌。要下架已通过的歌，请先点「移入回收站」。', 400);
+    }
 
     await env.DB.prepare('DELETE FROM songs WHERE id = ?').bind(id.value).run();
     await cleanSongReferences(env, [id.value]);

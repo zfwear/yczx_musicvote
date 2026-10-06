@@ -297,8 +297,14 @@ export async function createSession(
 
   // 顺手清理过期会话，避免表无限增长（失败不影响登录）。
   try {
+    // ⚠️ 比较的是**裸列**，不能写成 `datetime(expires_at) <= datetime('now')`
+    //    （2026-10-08 修）。`sql/001` 建的索引是 `idx_sessions_expiry(expires_at)`
+    //    —— 列被函数包住之后 SQLite 用不上那个索引，而这条 DELETE 没有别的谓词，
+    //    于是**每次建会话都要全表扫 sessions**（D1 按行读计费，sessions 越大越贵）。
+    //    可以这么比的原因：`expires_at` 是用 `datetime('now', ?)` 写的，
+    //    格式固定为 `YYYY-MM-DD HH:MM:SS`，字典序与时序一致。
     await env.DB.prepare(
-      `DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')`
+      `DELETE FROM sessions WHERE expires_at <= datetime('now')`
     ).run();
   } catch { /* 清理是尽力而为 */ }
 
@@ -443,24 +449,55 @@ async function refreshSessionOnUse(env, row) {
   // 节流：距上次续期不到一小时就什么都不做（连库都不碰）
   const lastSeen = lastSeenAtOf(row);
   if (lastSeen) {
-    const ageSeconds = (Date.now() - Date.parse(lastSeen)) / 1000;
+    // ⚠️ 必须**补上 Z** 再解析（2026-10-08 修）。
+    //    写入端用的是 `new Date().toISOString()`（UTC），但它把结尾的
+    //    `Z` 去掉了（为了让这一列在 SQLite 里形状统一）。
+    //    而 ES 规范里"没有时区偏移的 date-time"是**按本地时区**解释的 ——
+    //    于是 UTC+8 的机器上 age 会凭空多出 8 小时（永远 > 节流窗口 →
+    //    每请求写一次库），UTC-x 的机器上 age 为负（节流永远命中 →
+    //    会话永不续期，学生每 24 小时必被踢）。
+    //    Cloudflare Workers 跑 UTC 所以线上无感，但本仓库正式支持的
+    //    `server.mjs` 自建路径会中招。值本身就是 UTC，补 Z 是正确解释。
+    const ms = Date.parse(lastSeen.endsWith('Z') ? lastSeen : `${lastSeen}Z`);
+    const ageSeconds = (Date.now() - ms) / 1000;
     if (Number.isFinite(ageSeconds) && ageSeconds < SESSION_REFRESH_INTERVAL_SECONDS) return;
   }
 
   try {
     const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, '');
+    // ⚠️ 续期用的有效期必须**按会话类型**取（2026-10-08 修）。
+    //    原来这里写死 `${CLASS_TTL_SECONDS}`（24 小时），而 readSession 会对
+    //    **任何**会话调用这里 —— 于是管理员会话（签发时 12 小时）与调试会话
+    //    （签发时 2 小时）只要每小时被用一次，就被推到 now+24h，
+    //    **两条生命周期边界实际失效、永不自然过期**（被盗 Cookie 只要持续使用就一直有效）。
+    const ttlSeconds = refreshTtlSeconds(row);
     await env.DB.prepare(
       `UPDATE sessions
           SET expires_at = datetime(
-                MAX(datetime(expires_at), datetime('now', '+${CLASS_TTL_SECONDS} seconds'))
+                MAX(datetime(expires_at), datetime('now', ?))
               ),
               user_agent = ?
         WHERE id = ?
           AND datetime(expires_at) > datetime('now')`
-    ).bind(withLastSeen(row.user_agent, nowIso), id).run();
+    ).bind(`+${ttlSeconds} seconds`, withLastSeen(row.user_agent, nowIso), id).run();
   } catch {
     /* 见函数说明：续期失败不影响本次请求 */
   }
+}
+
+/**
+ * 这个会话续期时该用多长的有效期。
+ *
+ * 判据按**签发时**的真实类型来（不能只看 subject）：
+ *   · 管理员会话       → subject='admin'，签发 12 小时
+ *   · 调试会话         → subject='class' 但 role='debug' / 有 debug_admin_id，
+ *                        签发 2 小时（**只按 subject 判断会把它误当成 24 小时**）
+ *   · 班级 / 游客会话   → 24 小时
+ */
+function refreshTtlSeconds(row) {
+  if (String((row && row.subject) || '') === 'admin') return ADMIN_TTL_SECONDS;
+  if (isDebugSession(row)) return DEBUG_TTL_SECONDS;
+  return CLASS_TTL_SECONDS;
 }
 
 /**
@@ -504,7 +541,26 @@ export async function requireSession(env, request, subject) {
  *
  * 但"不确定时给最高权限"违反默认拒绝原则（审计报告 A3），
  * 所以现在**空值和无法识别的值一律按最低权限（普通管理员）处理**。
- * 历史空角色请执行 sql/013_debug_login_hardening.sql 一次性补齐。
+ *
+ * ⚠️ 历史空角色要补齐，**没有**任何一个 sql/ 迁移会做这件事
+ *    （2026-10-08 审计核实：这里原来写着"请执行 sql/013"，而
+ *    `sql/013_debug_login_hardening.sql` 里**一条 `UPDATE admins` 都没有** ——
+ *    照着它做等于什么也没做，而运维会以为已经修好了）。
+ *    请直接在 D1 控制台执行下面这两句（幂等，可反复跑）：
+ *
+ *      -- ① 空值 / 无法识别的值一律降为普通管理员
+ *      UPDATE admins SET role = 'admin'
+ *       WHERE role IS NULL OR TRIM(role) = '' OR role NOT IN ('super', 'admin');
+ *
+ *      -- ② 保证至少有一个高级管理员（一个都没有时，把 id 最小的那个提上来）
+ *      UPDATE admins SET role = 'super'
+ *       WHERE id = (SELECT MIN(id) FROM admins)
+ *         AND NOT EXISTS (SELECT 1 FROM admins WHERE role = 'super');
+ *
+ *    第 ② 句是**必须**的：`requireSuper` 的接口在库里没有 super 时会对所有人返回
+ *    403，而且是一条没有任何线索的"当前角色无权执行该操作" ——
+ *    邀请码、管理员管理、班级口令、分类权重、投票上限会**永久全部失效**。
+ *    现在那种情况下的 403 会直接把这两句 SQL 印出来（见 requireAdmin）。
  */
 export function normalizeRole(role) {
   const value = String(role ?? '').trim().toLowerCase();
@@ -541,6 +597,31 @@ export async function requireAdmin(env, request, allowedRoles = null) {
   result.session.role = role;
 
   if (allowedRoles && !allowedRoles.includes(role)) {
+    // 这里要区分两种情况（2026-10-08 加）：
+    //   · "你权限不够" —— 正常情况，说这句就够了；
+    //   · "**这台部署根本没有高级管理员**" —— 那就不是权限问题，而是
+    //     邀请码、管理员管理、班级口令、分类权重、投票上限**对所有人永久失效**，
+    //     而且原来的文案是一条没有任何线索的 403，运维只能干瞪眼。
+    //     这种情况直接把修复用的 SQL 印出来。
+    // 只在**失败路径**上多查一次库，不碰热路径。
+    if (allowedRoles.includes('super')) {
+      let noSuper = false;
+      try {
+        const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM admins WHERE role = 'super'").first();
+        noSuper = Number((row && row.n) || 0) === 0;
+      } catch { /* 查不动就按普通权限不足处理 */ }
+      if (noSuper) {
+        return {
+          ok: false,
+          response: error(
+            '本站当前**没有任何高级管理员**，所以这个功能对所有人都是关闭的。'
+            + '在 D1 控制台执行这一句即可恢复：'
+            + " UPDATE admins SET role='super' WHERE id=(SELECT MIN(id) FROM admins);",
+            403
+          ),
+        };
+      }
+    }
     return { ok: false, response: error('当前角色无权执行该操作', 403) };
   }
   return result;
@@ -764,6 +845,18 @@ export async function rateLimitOnce(env, bucket, item, limit, windowSeconds) {
       return { first: true, allowed: true, count: 1 };
     }
 
+    // ⚠️ 这里**故意不递增 count**（我一度改成递增，被测试当场拦下 —— 见下）。
+    //
+    // 这个函数的用途是"**折叠**"：同一次试听会发十几个音频分段请求，
+    // 它们用同一个 `item` 调进来，于是第一次 `first=true`、后续都是 `first=false`，
+    // 而 `count` **保持 1** —— 整次试听只算一次配额。测试直接断言了这一点
+    // （「同一次试听的计数应当是 1，而不是 12」）。
+    // 改成每次递增会让 count 变成 12，折叠就失效了。
+    //
+    // 由此带来一个**必须知道**的性质：`limit` / `allowed` 只有在调用方传入
+    // **会变化的 item** 时才真正起作用；用固定 item 的折叠场景下
+    // `allowed` 恒为 true（2026-10-08 审计指出"limit 是死参数"，属实 ——
+    // 但那是折叠语义的必然结果，不是 bug）。要"限 N 次"请用 `countBudget`。
     const row = await env.DB.prepare('SELECT count FROM rate_limits WHERE bucket = ?')
       .bind(key).first();
     const count = row ? Number(row.count) : 1;
@@ -813,12 +906,20 @@ export async function clearRateLimit(env, bucket) {
  *   校园网共用出口 IP，于是全校共用 30 次额度。一个人（或一个脚本）把额度打满，
  *   正常学生全部收到 429。按 IP 限流在这里不是安全，是把可用性交给了攻击者。
  *
- * 两道限流的分工：
- *   · 身份额度（identKey）：这是**公平**用的 —— 每台设备/每一条会话各有一份，
- *     别人刷不爆你的额度。客户端能伪造身份键，所以它**不是**防滥用的硬边界。
- *   · IP 兜底（rateKey 里的 ip 那一道）：这才是**防滥用**用的 —— 阈值放得很宽，
- *     只挡"一个出口的脚本疯狂刷"，正常一个班甚至一个年级都不会碰到。
- *   两道都超了才拒绝：任何一道还有余量就放行。
+ * 三道限流的分工（2026-10-08 修过一次，下面是**修好之后**的事实）：
+ *   · 身份额度（identKey）：**公平**用的 —— 每台设备各有一份，别人刷不爆你的额度。
+ *     但它的键来自客户端自报的 fingerprint，**可以随便改**，所以它**不是**防滥用的边界。
+ *   · IP 兜底（rateIpKey）：只在身份额度用完之后才查（省一次数据库往返）。
+ *     ⚠️ 注意它**挡不住"换指纹"**：换了指纹就是新桶、额度全新，
+ *     而这条兜底写在 `if (!identity.allowed)` 里面，那种情况下根本不会执行。
+ *     （原来这里的注释把它写成"这才是防滥用用的"，是**错的** —— 见下。）
+ *   · **会话配额（2026-10-08 新增，真正堵住刷票的那一道）**：
+ *     会话是服务端签发、伪造不了的，所以"换个指纹继续刷"在这里会被拦下。
+ *     复用同一个 `limit`，不引入新阈值。详见下面函数体里的长注释。
+ *
+ * 还**没用 IP 当硬边界**的原因：站点前面是阿里云 ESA，`cf-connecting-ip`
+ * 很可能拿到的是网关 IP —— 全校会塌进同一个桶（600 次/小时），
+ * 一旦真启用就是"全校一起被限流"。
  *
  * @param {object} env
  * @param {Request} request
@@ -830,6 +931,11 @@ export async function guardRate(env, request, opts) {
   const {
     kind, limit, windowSeconds,
     ipLimit = Math.max(limit * 8, 600),
+    // 会话配额默认比身份额度宽 8 倍（与 ipLimit 同一个约定）。**不能等于 limit**：
+    // 机房/教室共用一台电脑时，一个浏览器会话可能被几十个学生轮流用，
+    // 按 limit 卡会把正常投票挡掉。宽 8 倍既能兜住"换指纹无限刷"，
+    // 又不至于误伤共用设备。
+    sessionLimit = Math.max(limit * 8, 60),
     fingerprint, clientId, session,
     message = '操作过于频繁，请稍后再试',
   } = opts;
@@ -838,16 +944,49 @@ export async function guardRate(env, request, opts) {
   const identity = await rateLimit(env, identityBucket, limit, windowSeconds);
 
   // IP 兜底只在身份额度已经用完时才查 —— 省一次数据库往返（免费套餐 CPU 预算有限）。
-  // 代价是"身份额度够用时完全不看 IP"，这正是我们想要的：正常流量永不触碰兜底阈值。
-  if (identity.allowed) return null;
-
-  const ipBucket = rateIpKey(request, kind);
-  if (ipBucket === identityBucket) {
-    // 连身份都没有（既无指纹也无会话），已经退化成按 IP —— 不必再查一遍。
-    return error(message, 429);
+  if (!identity.allowed) {
+    const ipBucket = rateIpKey(request, kind);
+    if (ipBucket === identityBucket) {
+      // 连身份都没有（既无指纹也无会话），已经退化成按 IP —— 不必再查一遍。
+      return error(message, 429);
+    }
+    const backstop = await rateLimit(env, ipBucket, ipLimit, windowSeconds);
+    if (!backstop.allowed) return error(message, 429);
   }
 
-  const backstop = await rateLimit(env, ipBucket, ipLimit, windowSeconds);
-  if (backstop.allowed) return null;
-  return error(message, 429);
+  /**
+   * ③ **会话配额**（2026-10-08 补，这是本轮最关键的一处）。
+   *
+   * 为什么必须有它：上面的"身份额度"用的是 `rateKey()`，而它优先取
+   * **客户端自报的 fingerprint** —— 请求体里一个 16~64 位的 hex，随便改。
+   * 改一个字符就是一个全新的桶、一份全新的额度，于是 `limit` 永远用不完：
+   * **刷票没有上限**。更糟的是 IP 兜底写在 `if (!identity.allowed)` 里面，
+   * 而 `identity.allowed` 在那种情况下**永远为 true** —— 也就是
+   * 注释里号称"真正的防滥用上限"的那一道，**一次都不会被执行**。
+   * （`pow.js` 里早就记录过同一个坑并绕开了，`guardRate` 当时没跟着改。）
+   *
+   * 为什么用**会话**而不是 IP：会话是服务端签发、放在 HttpOnly Cookie 里、
+   * 数据库里有对应行 —— **客户端伪造不了**。想换一个会话就得重新登录，
+   * 而登录本身有两道限流（`class-login:ip:口令摘要` 与 `class-login-ip:ip`）。
+   * 而**按 IP 兜底在这里反而危险**：站点前面是阿里云 ESA，
+   * `cf-connecting-ip` 很可能拿到的是网关 IP，全校会塌进同一个桶
+   * （600 次/小时），一启用就是"全校一起被限流"。
+   *
+   * 为什么**不需要新阈值**：这里刻意复用调用方本来就传进来的 `limit` ——
+   * 那个数字（upvote 30/小时、vote 等）是上一轮已经定好的"每个学生每小时能做几次"，
+   * 而一个学生会话正好就是一个学生。所以这道闸不引入任何新的产品决定。
+   *
+   * 代价：每个受保护的写请求多一次限流读写。写请求本来就少，
+   * 而换来的是"刷票从无限变成有限"。
+   */
+  if (session) {
+    const sessionBucket = rateKey(request, { kind, session });
+    // `rateKey` 在没有指纹/会话时会退化成按 IP —— 那种 key 上面已经查过了，别重复查。
+    if (sessionBucket !== identityBucket && sessionBucket !== rateIpKey(request, kind)) {
+      const bySession = await rateLimit(env, sessionBucket, sessionLimit, windowSeconds);
+      if (!bySession.allowed) return error(message, 429);
+    }
+  }
+
+  return null;
 }

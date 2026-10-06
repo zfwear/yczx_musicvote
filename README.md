@@ -665,18 +665,28 @@ _lib/db.js                              changedRows / lastRowId / 迁移缺失�
 _lib/settings.js                        系统设置读写（投票上限、举报阈值）
 _lib/validate.js                        入库前收敛：文本、正整数、枚举、指纹、违禁词、音源 id
 
+sql/000_reset_database.sql               注意： **清空重建**用（开头的 DROP TABLE）。
+                                         它同时创建 6 张基础表，所以**全新部署也必须跑它**；
+                                         但它会删光已有数据 —— 只在"重来一遍"时执行
 sql/001_security_upgrade.sql            会话表 / 限流表 / 口令哈希列
-sql/002_reports_and_reset.sql           举报与投票记录表 + 凭证重置
+sql/002_reports.sql                     举报与投票记录表
 sql/003_multi_admin_and_announcements.sql  多管理员、动态口令、公告
 sql/004_shared_board.sql                全校共用榜单 + 投票按设备去重
 sql/005_viewable_class_passwords.sql    班级口令加密留存（管理员可查看分发）
 sql/006_debug_mode.sql                  调试模式标记
-sql/012_weekly_schedule.sql             每周歌单（一周 6 首）
-sql/013_debug_login_hardening.sql       调试登录的归属管理与撤销
 sql/007_class_grade_and_vote_cap.sql    班级年级/人数 + 投票上限
 sql/008_report_inbox.sql                举报收件箱（处理状态）
 sql/009_song_track_id.sql               点歌时锁定的音源 id
+sql/010_gate_announcements.sql          登录页公告（scope 列）
+sql/011_song_suggestions.sql            歌曲建议
+sql/012_weekly_schedule.sql             每周歌单（一周 6 首）
+sql/013_debug_login_hardening.sql       调试登录的归属管理与撤销
 ```
+
+> 这份清单已按**编号顺序**列全（000~013）。以前这里写错过三处：
+> 把 `002_reports.sql` 记成 `002_reports_and_reset.sql`（文件不存在）、
+> 顺序把 012/013 排在 007 前面、而且**漏了 000/010/011** ——
+> 照着旧清单在 D1 控制台手工执行会顺序错乱、还会去找一个不存在的文件。
 
 ---
 

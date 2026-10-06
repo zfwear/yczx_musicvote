@@ -68,8 +68,18 @@ export function recaptchaEnabled(env) {
  */
 const DEFAULT_RECAPTCHA_HOSTS = ['vote.yzstu.top'];
 
-/** 本机开发地址永远放行（wrangler pages dev / 本地联调）。 */
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+/**
+ * ⚠️ 这里**故意没有** "本机地址永远放行" 那种例外（原来是有的，2026-10-08 去掉）。
+ *
+ * 为什么必须去掉：这道域名校验是**唯一**还认得出"别人拿我们公开的站点密钥、
+ * 在自己网页上签令牌"的防线（控制台里"验证来源"已被关掉）。
+ * 而 `localhost` 是**任何人都能声明**的主机名 —— 攻击者只要在本机起一个页面、
+ * 嵌入我们的站点密钥，签出来的 token 里 `hostname` 就是 `localhost`，
+ * 于是这道防线被一句话绕开。审计当场指出了这一点。
+ *
+ * 本机联调要放行的话，请**显式加进白名单**（这才是"知情同意"）：
+ *   RECAPTCHA_ALLOWED_HOSTS=vote.yzstu.top,localhost
+ */
 
 /** 去端口、转小写。 */
 function normalizeHost(raw) {
@@ -107,7 +117,7 @@ export function isAllowedTokenHost(hostname, allowed) {
   if (allowed === null) return true;                 // 应急开关：不校验
   const host = normalizeHost(hostname);
   if (!host) return false;                           // 拿不到域名：**宁可拒绝**（见下）
-  if (LOCAL_HOSTS.has(host)) return true;
+  // 没有 localhost 例外 —— 那是可被任何人声明的主机名，见文件开头那段说明。
   return allowed.some((a) => host === a || host.endsWith('.' + a));
 }
 

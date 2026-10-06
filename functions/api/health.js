@@ -12,9 +12,13 @@ import { json } from '../../_lib/http.js';
  * 数据库的健康状况由 `/api/config`（它会读一次设置表）那一侧反映，
  * 两件事分开看，才不会互相掩盖。
  *
- * 注意：它仍然经过域名白名单中间件 —— 非白名单域名的 fetch 会拿到 403。
- * 如果你用外部监控探活，要么让监控带正确的 Host，要么把监控的域名加进
- * `ALLOWED_HOSTS`。
+ * 注意：它是**唯一**被域名白名单中间件放行的接口（见 `functions/_middleware.js`
+ * 开头那段说明）。这是有意的 —— 2026-10-08 那次 ESA 回源 TLS 挂掉（HTTP 525）时，
+ * "源站到底还活着吗"从外部没法直接问，因为直连源站的 health 也被挡成了 403，
+ * 只能从 403 正文里反推。放开这一个**不含任何数据**的接口，
+ * 就能让"源站活着吗 / 卡在哪一层"变成一条 curl 就能回答的问题。
+ *
+ * 页面与其它接口仍然按白名单拦（非白名单域名的 fetch 会拿到 403）。
  */
 export async function onRequestGet(context) {
   const request = context && context.request;

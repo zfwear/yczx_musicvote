@@ -103,12 +103,53 @@ const MIME = {
  * 返回 null 表示"不该由静态服务处理"。
  */
 function resolveStatic(urlPath) {
-  let rel = decodeURIComponent(urlPath.split('?')[0]);
+  // `decodeURIComponent` 对 `%zz` / `%` 这类非法序列会抛 URIError。
+  // 它是**远程可控**的（客户端随便就能发一个 `/%zz`），而这里在
+  // 请求处理函数里、没有任何 try —— 抛出去就是未处理的 Promise rejection，
+  // Node 15+ 默认直接**结束进程**。一个普通 GET 就能把服务打挂。
+  let rel;
+  try {
+    rel = decodeURIComponent(String(urlPath).split('?')[0]);
+  } catch {
+    return null;                       // 解不开就当"不该由静态服务处理" → 404
+  }
+  // NUL 以及其它控制字符：path 相关 API 对它们会抛 ERR_INVALID_ARG_VALUE
+  if (/[\u0000-\u001f]/.test(rel)) return null;
   if (rel.endsWith('/')) rel += 'index.html';
+
+  /**
+   * 敏感文件黑名单（2026-10-08 补，审计指出）。
+   *
+   * 为什么必须有：`pickSiteRoot()` 在没有 `public/` 时会**回退到仓库根**。
+   * 那本来是给"还没做前端分离"的旧目录留的兼容路径，但只把
+   * `server.mjs / _lib / functions / sql` 拷到 VPS、没带 `public/` 的人也会走到那儿。
+   * 那一刻静态服务就对着**整个仓库**：`GET /.env` 会把 `AUTH_PEPPER`、
+   * `RECAPTCHA_SECRET` 原样发出去，`/data/yczx.db` 能把整库下载走。
+   * `resolveStatic` 只检查"是否落在静态根之内"，对这类文件毫无防备。
+   *
+   * 这里按**路径段**判断，所以 `sub/.env`、`data/x.db` 也挡得住。
+   */
+  const SENSITIVE_DIRS = new Set(['sql', '_lib', 'functions', 'data', 'node_modules', '.git']);
+  const parts = rel.split('/').filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i];
+    if (seg.startsWith('.')) return null;                       // .env / .git / .gitignore …
+    if (SENSITIVE_DIRS.has(seg)) return null;                   // sql/ _lib/ functions/ data/ …
+    if (/\.(db|sqlite|sqlite3|db-wal|db-shm)$/i.test(seg)) return null;
+    if (i === parts.length - 1 && /^(server\.mjs|_headers|_routes\.json)$/.test(seg)) return null;
+  }
+
   const full = path.resolve(SITE_ROOT, '.' + rel);
   // 必须仍在静态根之内 —— `..` 拼出来的路径一律拒绝
   if (full !== SITE_ROOT && !full.startsWith(SITE_ROOT + path.sep)) return null;
-  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+  // 用一次 statSync（包 try）代替 existsSync + statSync：
+  // 后者在"存在但读不了"（EACCES）或两个调用之间被删掉时会抛，
+  // 同样会变成未处理异常。
+  try {
+    if (!fs.statSync(full).isFile()) return null;
+  } catch {
+    return null;
+  }
   return full;
 }
 
@@ -136,6 +177,7 @@ function loadHeaderRules() {
     if (!line.trim()) continue;
     if (!/^\s/.test(line)) {                              // 顶格 = 路径
       current = { pattern: line.trim(), headers: {} };
+      current.regex = patternToRegExp(current.pattern);   // 预先编译（见下面的说明）
       rules.push(current);
       continue;
     }
@@ -147,15 +189,38 @@ function loadHeaderRules() {
 
 const HEADER_RULES = loadHeaderRules();
 
-/** 把匹配到的站点级响应头并进去（不覆盖处理器自己设的头）。 */
+/**
+ * 把 `_headers` 的路径模式编译成正则。
+ *
+ * 2026-10-08 修：原来只认三种写法 —— `/*`、精确相等、以及 `前缀/*`
+ * （`endsWith('/*') ? startsWith(...)`）。于是 `_headers` 里那条
+ * `/assets/*.png` **永远匹配不上**（它既不是 `/*`、也不以 `/*` 结尾），
+ * 声明了 7 天图片缓存却从来没生效过，而这件事**不会报任何错**。
+ * 现在支持 `*` 出现在任意位置（`*` 按 Pages 的语义跨 `/` 匹配）。
+ */
+function patternToRegExp(pattern) {
+  const src = String(pattern)
+    .split('*')
+    .map((part) => part.replace(/[\\^$+.()|[\]{}?]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${src}$`);
+}
+
+/** 把匹配到的站点级响应头并进去（**不覆盖**处理器自己设的头）。 */
 function withSiteHeaders(headers, pathname) {
+  // ⚠️ 键比较必须**忽略大小写**（2026-10-08 修）：处理器用 `Headers` 设的是小写键
+  // （`x-content-type-options`），而 `_headers` 里写的是 `X-Content-Type-Options`
+  // —— 用 `headers[k] === undefined` 判重永远为真，于是同一个头会被下发两次
+  // （大小写不同的两条）。值一样时浏览器看不出问题，但只要哪天处理器设了
+  // **不同值**的 CSP/X-Frame-Options，就会下发两条互相冲突的头。
+  const seen = new Set(Object.keys(headers).map((k) => k.toLowerCase()));
   for (const rule of HEADER_RULES) {
-    const hit = rule.pattern === '/*'
-      || rule.pattern === pathname
-      || (rule.pattern.endsWith('/*') && pathname.startsWith(rule.pattern.slice(0, -1)));
-    if (!hit) continue;
+    if (!rule.regex.test(pathname)) continue;
     for (const [k, v] of Object.entries(rule.headers)) {
-      if (headers[k] === undefined) headers[k] = v;
+      const lower = k.toLowerCase();
+      if (seen.has(lower)) continue;
+      headers[k] = v;
+      seen.add(lower);
     }
   }
   return headers;
@@ -177,10 +242,43 @@ async function loadHandler(apiPath) {
   return mod;
 }
 
-/** 把 URLSearchParams / 字符串体读成字符串（处理器自己会再解析 JSON）。 */
-async function readBody(req) {
+/**
+ * 把 URLSearchParams / 字符串体读成字符串（处理器自己会再解析 JSON）。
+ *
+ * ⚠️ 必须设上限（2026-10-08 补，审计指出）：`readBody` 在**路由之前**就被调用，
+ * 也就是连一个不存在的接口都会把请求体整段读进内存。在 Cloudflare 上有平台限制
+ * 兜着，自建（直连 server.mjs）时完全没有 —— 一条
+ * `curl -X POST --data-binary @10GB http://host:8788/api/login` 就能把进程内存吃满。
+ * 本站所有接口的载荷都很小（登录/举报/建议都是几十到几百字节），
+ * 所以 64KB 足够宽松，超了直接 413 并断开。
+ */
+const MAX_BODY_BYTES = 64 * 1024;
+
+async function readBody(req, res) {
+  const declared = Number(req.headers['content-length'] || 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    if (res && !res.headersSent) {
+      res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8', Connection: 'close' });
+      res.end('413 请求体过大');
+    }
+    req.destroy();
+    return undefined;
+  }
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY_BYTES) {
+      // 没有 Content-Length（分块传输）时靠这里兜住
+      if (res && !res.headersSent) {
+        res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8', Connection: 'close' });
+        res.end('413 请求体过大');
+      }
+      req.destroy();
+      return undefined;
+    }
+    chunks.push(chunk);
+  }
   return chunks.length ? Buffer.concat(chunks) : undefined;
 }
 
@@ -218,7 +316,22 @@ if (DB_FILE !== ':memory:') {
 
 const DB = createSqliteD1(DB_FILE === ':memory:' ? ':memory:' : path.resolve(HERE, DB_FILE));
 
-/** 首次部署：把 sql/*.sql 按文件名顺序全跑一遍（迁移本身是幂等的）。 */
+/**
+ * 首次部署：把 `sql/*.sql` 按文件名顺序跑一遍。
+ *
+ * ⚠️ **不要**在这里排除 `000_reset_database.sql` —— 我第一版就是这么修的，
+ * 结果 `001` 立刻报 `no such table: vote_logs`：因为 `000` **不只是"清库"**，
+ * 它同时**创建 6 张基础表**（categories / classes / admins / songs /
+ * banned_items / vote_logs），后面的迁移都是在这之上做增补。
+ * （这个错是 `_harness/check-init-safe.mjs` 当场抓出来的。）
+ *
+ * 所以控制"要不要跑"的正确判据不是文件名，而是**库里有没有表结构** ——
+ * 见下面的 `schemaExists()`。
+ *
+ * 另外：迁移文件**不可重复执行**（004/005/006/007/008/009/010 的
+ * `ALTER TABLE ADD COLUMN` 重复跑会 `duplicate column name` 并中断），
+ * 所以"已有表结构就整体跳过"同时也是可重复执行性的解药。
+ */
 async function runMigrations() {
   const dir = path.join(HERE, 'sql');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
@@ -234,14 +347,64 @@ async function runMigrations() {
   console.log(`迁移完成（${files.length} 个文件）`);
 }
 
+/**
+ * 库里是否已经存在本项目的表结构。
+ *
+ * 用"表存不存在"而不是"有没有数据"来判断：
+ *   · 看行数会误判 —— 一个把管理员删光、但还留着班级与歌曲的库，行数是 0，
+ *     会被当成新库，然后 `000` 的 DROP 就把还活着的班级和歌曲清掉了。
+ *   · 看 `sqlite_master` 才反映"这个库到底初始化过没有"。
+ */
+async function schemaExists() {
+  try {
+    const row = await DB.prepare(
+      `SELECT COUNT(*) AS n FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ('admins','songs','classes','system_settings','weekly_playlist')`
+    ).first();
+    return Number((row && row.n) || 0) > 0;
+  } catch {
+    return false;   // 连 sqlite_master 都问不到：当它是新库（后续 --init 会自己建表）
+  }
+}
+
+
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  // ⚠️ 整体 try/catch 是**必须**的：这是一个 async 回调，抛出去没人接就是
+  //    未处理的 Promise rejection，Node 15+ 默认**结束进程**。
+  //    实测有两条远程可触发的路径：
+  //      · `curl -H 'Host: a b' http://host:8788/` —— WHATWG URL 对 special scheme
+  //        的主机禁止空格等字符，`new URL()` 直接抛 TypeError；
+  //      · `curl 'http://host:8788/%zz'` —— 见 resolveStatic 里的 decodeURIComponent。
+  //    两条都只需一个普通请求、无需认证，就能把进程打挂（守护进程会反复重启）。
+  try {
+    await handleRequest(req, res);
+  } catch (err) {
+    console.error(`请求处理异常：${(err && err.stack) || err}`);
+    try {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('500');
+      } else {
+        res.end();
+      }
+    } catch { /* 响应已经没法写了，只能算了 */ }
+  }
+});
+
+async function handleRequest(req, res) {
+  // URL 只用来取 pathname / query，**不需要真实 Host**。
+  // 用固定的 base 而不是 `http://${req.headers.host}`：后者会被一个畸形 Host
+  // 头搞成抛异常（见上面 createServer 里的说明）。
+  const url = new URL(req.url || '/', 'http://localhost');
   const env = { ...dotenv, ...process.env, DB };
 
   // ⚠️ 请求体**只能读一次**，所以 Request 必须在最前面构造一次、
   //    之后中间件与处理器共用同一个对象。分开构造两次的话，
   //    第二次拿到的会是一个**空体**（现象是"登录时口令永远是空的"）。
-  const rawBody = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : undefined;
+  const rawBody = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req, res) : undefined;
+  // 超限时 readBody 已经把 413 写出去并断了连接，这里直接收工。
+  if (res.headersSent) return;
   const reqHeaders = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (Array.isArray(v)) v.forEach((x) => reqHeaders.append(k, x));
@@ -303,15 +466,52 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
-  const headers = withSiteHeaders(
-    { 'Content-Type': type, 'Cache-Control': 'no-cache' }, url.pathname
-  );
+  // ⚠️ 这里**不能**把 Cache-Control 当成"处理器已经设好的头"直接塞进去
+  //    （2026-10-08 修）。原来写死 `'Cache-Control': 'no-cache'` 再交给
+  //    withSiteHeaders，而后者"不覆盖已有头" —— 于是 `_headers` 里那条
+  //    `/assets/*.png  Cache-Control: public, max-age=604800` **永远被顶掉**，
+  //    图片每次全量重下。现在先让 `_headers` 说话，它没说才用 no-cache 兜底。
+  const headers = withSiteHeaders({ 'Content-Type': type }, url.pathname);
+  if (!Object.keys(headers).some((k) => k.toLowerCase() === 'cache-control')) {
+    headers['Cache-Control'] = 'no-cache';
+  }
   res.writeHead(200, headers);
-  fs.createReadStream(file).pipe(res);
-});
+  // ⚠️ 必须挂 error 监听：读不了的**已存在**文件（EACCES、或在这两行之间被删掉）
+  //    会让流异步抛错，没人接就是未处理异常 → 进程退出。
+  const stream = fs.createReadStream(file);
+  stream.on('error', (err) => {
+    console.error(`静态文件读取失败：${file} —— ${(err && err.message) || err}`);
+    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end();
+  });
+  stream.pipe(res);
+}
 
+// ---- `--init` 的两道闸 ----
+//
+// 为什么要有闸：这套迁移文件**不可重复执行**（`ALTER TABLE ADD COLUMN`
+// 会 `duplicate column name`），而文档里推荐的容器写法是
+// `CMD ["node","server.mjs","--init"]` + `restart: unless-stopped` ——
+// 也就是**每次重启都会跑一遍**。所以必须能识别"这库已经初始化过了"。
+//
+// 要真的重来一遍：删掉数据库文件，或者显式加 `--force-reset`
+// （后者会连 `000_reset_database.sql` 一起跑，把库清空重建 —— 是**故意**要清库时才用）。
 if (process.argv.includes('--init')) {
-  await runMigrations();
+  const FORCE = process.argv.includes('--force-reset');
+  const exists = await schemaExists();
+  if (FORCE) {
+    console.warn('⚠️  --force-reset：会执行 000_reset_database.sql，把整库清空重建。');
+    await runMigrations();
+  } else if (exists) {
+    // 关键的一道闸：迁移文件不可重复执行（ALTER TABLE ADD COLUMN 会
+    // duplicate column name），而文档推荐的容器写法是每次重启都跑 --init。
+    // 没有这道闸，第二次启动就会先执行 000 的 DROP TABLE —— 静默清空整库。
+    console.log('跳过迁移：库里已经有本项目的表结构。');
+    console.log('  迁移文件不可重复执行，所以这里不重跑（旧行为会先执行 000 把整库清空）。');
+    console.log('  要真的重新初始化：删掉数据库文件，或加 --force-reset（会清空全部数据）。');
+  } else {
+    await runMigrations();
+  }
 }
 
 server.listen(PORT, () => {

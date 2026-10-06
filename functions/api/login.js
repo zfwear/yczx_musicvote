@@ -8,6 +8,7 @@ import {
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
+import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.js';
 
 /**
  * 班级口令登录。
@@ -37,6 +38,25 @@ export async function onRequestPost(context) {
 
   const secret = parseSecret(parsed.value.password, { min: 4, max: 128, field: '班级口令' });
   if (!secret.ok) return error(secret.error, 400);
+
+  // ---- 公开仓库防线：示例班级口令默认拒绝 ----
+  //
+  // 2026-10-08 补上。这条防线**管理员侧一直有**（admin-login.js 的
+  // isSeedAdminPassword），学生侧却是空的 —— `SEED_CLASS_PASSWORD` 在
+  // `_lib/defaults.js` 里导出了却全仓库没人用。后果是：跑完迁移之后，
+  // 任何知道这个公开仓库的人都能用 `yczx2026` 登录学生端
+  // （读榜单、投票、举报、点歌）。**管理员进不去、学生端门户大开**，
+  // 这种不对称比"两个都开着"更危险 —— 没人会意识到还要改它。
+  //
+  // 位置刻意放在**任何数据库查询与限流之前**：被拒的请求一行都不碰库。
+  // 开关沿用同一个环境变量（本地测试已统一打开），见 _lib/defaults.js。
+  if (isSeedClassPassword(secret.value) && !allowSeedCredentials(env)) {
+    return error(
+      '这是公开仓库里的示例班级口令，任何人都知道，已被拒绝登录。'
+      + '请先按 README 的「部署后必做」把班级口令改成自己的（后台即可改），然后再登录。',
+      403
+    );
+  }
 
   // ---- 登录限流：口令进 URL 之前就要做，但**必须按"这个口令"分桶** ----
   //
