@@ -1,0 +1,280 @@
+/* ============================================================
+   液态玻璃设计系统（Liquid Glass Design Tokens & Foundations）
+   ============================================================ */
+
+:root {
+  /* 基础品牌调色板 */
+  --liquid-primary: #3b82f6;
+  --liquid-primary-strong: #2563eb;
+  --liquid-primary-glow: rgba(59, 130, 246, 0.45);
+  --liquid-accent: #06b6d4;
+  --liquid-accent-glow: rgba(6, 182, 212, 0.4);
+  --liquid-violet: #8b5cf6;
+  --liquid-violet-glow: rgba(139, 92, 246, 0.35);
+
+  /* 文字墨水系统 */
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --ink-3: #64748b;
+  --ink-4: #94a3b8;
+  --ink-inverse: #ffffff;
+
+  /* 浅色模式液态玻璃晶格 */
+  --canvas-bg: #eef2f9;
+  --glass-surface: rgba(255, 255, 255, 0.68);
+  --glass-surface-subtle: rgba(255, 255, 255, 0.42);
+  --glass-surface-solid: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.75);
+  --glass-border-subtle: rgba(255, 255, 255, 0.4);
+  --glass-border-color: rgba(226, 232, 240, 0.8);
+  --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.95);
+  --glass-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
+  --glass-shadow-hover: 0 18px 40px -12px rgba(15, 23, 42, 0.14), 0 8px 16px -4px rgba(15, 23, 42, 0.06);
+  --glass-blur: blur(20px) saturate(190%);
+
+  /* 状态颜色 */
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.3);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.12);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+
+  /* 圆角规范 */
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 9999px;
+
+  /* 字体与字号 */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f8fafc;
+    --ink-2: #cbd5e1;
+    --ink-3: #94a3b8;
+    --ink-4: #64748b;
+    --ink-inverse: #0f172a;
+
+    --canvas-bg: #090d16;
+    --glass-surface: rgba(17, 24, 39, 0.72);
+    --glass-surface-subtle: rgba(17, 24, 39, 0.48);
+    --glass-surface-solid: rgba(22, 30, 46, 0.88);
+    --glass-border: rgba(255, 255, 255, 0.14);
+    --glass-border-subtle: rgba(255, 255, 255, 0.07);
+    --glass-border-color: rgba(51, 65, 85, 0.6);
+    --glass-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.2);
+    --glass-shadow: 0 12px 35px -10px rgba(0, 0, 0, 0.6), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+    --glass-shadow-hover: 0 20px 48px -12px rgba(0, 0, 0, 0.8), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+    --glass-blur: blur(24px) saturate(200%);
+  }
+}
+
+/* 基础重置 */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--canvas-bg);
+  color: var(--ink);
+  line-height: 1.6;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 流体环境光光斑容器（Ambient Liquid Orbs） */
+.liquid-mesh-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.liquid-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.6;
+  mix-blend-mode: normal;
+}
+
+.liquid-orb-1 {
+  width: 520px;
+  height: 520px;
+  top: -120px;
+  left: -80px;
+  background: radial-gradient(circle, var(--liquid-primary-glow) 0%, rgba(59, 130, 246, 0) 70%);
+}
+
+.liquid-orb-2 {
+  width: 480px;
+  height: 480px;
+  top: 15%;
+  right: -100px;
+  background: radial-gradient(circle, var(--liquid-accent-glow) 0%, rgba(6, 182, 212, 0) 70%);
+}
+
+.liquid-orb-3 {
+  width: 600px;
+  height: 600px;
+  bottom: -150px;
+  left: 20%;
+  background: radial-gradient(circle, var(--liquid-violet-glow) 0%, rgba(139, 92, 246, 0) 70%);
+}
+
+/* 液态玻璃核心材质类 */
+.glass-panel {
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+  border-radius: var(--r-lg);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+}
+
+.glass-panel:hover {
+  box-shadow: var(--glass-rim), var(--glass-shadow-hover);
+}
+
+.glass-subtle {
+  background: var(--glass-surface-subtle);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+/* 按钮与交互控件 */
+.btn-liquid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn-liquid:active {
+  transform: scale(0.96);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--liquid-primary) 0%, var(--liquid-primary-strong) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px -4px var(--liquid-primary-glow), inset 0 1px 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 10px 28px -4px var(--liquid-primary-glow), inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  background: var(--glass-surface-subtle);
+  color: var(--ink);
+  border-color: var(--glass-border);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.btn-secondary:hover {
+  background: var(--glass-surface);
+  color: var(--liquid-primary);
+  border-color: var(--liquid-primary);
+  transform: translateY(-2px);
+}
+
+/* 优雅输入框 */
+.input-liquid {
+  width: 100%;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--glass-surface-subtle);
+  border: 1px solid var(--glass-border-color);
+  border-radius: var(--r-md);
+  padding: 12px 18px;
+  outline: none;
+  transition: all 0.25s ease;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.input-liquid:focus {
+  border-color: var(--liquid-primary);
+  background: var(--glass-surface);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.16), var(--glass-rim);
+}
+
+.input-liquid::placeholder {
+  color: var(--ink-4);
+}
+
+/* 标签徽章 */
+.badge-liquid {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--glass-surface-subtle);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--ink-2);
+}
+
+/* 通用全屏遮罩与模态框 */
+.ui-dialog-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* 数字等宽对齐 */
+.num-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 全端自适应容器 */
+.layout-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 768px) {
+  .layout-container {
+    padding: 16px 14px 60px;
+  }
+}

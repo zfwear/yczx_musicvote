@@ -4,77 +4,121 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>盐中之声音乐投稿（北校区）</title>
+<link rel="stylesheet" href="assets/css/liquid-glass.css">
 <link rel="stylesheet" href="assets/css/index.css">
 </head>
 <body>
-<div id="gate">
-  <h2 style="text-align:center;color:var(--ink);margin-top:0;font-size:19px;line-height:1.45;">盐中之声音乐投稿（北校区）</h2>
-  <p style="color:var(--ink-3);font-size:13px;text-align:center;">请输入班级口令</p>
-  <label class="field-label" for="pw">班级口令</label>
-  <input id="pw" type="password" placeholder="口令" onkeydown="if(event.key==='Enter')checkPw()">
-  <button class="gate-enter" onclick="checkPw()">进入</button>
-  <p id="gateMsg" class="err"></p>
-  <div id="gateAnnounceBox"></div>
+<!-- 流体环境光斑 -->
+<div class="liquid-mesh-layer" aria-hidden="true">
+  <div class="liquid-orb liquid-orb-1"></div>
+  <div class="liquid-orb liquid-orb-2"></div>
+  <div class="liquid-orb liquid-orb-3"></div>
 </div>
-<div id="app">
-  <div class="header">
-    <div><h1>盐中之声音乐投稿</h1><p>北校区 · 广播站</p></div>
-    <img src="/assets/school-badge.png" alt="校徽" class="badge">
-  </div>
-  <!-- 游客模式提示条：默认隐藏，身份确认后由 applyGuestMode() 显示。
-       文案与登录响应里的 guest 字段同源，服务端才是权威。 -->
-  <div id="guestNotice" hidden>
-    当前为游客模式，只能查看排行（榜单里的试听仍然可用）；不能投稿、投票或举报。
-  </div>
-  <!-- 暂停接收投稿的提示：进页面问一次 /api/config 再决定是否显示。
-       「去投稿」**仍然可点** —— 点歌页会说明"暂停中"，比在主页把入口藏起来更好懂。 -->
-  <div id="pausedNotice" class="paused-notice" hidden></div>
-  <a id="goVoteBtn" href="/vote.html" class="btn">去投稿</a>
-  <a href="/schedule.html" class="btn" style="background:rgba(255,255,255,0.85);color:var(--brand-ink);box-shadow:none;border:1px solid #bae6fd;">查看每周排期</a>
-  <button onclick="logoutUser()" style="background:rgba(255,255,255,0.85);color:var(--ink-3);box-shadow:none;border:1px solid #e2e8f0;font-weight:600;">退出登录</button>
-  <div id="rulesBox"></div>
-  <div id="announceBox"></div>
-  <div class="mobile-tabs">
-    <button id="tabPending" class="active" onclick="switchMobileTab('pending')">待审核榜</button>
-    <button id="tabApproved" onclick="switchMobileTab('approved')">正式榜</button>
-  </div>
-  <div id="rankList">
-    <div id="pendingCol" class="col active">
-      <p class="col-title">待审核榜 <span>投票选出你想听的</span></p>
-      <div id="pendingList"><p style="text-align:center;color:var(--ink-4);padding:20px 0;">加载中...</p></div>
+
+<div class="layout-container">
+  <!-- 门禁卡片 -->
+  <div id="gate" class="glass-panel gate-card">
+    <div class="gate-header">
+      <div class="gate-icon-bubble">🎵</div>
+      <h2>盐中之声音乐投稿</h2>
+      <p class="gate-sub">北校区广播站 · 请输入班级口令进入</p>
     </div>
-    <div id="approvedCol" class="col">
-      <p class="col-title">正式榜 <span>已通过审核</span></p>
-      <div id="approvedList"></div>
+    <div class="gate-form">
+      <label class="field-label" for="pw">班级口令</label>
+      <input id="pw" class="input-liquid" type="password" placeholder="输入口令…" onkeydown="if(event.key==='Enter')checkPw()">
+      <button class="btn-liquid btn-primary gate-enter" onclick="checkPw()">进入系统</button>
+      <p id="gateMsg" class="err"></p>
     </div>
+    <div id="gateAnnounceBox"></div>
   </div>
-  <footer>
-    <img src="/assets/radio-logo.png" alt="盐中之声">
-    <p>江苏省盐城中学 · 盐中之声广播站</p>
-    <div id="disclaimerBox"></div>
-  </footer>
+
+  <!-- 主程序应用面板 -->
+  <div id="app" style="display:none;">
+    <header class="glass-panel app-header">
+      <div class="header-main">
+        <div class="header-brand">
+          <h1>盐中之声音乐投稿</h1>
+          <p class="header-sub">北校区 · 广播站音乐投票系统</p>
+        </div>
+        <img src="/assets/school-badge.png" alt="校徽" class="badge">
+      </div>
+      <div class="header-actions">
+        <a id="goVoteBtn" href="/vote.html" class="btn-liquid btn-primary">去投稿</a>
+        <a href="/schedule.html" class="btn-liquid btn-secondary">查看每周排期</a>
+        <button class="btn-liquid btn-secondary btn-logout" onclick="logoutUser()">退出登录</button>
+      </div>
+    </header>
+
+    <!-- 游客提示横幅 -->
+    <div id="guestNotice" class="glass-panel notice-banner notice-guest" hidden>
+      当前为游客模式，只能查看排行（榜单里的试听仍然可用）；不能投稿、投票或举报。
+    </div>
+
+    <!-- 暂停投稿提示横幅 -->
+    <div id="pausedNotice" class="glass-panel notice-banner notice-paused" hidden></div>
+
+    <!-- 规定与公告折叠区 -->
+    <div id="rulesBox" class="rules-container"></div>
+    <div id="announceBox" class="announce-container"></div>
+
+    <!-- 移动端选项卡 -->
+    <div class="mobile-tabs glass-panel">
+      <button id="tabPending" class="tab-btn active" onclick="switchMobileTab('pending')">待审核榜</button>
+      <button id="tabApproved" class="tab-btn" onclick="switchMobileTab('approved')">正式榜</button>
+    </div>
+
+    <!-- 榜单主体网格（双列并排/移动端选项卡切换） -->
+    <main id="rankList" class="rank-grid">
+      <section id="pendingCol" class="col active glass-panel">
+        <div class="col-header">
+          <div class="col-title-group">
+            <h2 class="col-title">待审核榜</h2>
+            <span class="col-badge">投票推荐</span>
+          </div>
+          <span class="col-hint">投票选出你想在校园听到的旋律</span>
+        </div>
+        <div id="pendingList" class="cards-list">
+          <p style="text-align:center;color:var(--ink-4);padding:30px 0;">加载中...</p>
+        </div>
+      </section>
+
+      <section id="approvedCol" class="col glass-panel">
+        <div class="col-header">
+          <div class="col-title-group">
+            <h2 class="col-title">正式榜</h2>
+            <span class="col-badge col-badge-success">审核通过</span>
+          </div>
+          <span class="col-hint">播音员精选排期曲目库</span>
+        </div>
+        <div id="approvedList" class="cards-list">
+          <p style="text-align:center;color:var(--ink-4);padding:30px 0;">加载中...</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer glass-panel glass-subtle">
+      <img src="/assets/radio-logo.png" alt="盐中之声" class="footer-logo">
+      <p class="footer-copy">江苏省盐城中学 · 盐中之声广播站</p>
+      <div id="disclaimerBox"></div>
+    </footer>
+  </div>
+
+  <div id="beianFooter" class="beian-footer">
+    <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
+    <div class="beian-links">
+      <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026011040号</a>
+      <span>|</span>
+      <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer">
+        <img src="/assets/gongan-badge.png" alt="" width="14" height="15">
+        <span id="beianGonganText">苏公网安备32090302000745号</span>
+      </a>
+    </div>
+    <div id="siteVersion" class="site-version">版本 2.0.0 · Liquid Glass Edition</div>
+  </div>
 </div>
 
-
-
-
-
-
-<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:var(--ink-4);">
-  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
-  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
-    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
-       style="color:var(--ink-4);text-decoration:none;">苏ICP备2026011040号</a>
-    <span style="color:var(--ink-4);">|</span>
-    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
-       style="color:var(--ink-4);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
-      <img src="/assets/gongan-badge.png" alt="" width="14" height="15"
-           style="flex:0 0 auto;vertical-align:-2px;display:block;">
-      <span id="beianGonganText">苏公网安备32090302000745号</span>
-    </a>
-  </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.1</div>
-</div>
+<script src="assets/js/gsap.min.js"></script>
+<script src="assets/js/liquid-motion.js"></script>
 <script src="assets/js/index-1.js"></script>
 <script src="assets/js/index-2.js"></script>
 </body>

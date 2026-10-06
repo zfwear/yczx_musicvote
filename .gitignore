@@ -1,0 +1,11 @@
+# 本地运行时数据
+data/
+
+# 本地工具状态
+.wrangler/
+.mimosa/
+node_modules/
+
+# 系统文件
+Thumbs.db
+.DS_Store
