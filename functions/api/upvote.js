@@ -3,6 +3,7 @@ import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
+import { verifyPow } from '../../_lib/pow.js';
 import { parseRequestId } from '../../_lib/idempotency.js';
 
 /**
@@ -49,6 +50,11 @@ export async function onRequestPost(context) {
   // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
   const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip });
   if (!human.ok) return error(human.error, 403);
+
+  // 浏览器端 PoW（第二道，默认关闭）。位置：reCAPTCHA 之后、占位与计票之前。
+  // 注意请求体变量名是 parsed.value（这个文件里没有 data 这个变量）。
+  const pow = await verifyPow(env, parsed.value.pow, { action: 'upvote' });
+  if (!pow.ok) return error(pow.error, 403);
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

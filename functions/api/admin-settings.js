@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword, encryptSecret, decryptSecret } from '../.
 import {
   getVoteCap, setSetting, SETTING_VOTE_CAP, getSetting,
   getReportThreshold, SETTING_REPORT_THRESHOLD, DEFAULT_REPORT_THRESHOLD,
+  isSubmissionsPaused, SETTING_SUBMISSIONS_PAUSED,
 } from '../../_lib/settings.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -144,6 +145,10 @@ export async function onRequestGet(context) {
       threshold: reportThreshold,   // 举报进入收件箱所需的最少举报次数
       defaultThreshold: DEFAULT_REPORT_THRESHOLD,
     },
+    // 「暂停接收投稿」的当前状态：前端据此决定两个按钮哪个是可用态。
+    submit: {
+      paused: await isSubmissionsPaused(env),
+    },
     security: {
       // 是否配置了私有的 AUTH_PEPPER。
       pepperConfigured: pepper !== DEFAULT_PEPPER,
@@ -205,6 +210,8 @@ export async function onRequestPost(context) {
       return updateCategoryWeight(env, data);
     case 'set_vote_cap':
       return setVoteCap(env, data);
+    case 'set_submissions_paused':
+      return setSubmissionsPaused(env, data);
     case 'set_report_threshold':
       return setReportThreshold(env, data);
     case 'update_class_info':
@@ -367,6 +374,33 @@ async function setVoteCap(env, data) {
     message: raw > 0
       ? `已设置投票上限为 ${raw} 票，超出部分不计入票数`
       : '已取消投票上限（票数不再封顶）',
+  });
+}
+
+/**
+ * 暂停 / 继续接收投稿（用户要求，以按钮形式给管理员）。
+ *
+ * 只写一个 system_settings 开关，**不需要任何数据库迁移**；
+ * 真正的拦截在 vote.js 的 POST 里（前端按钮只是提示，绕过页面直接 POST 才是真实攻击面）。
+ * 表还没建（007 没跑）时给一条能照着做的错误，而不是 500。
+ */
+async function setSubmissionsPaused(env, data) {
+  const paused = data.paused === true || data.paused === 1 || data.paused === '1';
+  try {
+    await setSetting(env, SETTING_SUBMISSIONS_PAUSED, paused ? '1' : '0');
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    paused,
+    message: paused
+      ? '已暂停接收投稿：学生仍可查看榜单与排期，但提交会被拒绝'
+      : '已恢复接收投稿',
   });
 }
 

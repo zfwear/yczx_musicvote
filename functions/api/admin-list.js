@@ -2,6 +2,10 @@ import { error, json } from '../../_lib/http.js';
 import { requireAdmin } from '../../_lib/auth.js';
 import { parseEnum } from '../../_lib/validate.js';
 import { getVoteCap, effectiveVotesExpr } from '../../_lib/settings.js';
+import { playableMapForIds } from '../../_lib/playable.js';
+// 跨路由复用同一个判断（含"问中转源"那一步）：见 music.js 里 trackPlayable 的说明。
+// 两份实现迟早会给出不一致的结论，而"学生端能播、审核端说不能"是最难查的一类分歧。
+import { trackPlayable } from './music.js';
 
 /**
  * 后台歌曲列表。
@@ -22,6 +26,14 @@ import { getVoteCap, effectiveVotesExpr } from '../../_lib/settings.js';
  *   track_id；前端拿到就直接播，拿不到（历史数据 / 009 迁移没跑）才回退搜索。
  *   为了让"迁移只跑了一半"的库也能打开后台，下面按列是否存在逐个降级，
  *   而不是让一个多余的列把整个列表打成 500。
+ *
+ * 关于 playable（2026-10-07 用户要求"在审核界面跟管理员说明没有音频"）：
+ *   `playable: false` 表示**学生锁定的这一版确认播不出音频**（网易云受版权限制的
+ *   原唱居多）。管理员一眼要看到"哪几首听不了"，所以这里由**服务端**一次问完
+ *   （`_lib/playable.js`，带 10 分钟缓存），而不是让前端对每张卡片各发一个请求 ——
+ *   那会撞上试听接口的额度，一个列表就把管理员的额度烧掉一大半。
+ *   三种取值语义不能混：true 能播 / false 确认不能播 / **null 不确定**（前端别标）。
+ *   探测有条数上限与总截止时间，到点没探完的一律 null，列表照常快速返回。
  */
 
 export async function onRequestGet(context) {
@@ -65,7 +77,11 @@ export async function onRequestGet(context) {
     try {
       const { results } = await env.DB.prepare(buildSelect(variant, orderBy))
         .bind(status.value).all();
-      return json(results || []);
+      const rows = results || [];
+      const playable = await playableMapForIds(rows.map((r) => r.track_id), {
+        resolve: (id) => trackPlayable(env, id),
+      });
+      return json(rows.map((row) => ({ ...row, playable: playable.get(String(row.track_id)) ?? null })));
     } catch (err) {
       lastError = err;
       // 只有"列不存在"才继续降级；其它错误（语法、权限等）直接抛出去

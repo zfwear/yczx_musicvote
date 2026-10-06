@@ -781,7 +781,7 @@
   .cand-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
               border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .cand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 4px;}
-  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;}
+  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;min-width:0;}
   .cand-hint{font-size:12px;color:var(--ink-4);padding:0 14px 8px;line-height:1.6;}
   .cand-hint>button{margin:8px 0 0;}
   .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
@@ -802,8 +802,33 @@
               background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
   .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
   .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
-  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
+  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;flex:0 0 auto;width:auto;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  /* 「无试听」是**状态标记**（disabled 按钮），不是可点的操作。
+     用户要求"就算无音频，还是要加上选这首这个按钮"，所以旁边那颗
+     「选这首」永远在；这里只把"没有音频"这件事安静地说清楚，
+     做成虚线描边的小标签，与实心的主按钮拉开层级。 */
+  .cand-noop{font-size:12px;color:var(--warn);background:var(--surface-2);
+    border:1px dashed var(--line-strong);border-radius:var(--v6-r-pill);
+    padding:6px 12px;min-height:32px;cursor:default;white-space:nowrap;}
+  .cand-noop:disabled{color:var(--warn);opacity:1;}
+
+  /* ------------------------------------------------------------
+     十二之二、候选行在**窄屏**上要换行，不能硬挤四列
+     ------------------------------------------------------------
+     上面那条 [data-track-row] 是 grid（序号 / 歌名+歌手 / 时长 / 操作）四列。
+     手机上（390px）算下来歌名只剩几十像素，实测被压成「雨…」，
+     而「选这首」也被挤成两行 —— 截图里一眼就能看出不对。
+     窄屏改成两行：第一行 序号 + 歌名歌手 + 时长，第二行整行给操作按钮。
+     宽屏保持四列不变（那边空间够，四列更紧凑）。
+     ------------------------------------------------------------ */
+  @media(max-width:560px){
+    .cand-panel [data-track-row]{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;column-gap:10px;}
+    .cand-panel [data-track-row]>div:not(.cand-acts){flex:1 1 auto;min-width:0;}
+    .cand-panel [data-track-row] .cand-dur{margin-left:auto;}
+    .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
+    .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
+  }
   .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
@@ -858,6 +883,20 @@
   body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
   body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
   @media(min-width:900px){ body>div.header h1{font-size:19px;} }
+
+  /* ------------------------------------------------------------
+     十四之三、状态提示条（「这一版没有音频」/「暂停接收投稿」）
+     ------------------------------------------------------------
+     两处都用"左侧一道粗边 + 极浅琥珀底"：它们都是**需要看清、但不必惊动**的
+     状态说明 —— 用 danger 红会像报错，用普通灰又会被一眼掠过。
+     颜色全部走令牌（--warn / --warn-soft / --ink），所以深色模式自动跟着翻转。
+     .no-audio 用在后台审核卡片上，.paused-notice 用在首页与点歌页。 */
+  .no-audio,.paused-notice{
+    background:var(--warn-soft);border:1px solid var(--warn);border-left:4px solid var(--warn);
+    color:var(--ink);font-size:13px;line-height:1.75;padding:10px 12px;border-radius:var(--v6-r-sm);
+    margin:10px 0;text-align:left;
+  }
+  .paused-notice{margin:0 0 14px;}
 
   /* ------------------------------------------------------------
      十五、深色模式：暖黑分层 + 紫青提亮
@@ -1019,7 +1058,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.0.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1117,6 +1156,11 @@ function uiStyles(){
     '.ui-toast-err{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 12px 30px -8px rgba(225,29,72,.55)}',
     '.ui-toast.ui-hide{opacity:0;transform:translate(-50%,12px)}',
     /* ---- 设计层 v2 · 弹窗与轻提示 ---- */
+    ".ui-actions{flex-wrap:wrap}",
+    ".ui-actions .ui-btn{width:auto;max-width:100%;box-sizing:border-box;flex:0 1 auto}",
+    ".ui-actions-single{display:block}",
+    ".ui-actions-single .ui-btn{display:block;width:100%;box-sizing:border-box;padding:11px 12px;text-align:center}",
+    ".ui-overlay{box-sizing:border-box}",
     ".ui-overlay{background:rgba(15,23,42,.40);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}",
     ".ui-overlay.ui-closing{animation:uiFadeOut .18s var(--ease,ease) forwards}",
     ".ui-box{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:var(--r-xl,20px);box-shadow:var(--shadow-pop,0 18px 44px -18px rgba(15,23,42,.34))}",
@@ -1137,6 +1181,9 @@ function uiStyles(){
     ".ui-toast-err{background:var(--danger,#e11d48)}",
     "@media(prefers-reduced-motion:reduce){.ui-overlay,.ui-box,.ui-toast{animation:none !important}}",
     "/* ---- 设计层 v2 · 弹窗与轻提示 ---- */ */",
+
+
+
 
 
 
@@ -1177,7 +1224,9 @@ function uiDialog(opt){
     }
 
     const actions = document.createElement('div');
-    actions.className = 'ui-actions';
+    // 没有取消按钮 = 提示型弹窗（只有「知道了」这一个动作），
+    // 用整行居中而不是挤在右下角 —— 用户反馈过「这个按钮位置看着很难受」。
+    actions.className = 'ui-actions' + (opt.cancelText === '' ? ' ui-actions-single' : '');
 
     let settled = false;
     const close = (result) => {
@@ -1432,12 +1481,16 @@ async function loadList(quiet){
       const catId = safeInt(s.category_id);
       const reported = safeInt(s.is_reported) === 1;
       const isDebugSong = safeInt(s.is_debug) === 1;
+      // 无音频：**服务端**已经确认"学生锁定的这一版播不出音频"（playable === false）。
+      // 只有明确 false 才提示 —— null 是"没探到/不确定"，标出来会冤枉人。
+      const noAudio = s.playable === false;
       const classText = safeInt(s.class_id) === 0 ? '调试' : ('#' + safeInt(s.class_id));
       return `
       <div id="song-card-${id}">
       <div class="card">
         <h3>${escapeHtml(s.title)} - ${escapeHtml(s.artist)}</h3>
-        <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${classText}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}${isDebugSong ? ' | <span style="color:#7c3aed;font-weight:bold;">调试模式</span>' : ''}</p>
+        ${noAudio ? `<p class="no-audio">这一版没有音频：学生锁定的音源拿不到可播放的音频文件，试听会失败。可以照常通过（点歌时允许选无试听的版本），也可以驳回让学生换一版。</p>` : ''}
+        <p>分类：${escapeHtml(s.category_name)} | 票数：${safeInt(s.votes)} | 班级：${classText}${reported ? ' | <span style="color:#e11d48;font-weight:bold;">已被举报</span>' : ''}${isDebugSong ? ' | <span style="color:#7c3aed;font-weight:bold;">调试模式</span>' : ''}${noAudio ? ' | <span style="color:#b45309;font-weight:bold;">无音频</span>' : ''}</p>
         <div style="margin: 8px 0;">
           <select onchange="updateCategory(${id}, this.value)" style="padding:6px; font-size:14px; width:auto; border-radius:6px; border:1px solid #e2e8f0;">
             <option value="1" ${catId === 1 ? 'selected' : ''}>纯音乐</option>
@@ -2194,10 +2247,14 @@ function renderSettings(){
   const annRows = settingsCache.announcements.length ? settingsCache.announcements.map(a => {
     const id = safeInt(a.id);
     const active = safeInt(a.is_active) === 1;
-    const isGate = (a.scope || 'app') === 'gate';
-    const scopeTag = isGate
+    const scope = a.scope || 'app';
+    // 三种类型在管理列表里要一眼分得开（弹窗公告尤其要认出来，
+    // 因为它会拦住学生点一次「知道了」，误发的影响比主页公告大）
+    const scopeTag = scope === 'gate'
       ? '<span style="color:#7c3aed;font-size:12px;">（登录页公告）</span>'
-      : '<span style="color:#0284c7;font-size:12px;">（主页公告）</span>';
+      : scope === 'popup'
+        ? '<span style="color:#b45309;font-size:12px;">（弹窗公告）</span>'
+        : '<span style="color:#0284c7;font-size:12px;">（主页公告）</span>';
     return `
       <div class="card">
         <h3>${escapeHtml(a.title)}${active ? '' : ' <span style="color:#e11d48;font-size:12px;">（已下架）</span>'} ${scopeTag}</h3>
@@ -2305,6 +2362,22 @@ function renderSettings(){
   const reportThreshold = safeInt(reportInfo.threshold) || 3;
   const reportDefault = safeInt(reportInfo.defaultThreshold) || 3;
 
+  // 暂停 / 继续接收投稿（用户要求，以按钮形式）。
+  // 两个按钮都渲染出来、按当前状态各自置灰 —— 比"只显示一个按钮"清楚：
+  // 管理员一眼能看到"现在是什么状态"以及"点哪个能切过去"。
+  const submitPaused = (settingsCache.submit || {}).paused === true;
+  const submitSection = `
+    <div class="card" id="submitSwitchCard">
+      <h3>接收投稿</h3>
+      <p>暂停之后学生<b>仍然能看榜单、看排期、登录</b>，只是<b>提交点歌会被拒绝</b>，
+         页面上会显示"广播站现在暂停接收投稿"。排期排满、考试周、放假前后常用这个开关。</p>
+      <p class="sub" style="color:${submitPaused ? '#b45309' : '#059669'};">
+        当前状态：${submitPaused ? '已暂停接收投稿' : '正常接收投稿'}</p>
+      <button onclick="setSubmissionsPaused(false)" class="btn-pass btn-sm" ${submitPaused ? '' : 'disabled'}>继续接收投稿</button>
+      <button onclick="setSubmissionsPaused(true)" class="btn-reject btn-sm" ${submitPaused ? 'disabled' : ''}>暂停接收投稿</button>
+    </div>
+  `;
+
   const voteSection = isSuper ? `
     <div class="card">
       <h3>投票上限（超出部分不计入）</h3>
@@ -2346,16 +2419,21 @@ function renderSettings(){
     </div>
 
     ${superSections}
+    ${submitSection}
     ${voteSection}
 
     <div class="card">
       <h3>发布公告</h3>
-      <p><b>两种公告互不干扰，注意选对类型：</b><br>
+      <p><b>三种公告互不干扰，注意选对类型：</b><br>
          <b>主页公告</b>：学生登录后在主页最上方看到。<br>
+         <b>弹窗公告</b>：学生登录后<b>弹一个窗口</b>要求点「知道了」——
+         用来发非看不可的通知；每台设备只看一次，所以<b>别拿它发日常消息</b>
+         （要反复提醒就再发一条新的）。<br>
          <b>登录页公告</b>：还没输入口令时就能看到，所以<b>不要写需要保密的内容</b>
          （适合放欢迎语、使用说明、值班安排）。</p>
       <select id="annScope" style="font-size:14px;padding:10px;margin:8px 0;width:100%;box-sizing:border-box;">
         <option value="app">主页公告（登录后可见）</option>
+        <option value="popup">弹窗公告（登录后弹出，点「知道了」关闭）</option>
         <option value="gate">登录页公告（未登录也可见）</option>
       </select>
       <input id="annTitle" placeholder="公告标题" maxlength="40" style="font-size:14px;padding:10px;margin:8px 0;">
@@ -2553,6 +2631,25 @@ async function saveReportThreshold(){
   settingsPost({action:'set_report_threshold', threshold: threshold}, '已保存');
 }
 
+/**
+ * 暂停 / 继续接收投稿（按钮）。
+ *
+ * 只发一个设置项；真正拦住提交的是 vote.js 的 POST 闸门 ——
+ * 这里改的只是"状态"，所以停收期间前端置灰只是体验，绕过页面 POST 一样会被 403。
+ * 保存成功后**重新拉一次设置**，让卡片上的状态文字与按钮置灰跟着变
+ * （settingsCache 是渲染的唯一来源，手动改 DOM 容易两边不一致）。
+ */
+async function setSubmissionsPaused(paused){
+  const what = paused ? '暂停接收投稿' : '恢复接收投稿';
+  if(!await uiConfirm('确认' + what + '吗？\n\n'
+    + (paused
+      ? '学生在点歌页会看到"广播站现在暂停接收投稿"，提交会被拒绝；榜单、排期、登录都不受影响。'
+      : '学生可以重新提交点歌。'))) return;
+
+  // settingsPost 成功后自己会 refreshSettings()，状态文字与按钮置灰跟着变。
+  await settingsPost({action:'set_submissions_paused', paused: paused ? 1 : 0}, '已' + what);
+}
+
 /* ---------------- 审核时试听 ---------------- */
 
 function adminAuditionFromButton(button){
@@ -2741,12 +2838,12 @@ function adminAuditionPanelHtml(songId, list){
       <span class="cand-no">${index + 1}</span>
       <div>
         <div class="cand-name">${escapeHtml(s.name)}</div>
-        <div class="cand-sub">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
+        <div class="cand-sub">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}</div>
       </div>
       <span class="cand-dur">${escapeHtml(formatDuration(s.duration))}</span>
       <div class="cand-acts">
         ${s.playable === false
-          ? '<span class="cand-off">暂无试听</span>'
+          ? '<button class="cand-noop" type="button" disabled title="这一版暂时取不到音频，但要播出请用榜单里学生锁定的那一版">无试听</button>'
           : `<button data-track="${escapeHtml(s.id)}" data-song="${id}" onclick="adminPlayFromButton(this)">播放</button>`}
       </div>
     </div>
@@ -3164,9 +3261,13 @@ async function createAnnouncement(){
   const scope = (document.getElementById('annScope') || {}).value || 'app';
   if(!title || !content){ uiAlert('公告标题和内容都要填'); return; }
 
+  // 确认框里把"发到哪儿"说清楚 —— 三种类型的到达位置差别很大，
+  // 发错地方（尤其是发成弹窗公告）会真的拦住学生。
   const where = scope === 'gate'
     ? '登录页（还没输入口令的人也能看到，别写保密内容）'
-    : '主页（学生登录后看到）';
+    : scope === 'popup'
+      ? '弹窗（学生登录后会弹出来，必须点「知道了」才能关；每台设备只看一次）'
+      : '主页（学生登录后看到）';
   if(!await uiConfirm('确认发布公告「' + title + '」吗？\n\n发布位置：' + where)) return;
 
   const r = await fetch('/api/announcements', {

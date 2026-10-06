@@ -16,6 +16,14 @@ const MAX_ACTIVE_LIST = 20;
 const MAX_ADMIN_LIST = 100;
 // 登录页公告是给还没进来的人看的，条数不宜多，否则把口令框挤下去
 const MAX_GATE_LIST = 5;
+/**
+ * 弹窗公告的条数上限。
+ *
+ * 为什么只有 3：每一条都是**登录后必须点一次「知道了」才能关掉**的模态框。
+ * 攒了十条弹窗，学生要连点十次才能用页面 —— 那不是公告，那是惩罚。
+ * 真要多发几条，让管理员用普通公告（页面上的卡片，不挡操作）。
+ */
+const MAX_POPUP_LIST = 3;
 
 const MIGRATION_HINT =
   '数据库尚未执行 003 迁移（缺少公告表），'
@@ -97,7 +105,33 @@ async function handleGet(context) {
       LIMIT ${MAX_ACTIVE_LIST}`
   ).all();
 
-  return json({ announcements: results || [] });
+  /**
+   * 弹窗公告（scope='popup'）。
+   *
+   * 为什么**跟普通公告一起返回**、而不是单开一个接口：
+   *   前端要在"首次进入须知弹窗关掉之后"紧接着弹它，而那是一个**时序要求**。
+   *   单开接口就变成"两个并发请求谁先回来不一定"，第二条弹窗可能抢在第一条前面
+   *   冒出来（甚至两条同时叠在一起）。一起返回，前端就能自己排好队。
+   *
+   * 为什么要 try/catch：老部署可能还没跑 010 迁移（没有 scope 列），
+   *   那时这条查询会抛 "no such column" —— 不能因此让**整个公告接口**挂掉，
+   *   否则首页连普通公告都看不到。缺列就当没有弹窗公告（与"没发过"同义）。
+   */
+  let popups = [];
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT id, title, content, created_by_name, created_at
+         FROM announcements
+        WHERE CAST(is_active AS INTEGER) = 1 AND scope = 'popup'
+        ORDER BY id ASC
+        LIMIT ${MAX_POPUP_LIST}`
+    ).all();
+    popups = rows.results || [];
+  } catch (err) {
+    if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+  }
+
+  return json({ announcements: results || [], popups });
 }
 
 async function handlePost(context) {
@@ -134,8 +168,9 @@ async function createAnnouncement(env, session, data) {
   const fields = parseFields(data);
   if (fields.error) return error(fields.error, 400);
 
-  // scope：gate = 登录页（未登录可见），app = 主页（登录后可见）
-  const scope = parseEnum(data.scope, ['gate', 'app'], { field: '公告类型', fallback: 'app' });
+  // scope：gate = 登录页（未登录可见），app = 主页（登录后可见），
+  //        popup = 登录后**弹窗**（学生必须点一次「知道了」）
+  const scope = parseEnum(data.scope, ['gate', 'app', 'popup'], { field: '公告类型', fallback: 'app' });
   if (!scope.ok) return error(scope.error, 400);
 
   const admin = await env.DB.prepare('SELECT username FROM admins WHERE id = ?')
@@ -157,7 +192,11 @@ async function createAnnouncement(env, session, data) {
 
   return json({
     ok: true,
-    message: scope.value === 'gate' ? '登录页公告已发布（未登录也能看到）' : '公告已发布',
+    message: scope.value === 'gate'
+      ? '登录页公告已发布（未登录也能看到）'
+      : scope.value === 'popup'
+        ? '弹窗公告已发布（学生登录后会看到，点「知道了」关闭）'
+        : '公告已发布',
   });
 }
 

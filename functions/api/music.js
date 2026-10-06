@@ -2,6 +2,7 @@ import { error, json } from '../../_lib/http.js';
 import { requireSession, guardRate, rateLimitOnce, countBudget } from '../../_lib/auth.js';
 import { sanitizeText } from '../../_lib/validate.js';
 import { signTrackToken } from '../../_lib/tracktoken.js';
+import { neteaseOuterUrl, probeNeteasePlayable, keepPlayableNetease, trackPlayable as probeTrackPlayable } from '../../_lib/playable.js';
 
 /**
  * 音源中转代理（试听 / 搜索 / 可播性校验）。
@@ -15,19 +16,27 @@ import { signTrackToken } from '../../_lib/tracktoken.js';
  * 所以已经删掉；要判断某家源此刻行不行，看 `/api/music?probe=1` 的 `verdict`。
  *
  * 当前音源与顺序（`auto` 模式，由 buildSources 决定）：
- *   1. `apple:<storefront>` —— 苹果官方 iTunes 搜索接口，按 hk / tw / us 依次。
- *      官方 30 秒试听，无需 key，最稳；负责"找得到原唱"。
- *   2. `meting:<host>` —— GD Studio / Meting 形状的中转，**优先源**。
- *      2026-10-07 按用户要求从末位提上来；默认第一个基址就是用户指定的
- *      `music.gdstudio.org`。给完整歌曲，覆盖面比网易云官方公开接口宽。
- *   3. `netease-native` —— 网易云官方公开接口。给完整歌曲；
- *      公开搜索接口隐藏主流版权曲，版权受限曲拿不到音频（探测为 false）。
+ *   1. `mg-` 咪咕 —— **第一位**。官方 CDN 直链，一次 fetch + 一次字节还原；
+ *      实测**原唱命中且给完整整曲**（4.12MB / 270s）。用户 2026-10-07 的验收标准
+ *      "原唱都能听到完整曲子"只有它同时满足。
+ *   2. `meting:<host>` —— 测试还活着的中转（默认只剩 qijieya）。搜索排得不准，
+ *      但**播放**能给完整 320kbps，连网易云官方拿不到的版权曲都能拿到 —— 当播放兜底。
+ *   3. `ap-` 苹果官方 iTunes —— 原唱准，但**只有 30 秒**，所以它是"原唱目录的补充"，
+ *      不是主源。按 hk / tw / us 依次问。
+ *   4. `mt-` 网易云官方直连 —— 接口最稳（从不变），但公开搜索接口隐藏主流版权曲。
  *   默认基址见 DEFAULT_METING_BASES，其可用性随时间变化，不要假设它活着。
- *   `MUSIC_PROVIDER=meting` 会关掉苹果源（于是中转源成为第一位）、
- *   `=apple` 会关掉网易云与 Meting。
+ *   `MUSIC_PROVIDER=apple` 只留苹果、`=meting` 会关掉苹果与咪咕。
+ *   ⚠️ 排序只决定**并列时的先后**：结果始终是**合并所有源**，
+ *   而且先去重、再按"标题干净度 → 相似度 → 歌手吻合 → 源优先级"排 ——
+ *   所以"某个源排第一"不等于"它的翻唱会顶掉别家的原唱"。
  *
- * 歌曲 id 带音源前缀（mt-<数字> / ap-<数字>），这样播放时不必猜测该用哪家，
- * 也避免两家的数字 id 互相撞车。`?check=` 只对 `mt-` 有意义（苹果必有音频）。
+ * 歌曲 id 带音源前缀（`mg-<contentId>` / `mt-<数字>` / `ap-<数字>`），
+ * 这样播放时不必猜测该用哪家，也避免两家的数字 id 互相撞车。
+ *
+ * ⚠️ 前缀语义不能混（踩过一次就会全错）：`mt-` 在 `_lib/playable.js` 里
+ * **专门表示"网易云歌曲 id"**（`neteaseIdOf` 只认 mt-，并拿它去拼 outer/url）。
+ * 把咪咕的 contentId 也写成 `mt-`，那串 id 会被当成网易云 id 去探测，
+ * 结果**全部候选被判成"拿不到音频"**。所以咪咕必须有独立前缀 `mg-`。
  *
  * A7（音源一致性）：搜索结果里每个候选都会额外带一张**服务端签名的
  * 短期选曲凭据**（`token`）。点歌时把它一起提交，服务端就能确认
@@ -62,7 +71,7 @@ const MAX_FIELD_LENGTH = 120;
  * 数字不对就说明部署的不是这一包，不必再猜别的可能。
  * 每次改动本文件时把它 +1（或改日期），交付时与版本号保持一致。
  */
-const MUSIC_BUILD = '2026-10-07-b+gdstudio-org';
+const MUSIC_BUILD = '2026-10-07-d+migu-first';
 
 /* ------------------------------------------------------------------
  * 上游调用的资源护栏（审计 C3）
@@ -92,25 +101,25 @@ const SOURCE_FAILURE_THRESHOLD = 3;
 const SOURCE_COOLDOWN_MS = 90 * 1000;
 
 const DEFAULT_METING_BASES = [
-  // 实测过的一批公共音源（清单来自 VoiceHub 的 musicSources.ts，逐个实测筛选）。
-  // 2026-10-05 结论：
-  //   ✅ music-api.gdstudio.xyz   搜索 + 播放地址都可用（完整歌曲 320kbps）
-  //   ❌ api.qijieya.cn/meting/   type=search 返回空、type=url 返回空
-  //   ❌ api.injahow.cn/meting/   type=search 报 unknown type、type=url 返回空
-  //   ❌ api.ygking.top           域名已无法解析
-  //   ⚠️ api.vkeys.cn/v2/music    搜索可用（QQ 音乐、原唱准）但 url 恒为 null，不能播
-  // 所以默认只留 GD Studio。要换成自建 Meting，设 MUSIC_API_BASE 即可。
-  //
-  // 2026-10-07 追加 `music.gdstudio.org`（用户指定接入的"音源 API"）：
-  //   · 域名本身活着（Cloudflare，首页 200），与 music-api.gdstudio.xyz 同属 GD Studio；
-  //   · 本机实测它的 `?types=search&...` 回 `401 {"detail":"Invalid request."}`，
-  //     只有 `?types=playlist` 回 `200 []`。用户明确要求接入，所以照办、放在第一位。
-  //   · 为什么放第一位也不冒险：搜索侧它是**并行的一路**，返回空只是少一路候选，
-  //     不会拖长尾（所有源都受 MERGE_DEADLINE_MS 约束）；播放侧 metingResolve
-  //     逐基址回退，它取不到地址就自动落到下一个基址。GD Studio 家的两套参数
-  //     形状由 isGdStudio() 按域名自动分派，这里不需要再写任何分派逻辑。
-  'https://music.gdstudio.org/api.php',
-  'https://music-api.gdstudio.xyz/api.php',
+  /**
+   * 2026-10-07 复测结论（本机直连，`_harness\probe-sources-live.mjs`）：
+   *   ❌ music.gdstudio.org          `?types=search` 回 401 Invalid request（拿不到候选）
+   *   ❌ music-api.gdstudio.xyz      **已被劫持**：任何路径都 200 跳 m.baidu.com（停靠页）
+   *   ✅ api.qijieya.cn/meting/      server=netease 搜索可用，type=url 给完整 320kbps
+   *   其它（injahow / ygking / lsky / moeyao / liumingye）全部不可用。
+   *
+   * 所以默认清单里**只留 qijieya**（实测唯一还活着的中转），GD Studio 两台一并移除：
+   * 留着它们不是"多一层兜底"，而是每次搜索都白发两个请求、再等一次超时。
+   * 谁的两台基址恢复了，用 `MUSIC_API_BASE` 就能把它们换回来（那是**替换**语义）。
+   *
+   * 为什么它排在中转位而不是第一位：qijieya 的 netease 通道**搜索质量差**
+   *（实测搜「七里香 周杰伦」第一条是翻唱《刀马旦》，搜「晴天」第一条是《刀马旦》）——
+   * 它只是把网易云的接口转出来，网易云公开接口隐藏主流版权曲这个毛病它一样有。
+   * 它的价值在**播放**：网易云官方 `outer/url` 对版权受限曲拿不到音频，
+   * 而它自带 cookie，同一首能给完整 320kbps。所以顺序是"咪咕（原唱准）→
+   * 网易云官方（搜索稳）→ qijieya（拿音频）"，三者**合并**，不是谁顶掉谁。
+   */
+  'https://api.qijieya.cn/meting/',
 ];
 
 /**
@@ -172,6 +181,7 @@ async function fetchBounded(url, options = {}, {
   timeoutMs = SEARCH_TIMEOUT_MS,
   limit = SEARCH_BODY_LIMIT,
   parse = 'json',
+  decode,
 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -187,6 +197,16 @@ async function fetchBounded(url, options = {}, {
     // 先看声明的长度：能提前拒绝就没必要真的去读。
     const declared = Number(res.headers.get('Content-Length'));
     if (Number.isFinite(declared) && declared > limit) return null;
+
+    // parse:'bytes' 走二进制读取，**解码交给调用方**（自定义 decode）。
+    // 为什么需要它：咪咕那个播放接口回的是**加扰二进制**，
+    // 预先按 UTF-8 解一遍就是有损的（非法字节会被换成 U+FFFD，再也还原不回来），
+    // 于是解密必然失败、表现成"咪咕能搜到却一首都播不了"。
+    if (parse === 'bytes') {
+      const bytes = await readBytesLimited(res, limit);
+      if (bytes === null) return null;
+      return { res, body: decode ? decode(bytes) : bytes, cleanup };
+    }
 
     const text = await readBodyLimited(res, limit);
     if (text === null) return null;
@@ -241,6 +261,51 @@ async function readBodyLimited(res, limit) {
     offset += chunk.byteLength;
   }
   return new TextDecoder('utf-8', { fatal: false }).decode(merged);
+}
+
+/**
+ * 逐块读取响应体为**原始字节**，超过上限返回 null。
+ *
+ * 与 readBodyLimited 的区别只有一个，但很关键：**不做任何解码**。
+ * 给咪咕那个回加扰二进制的接口用 —— 先按 UTF-8 解一遍会把非法字节换成 U+FFFD，
+ * 那种损坏是不可逆的，之后无论怎么解密都拿不到 URL。
+ */
+async function readBytesLimited(res, limit) {
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    try {
+      const buf = await res.arrayBuffer();
+      const all = new Uint8Array(buf);
+      return all.byteLength > limit ? null : all;
+    } catch {
+      return null;
+    }
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value ? value.byteLength : 0;
+      if (total > limit) {
+        try { await reader.cancel(); } catch { /* 已经在关了 */ }
+        return null;
+      }
+      if (value) chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
 }
 
 /* ======================= 音源健康度与短期缓存 ======================= */
@@ -478,6 +543,184 @@ async function gdstudioResolve(base, songId) {
   return typeof direct === 'string' && /^https?:\/\//i.test(direct) ? direct : null;
 }
 
+/* ======================= 咪咕（原唱 + 完整整曲，第一顺位） =======================
+
+   为什么接它（用户 2026-10-07 的验收标准是"**原唱都能听到完整曲子**"）：
+     实测各源对同一个查询的表现（`_harness\probe-source-quality.mjs`，六首歌）：
+
+     | 源 | 原唱命中 | 能拿到完整音频 |
+     |---|---|---|
+     | 咪咕 | ✅ 目录里就是原唱（晴天/七里香/雨爱/起风了/孤勇者/海阔天空 全中） | ✅ 完整整曲（实测 4.12MB / 270s，128kbps） |
+     | qijieya 中转 | ⚠️ 搜索排不准（第一条常是翻唱），但拿到的音频完整 | ✅ 完整 320kbps |
+     | 网易云官方 | ❌ 公开接口**隐藏主流版权曲**（搜七里香全是翻唱） | ⚠️ 版权受限曲拿不到 |
+     | 苹果 iTunes | ✅ 原唱准 | ❌ **只有 30 秒** —— 不满足"完整曲子" |
+
+     所以"原唱 + 完整"同时成立的只有咪咕。它是**官方 CDN 直链**，
+     一次 fetch + 一次 O(n) 字节还原，没有第三方中转、没有 key、没有 cookie，
+     正好落在免费套餐 10ms CPU 预算里。
+
+   实现出处：VoiceHub `server/api/native-api/migu/playurl.get.ts`（GPL-3.0）的算法，
+   按本项目的**流式转发**模型重写（VoiceHub 是把整个 ArrayBuffer 读进来再解密，
+   这里只需要解密那一小段 JSON 信封，音频本身照旧流式转发、不进内存）。
+
+   ⚠️ 三个必须知道的边界：
+     1. **返回的不是 JSON，是私有加扰二进制**，魔数 0xAB 0xCD 0x01，第 4 字节是异或步长。
+        认不出魔数就一律当失败（宁可少一个候选，也不要把乱码解析成 URL）。
+     2. `auditionsLength: 60` 这个字段**实测不影响拿到的音频**：返回的直链是完整整曲
+        （已用 `Range: bytes=0-0` 读 `Content-Range` 反算验证：4317311 字节 / 270 秒 = 128kbps）。
+        但它是上游的"试听"标记，**将来可能变成真的 60 秒**，所以：
+        换源或发现用户反馈"只有一小段"时第一件事就是重新量一次总字节数。
+     3. `toneFlag` 只影响上游挑哪一档音质；匿名请求实测一律给 PQ（128kbps）。
+        要升档得先改 URL 路径再 HEAD 探测（VoiceHub 的 `QUALITY_FALLBACK_CHAIN`），
+        本项目不做 —— 多一次上游往返去赌一个可能 404 的高码率地址，不划算。
+
+   关于歌词/封面的字段（`lrcUrl` / `imgItems`）：本项目的候选面板不展示它们，不收。 */
+
+/** 一次搜索最多问咪咕要多少条（与 SOURCE_FETCH_LIMIT 对齐，一次请求拿满）。 */
+const MIGU_PAGE_SIZE = 20;
+
+function miguSearchUrl(keywords, pageSize) {
+  return 'https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/search_all.do'
+    + `?text=${encodeURIComponent(keywords)}&pageNo=1&pageSize=${pageSize}`
+    + '&searchSwitch=%7B%22song%22%3A1%7D';
+}
+
+/** 咪咕的歌曲 id 就是 contentId（长数字串），加 `mg-` 前缀避免与网易云数字 id 撞车。 */
+function miguContentIdOf(trackId) {
+  const m = /^mg-(\d{1,24})$/.exec(String(trackId || ''));
+  return m ? m[1] : '';
+}
+
+async function miguSearch(keywords) {
+  const url = miguSearchUrl(keywords, MIGU_PAGE_SIZE);
+  const got = await fetchBounded(url, {
+    // channel 是上游要求的渠道号（VoiceHub 用 014X031），缺了会回错误体
+    headers: { channel: '014X031', Referer: 'https://music.migu.cn/' },
+  }, { parse: 'json' });
+  if (!got) return [];
+  got.cleanup();
+
+  const items = (got.body && got.body.songResultData && got.body.songResultData.result) || [];
+  const out = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const contentId = String(item.contentId || '');
+    const name = String(item.name || item.songName || '').trim();
+    if (!name || !/^\d{1,24}$/.test(contentId)) continue;
+    // 歌手：优先 singers 数组（实测字段），退回单数字符串形态
+    const singers = Array.isArray(item.singers) ? item.singers : [];
+    const artist = singers.length
+      ? singers.map((s) => (s && typeof s === 'object' ? s.name : s)).filter(Boolean).join(' / ')
+      : String(item.singer || item.singerName || '');
+    const albums = Array.isArray(item.albums) ? item.albums : [];
+    const album = albums.length ? String((albums[0] && albums[0].name) || '') : '';
+    out.push({
+      id: `mg-${contentId}`,
+      name: clip(name),
+      artist: clip(artist),
+      album: clip(album),
+      duration: miguDurationOf(item.duration),
+      source: '咪咕音乐',
+    });
+    if (out.length >= SOURCE_FETCH_LIMIT) break;
+  }
+  return out;
+}
+
+/**
+ * 时长（秒）。咪咕给的是**毫秒**（实测晴天 270000）。
+ * 与 gdDurationOf 用同一个分界：正常歌曲的毫秒值必然远大于 10000，
+ * 秒值必然远小于它。判错的代价只是候选行上少一个时长，不影响可播性。
+ */
+function miguDurationOf(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.round(value > 10000 ? value / 1000 : value);
+}
+
+/** 上游协议里硬编码的加扰密钥（不是我们的秘密，VoiceHub 里同样是明文）。 */
+const MIGU_SCRAMBLE_KEY = 'Jk8qzuePiJ1qE3mDYhLQ3T73DtDoAhLP';
+
+/**
+ * 咪咕返回的私有加扰还原（VoiceHub `decode()` 的等价实现，逐字节相同）。
+ *
+ * 算法：跳过 4 字节头，剩余每个字节 `(密文 + step - 密钥[i % 密钥长]) & 0xff`。
+ * 纯 O(n) 字节运算，信封只有 1~4KB，落在免费套餐 10ms CPU 预算里。
+ * 密钥是上游协议常量，**不是我们的秘密**（VoiceHub 里也是硬编码的明文）。
+ *
+ * ⚠️ 踩过的坑（写这条测试时抓到的，第一版就是这么错的）：
+ *   循环上界写成 `i < key.length * 2`（64）而不是 `i < out.length`，
+ *   于是**只还原了前 64 个字节**、后面全是 0，JSON.parse 报
+ *   "Bad control character in string literal"。
+ *   真实信封有 1~4KB，所以那样写等于**咪咕一首都解不出来** ——
+ *   而"解密失败"在调用方看起来和"这首歌没音频"一模一样，极难排查。
+ *   上界只能是输出长度。
+ */
+function miguDecode(bytes, key) {
+  if (!key || bytes.length < 4) return null;
+  if (bytes[0] !== 0xab || bytes[1] !== 0xcd || bytes[2] !== 0x01) return null;
+  const step = bytes[3];
+  const out = new Uint8Array(bytes.length - 4);
+  const keyLength = key.length;
+  for (let i = 0; i < out.length; i++) {
+    out[i] = (bytes[4 + i] + step - key.charCodeAt(i % keyLength)) & 0xff;
+  }
+  return out;
+}
+
+/** 加扰还原后的字节 -> 字符串。信封是 JSON，用 TextDecoder 一次解出来最省。 */
+function miguTextOf(bytes) {
+  try {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 咪咕播放地址。
+ * @returns {Promise<string|null>} 真实音频直链（已剥掉查询串、已升级 https）
+ */
+async function miguResolve(contentId) {
+  if (!/^\d{1,24}$/.test(String(contentId || ''))) return null;
+  const url = 'https://c.musicapp.migu.cn/strategy/listen-url/h5/v2.4'
+    + `?contentId=${encodeURIComponent(contentId)}`
+    + `&copyrightId=&resourceType=2&netType=01&toneFlag=PQ&scene=`
+    + `&lowerQualityContentId=${encodeURIComponent(contentId)}`;
+
+  // parse:'bytes' —— 响应体是加扰二进制，交给 JSON.parse 只会整条丢掉，
+  // 而先按 UTF-8 解一遍又会把字节损坏掉（见 readBytesLimited 的说明）。
+  const got = await fetchBounded(url, {
+    headers: {
+      birth: 'h5page',
+      channel: '014X031',
+      Referer: 'https://y.migu.cn/',
+      'location-data': '30.6698676660,104.1229614820',
+      'location-info': '',
+    },
+  }, {
+    parse: 'bytes',
+    timeoutMs: 8000,
+    limit: 64 * 1024,
+    decode: (bytes) => miguDecode(bytes, MIGU_SCRAMBLE_KEY),
+  });
+  if (!got) return null;
+  const { body: plain, cleanup } = got;
+  cleanup();
+
+  if (!plain) return null;
+  let payload = null;
+  try { payload = JSON.parse(miguTextOf(plain)); } catch { return null; }
+  const data = payload && payload.data;
+  const direct = data && typeof data.url === 'string' ? data.url : '';
+  if (!/^https?:\/\//i.test(direct)) return null;
+
+  // 剥查询串 + 升级 https：上游给的常是 http + 带鉴权查询串，
+  // 查询串对音频本体没影响（VoiceHub 同样先剥再替换），而 http 在页面上会被
+  // upgrade-insecure-requests 拦成混合内容。
+  return direct.split('?')[0].replace(/^http:/i, 'https:');
+}
+
 async function metingSearch(base, keywords) {
   if (isGdStudio(base)) return gdstudioSearch(base, keywords);
   const url = `${base}?server=netease&type=search&id=${encodeURIComponent(keywords)}`;
@@ -541,122 +784,14 @@ async function neteaseSearch(keywords) {
   return out;
 }
 
-/** 网易云播放地址：outer/url 会 302 跳到真实 CDN 直链（完整歌曲）。 */
-function neteaseResolveUrl(songId) {
-  return `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(songId)}.mp3`;
-}
+/* ---------------- 网易云候选的"可播性" ----------------
 
-/* ---------------- 网易云候选的"可播性"过滤 ----------------
-
-   为什么需要它（实测数据）：网易云**受版权限制的歌**（原唱居多：
-   Beyond《海阔天空》、米津玄師《Lemon》、逃跑计划《夜空中最亮的星》…）
-   的 outer/url 会 **302 回它自己的首页**，拿不到任何音频。
-   实测 21 个候选里有 5 个是这种（约 1/4）。
-
-   不滤掉的后果最糟：学生看到《海阔天空 / Beyond》很自然地选它、提交、
-   入库存下这个 id，**以后谁都播不出来** —— 用户的原话就是"点了却放不了"。
-   所以宁可少给几个候选，也不给一个点了不能用的。
-
-   做法：搜索后并发探一次（只取响应头，不读 body），能出音频的才留下。
-   · 只对网易云候选做（苹果那边给的是官方 previewUrl，一定有音频）；
-   · 并发 4 路 + 总超时 1.8 秒，避免把搜索拖慢；
-   · 结果按 id 缓存 10 分钟，翻来覆去搜同一首歌不会反复探测；
-   · 探测本身失败（超时/网络抖动）时**保留**该候选 —— 宁可偶尔给一个
-     放不出来的，也不要在网络不稳时把搜索结果清空。 */
-
-const NETEASE_PLAYABLE_TTL_MS = 10 * 60 * 1000;
-const NETEASE_PLAYABLE_MAX = 400;
-const neteasePlayable = new Map();      // id -> { ok: boolean, at: number }
-
-function neteasePlayableCached(id) {
-  const hit = neteasePlayable.get(id);
-  if (hit && Date.now() - hit.at < NETEASE_PLAYABLE_TTL_MS) return hit.ok;
-  return null;
-}
-
-function rememberPlayable(id, ok) {
-  if (neteasePlayable.size > NETEASE_PLAYABLE_MAX) {
-    // 简单的容量控制：清掉最早的一批（Worker isolate 内存有限）
-    const keys = Array.from(neteasePlayable.keys()).slice(0, 100);
-    for (const k of keys) neteasePlayable.delete(k);
-  }
-  neteasePlayable.set(id, { ok, at: Date.now() });
-}
-
-/** 探一次"这个 id 到底能不能出音频"。返回 true=能播，false=拿不到音频，null=探测失败（不确定）。 */
-async function probeNeteasePlayable(songId) {
-  const cached = neteasePlayableCached(songId);
-  if (cached !== null) return cached;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
-  try {
-    // 第 1 跳：outer/url（看它把我们导向哪）
-    const first = await fetch(neteaseResolveUrl(songId), {
-      redirect: 'manual',
-      signal: controller.signal,
-      headers: { 'User-Agent': 'yczx-musicvote/1.0', Referer: 'https://music.163.com/', Cookie: 'appver=2.0.2' },
-    });
-    const location = first.headers.get('Location') || '';
-    try { await first.body?.cancel(); } catch { /* 重定向响应没有 body */ }
-
-    // 关键判据：受版权限制时它跳回自己首页（含 404 / music.163.com/song 之类），
-    // 而不是跳到 m*.music.126.net 这种 CDN。
-    if (!location) { rememberPlayable(songId, false); return false; }
-    const target = new URL(location, neteaseResolveUrl(songId)).href;
-    let host = '';
-    try { host = new URL(target).host; } catch { /* 非法 Location */ }
-    if (!/(^|\.)music\.126\.net$/.test(host)) {
-      rememberPlayable(songId, false);
-      return false;
-    }
-    rememberPlayable(songId, true);
-    return true;
-  } catch {
-    // 超时/网络问题：不确定，交给调用方保留候选
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 并发过滤网易云候选：只留下"确认能播"的。
- * 探测失败的（不确定）保留，避免网络抖动时把结果清空。
- */
-async function keepPlayableNetease(songs) {
-  const targets = songs.filter((s) => /^mt-\d+$/.test(String(s.id || '')));
-  if (!targets.length) return songs;
-
-  const verdicts = new Map();
-  const queue = targets.slice();
-  const CONCURRENCY = 6;
-  const deadline = Date.now() + 4000;
-
-  const worker = async () => {
-    while (queue.length && Date.now() < deadline) {
-      const song = queue.shift();
-      const id = String(song.id).slice(3);
-      // eslint-disable-next-line no-await-in-loop
-      const ok = await probeNeteasePlayable(id);
-      verdicts.set(song.id, ok);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
-
-  // ⚠️ 这里**不再删除**不可播的候选，只给它打一个 `playable=false` 标记。
-  //
-  // 为什么（用户反馈："搜索雨爱居然只能出 DJ 版"）：有些歌的**原唱**
-  // 受版权限制拿不到音频（实测网易云的杨丞琳《雨爱》outer/url 会 302
-  // 回它自己首页），而苹果目录里没有这一版。直接删掉整条会让原唱
-  // **从列表里消失**，学生只能看到翻唱/DJ 版，以为"系统搜不到原唱"。
-  // 打标记则由前端显示"暂无试听"——知情比消失好。
-  return songs.map((s) => {
-    const v = verdicts.get(s.id);
-    if (v === false) return { ...s, playable: false };
-    return s;
-  });
-}
+   探测与缓存已经抽到 `_lib/playable.js`（2026-10-07），因为现在有**两个**使用方，
+   而且必须给出完全一致的结论：
+     · 本文件 —— 搜索时给候选打 `playable` 标记、以及 `?check=<id>` 惰性校验；
+     · `admin-list.js` —— 审核列表要告诉管理员"学生锁定的这一版播不出来"。
+   两边各写一套就会出现"学生端说能播、审核端说不能"这种最难查的分歧。
+   判据、三种返回值（true / false / null）与缓存策略都写在那边的文件头上。 */
 
 async function metingResolve(base, songId) {
   if (isGdStudio(base)) return gdstudioResolve(base, songId);
@@ -782,6 +917,29 @@ function titlePartOf(raw) {
 }
 
 /**
+ * 从用户输入里拆出"可能是歌手"的部分（与 titlePartOf 互为反面）。
+ *
+ * 为什么需要它（用户反馈："我在这里搜一首雨爱，居然第一个原唱没有"）：
+ *   前端把**歌名框里的整段文字**当查询词发过来（`q=雨爱 杨丞琳`），而那个独立的
+ *   歌手字段是只读的 —— 只有"选这首"才会填进去。所以学生手动打了歌手时，
+ *   服务端**完全收不到歌手信号**，于是《雨爱》的原唱和一堆同名翻唱在排序里
+ *   完全并列（干净度一样、相似度一样、歌手吻合度都是 0），最后只能靠
+ *   "源优先级"分先后 —— 翻唱就这么顶到了原唱前面。
+ *
+ * 用途仅限**排序加分**，绝不用于过滤：猜错了最坏是没加分，
+ * 不会因为"我猜的歌手和这首歌对不上"而把结果筛掉。
+ */
+function artistHintOf(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const parts = value.split(/[\s·・/|,，]+/).filter(Boolean);
+  if (parts.length < 2) return '';
+  // 「七里香 周杰伦」-> 周杰伦；「Merry Christmas Mr. Lawrence」这类第一段就带空格的
+  // 外文歌名也会走到这里，但那种情况下"歌手线索"只是个噪音串，对不上就不加分。
+  return clip(parts.slice(1).join(' '));
+}
+
+/**
  * 把多个音源的结果**合并**成一个候选池（而不是只留第一个达标的源）。
  *
  * 为什么必须合并（这是"搜不到歌"的主要成因之一）：
@@ -888,84 +1046,106 @@ function titleCleanliness(name) {
  * 为什么"没带歌手时不减分"很重要：学生点歌经常只输歌名，
  * 而网易云的候选里不少作者名是空的/杂名 —— 如果那种情况给低分，
  * 会把本来对的结果压到翻唱后面。
+ *
+ * ⚠️ 2026-10-07 改了两处（都是为了修"搜雨爱时原唱排在翻唱后面"）：
+ *   1. **包含即满分**（原来给 1 分，只有完全相等才给 2）。学生写
+ *      「雨爱 杨丞琳」而候选是「李之谦 / 杨丞琳」时，包含关系就是最强信号，
+ *      给半分等于把原唱和翻唱又拉平了。
+ *   2. **不再给不相干的候选扣分（原来的 -1）**，改用"查询里的字有多少出现在
+ *      候选里"的覆盖率，≥0.6 给 1 分、否则 0 分。原因是扣分对"简繁差异"
+ *      完全失效：「周杰伦」（学生输入）与「周杰倫」（苹果目录里的写法）
+ *      一个字都对不上，扣分会让**原唱和翻唱一起沉底**，等于没排。
+ *      覆盖率则能救回来：周杰伦 vs 周杰倫 命中 2/3 = 0.67 → 加分，
+ *      而「Xai小爱」= 0 → 不加分，原唱就浮上来了。
+ * 这个"按字数覆盖率"的写法是**刻意的近似**：它不做真正的简繁转换
+ *（那需要一张完整对照表），只在排序上做让步 —— 排错了顶多是顺序不理想，
+ * 而真做转换要维护的数据量和出错面都大得多。
  */
 function artistFitScore(candidateArtist, queryArtist) {
-  const q = String(queryArtist || '').trim().toLowerCase();
+  const q = String(queryArtist || '').trim().toLowerCase().replace(/\s+/g, '');
   if (!q) return 0;
-  const c = String(candidateArtist || '').toLowerCase();
+  const c = String(candidateArtist || '').toLowerCase().replace(/\s+/g, '');
   if (!c) return 0;
   if (c === q) return 2;
-  if (c.includes(q) || q.includes(c)) return 1;
-  return -1;
+  if (c.includes(q) || q.includes(c)) return 2;
+
+  let hit = 0;
+  for (const ch of q) if (c.includes(ch)) hit += 1;
+  return hit / q.length >= 0.6 ? 1 : 0;
 }
 
 /**
  * 一个关键词要问哪些音源。
  *
- * ⚠️ 优先级于 2026-10-05 调整过。原因是实测发现学生"搜不到想要的歌"：
+ * ⚠️ 优先级改过四次，改之前先读完这段（每次改动的原因都不同，别把它们混起来）：
  *
- *   搜「七里香」——
- *     · 苹果官方   → 第一条就是 七里香 / **周杰倫**（原唱）
- *     · 网易云抓取 → 第一条是 七里香 / **Xai小爱**（翻唱），整页都是无名翻唱
+ *   2026-10-05「苹果优先」：实测搜「七里香」时苹果第一条是 周杰倫（原唱），
+ *     而网易云抓取整页都是无名翻唱。点歌场景里**歌手对不对远比时长重要**，
+ *     所以当时把官方目录排到第一。
  *
- *   原设计把 Meting 排在前面，理由是"完整歌曲优于 30 秒试听"。
- *   但点歌场景里**歌手对不对远比时长重要** —— 学生要的是周杰伦那首，
- *   审核老师听到翻唱也会直接驳回。而且 Meting 是第三方抓取，
- *   苹果是官方接口（更稳、不会突然失效），30 秒试听对审核完全够用。
+ *   2026-10-07「中转源优先」：用户明确要求"优先使用 music.gdstudio.org 这个 API
+ *     找歌"，于是把 GD Studio 提到最前。
  *
- *   所以现在**苹果优先（order 0）**，Meting 退为兜底：
- *   苹果目录里没有的歌（部分华语冷门曲）仍能从 Meting 找到。
- *   想改回去就设 MUSIC_PROVIDER=meting。
+ *   2026-10-07 晚「咪咕优先」（现在这一版）：**那两台 GD Studio 基址都已经不可用了**
+ *     （实测：.org 回 401、.xyz 被劫持跳百度），"排第一"已经没有意义。
+ *     同时用户把验收标准说清楚了：**原唱都能听到完整曲子**，而且
+ *     "哪个最稳定选哪个，原唱完整这条优先级更高"。
+ *     按这两条实测（`_harness\probe-source-quality.mjs`，六首歌逐源对比）：
+ *       · **咪咕**是唯一"原唱命中 + 完整整曲"同时成立的源，而且是官方 CDN 直链，
+ *         没有第三方中转、没有 key —— 所以它排 order 0。
+ *       · 苹果原唱也准，但**只有 30 秒**，不满足"完整曲子"，只能当原唱目录的补充。
+ *       · 网易云官方搜索稳（接口从不变），可公开接口**隐藏主流版权曲**，
+ *         搜「七里香」第一条是翻唱 —— 排在中转源之前是因为它**最不会挂**。
+ *       · qijieya 中转搜索质量差（同样是网易云），但**播放**能给完整 320kbps，
+ *         连官方拿不到的版权曲都能拿到 —— 所以它主要当"播放兜底"。
+ *
+ *   order 同时也是**去重时的胜出顺序**：同名同歌手的条目只有第一条能进候选池。
+ *   咪咕排最前，意味着"同一首歌同时被咪咕和网易云搜到时用咪咕那条" ——
+ *   咪咕给的是完整整曲、且目录里就是原唱，这正是用户要的。
+ *   想让苹果独占，设 `MUSIC_PROVIDER=apple`。
  */
 function buildSources(env, keywords) {
   const mode = providerMode(env);
   const sources = [];
+  let next = 0;
 
+  // 1) 咪咕：原唱命中率最高、给完整整曲（见上面 migu 那一节的实测表）。
+  if (mode !== 'apple') {
+    sources.push({
+      name: 'migu',
+      order: next++,
+      resolve: () => miguSearch(keywords),
+    });
+  }
+
+  // 2) 中转源（默认只剩实测可用的 qijieya）：搜索一般，但**播放**给完整 320kbps。
+  if (mode !== 'apple') {
+    metingBases(env).forEach((base) => {
+      sources.push({
+        name: `meting:${hostOf(base)}:${sources.length}`,
+        order: next++,
+        resolve: () => metingSearch(base, keywords),
+      });
+    });
+  }
+
+  // 3) 苹果官方目录：原唱准，但只有 30 秒（`MUSIC_PROVIDER=apple` 时它是唯一的一个）。
+  //    多个 storefront 之间也有先后：hk 的华语覆盖最好，放最前。
   if (mode !== 'meting') {
-    storefronts(env).forEach((cc, index) => {
+    storefronts(env).forEach((cc) => {
       sources.push({
         name: `apple:${cc}`,
-        // 多个 storefront 之间也要有先后：hk 的华语覆盖最好，放最前
-        order: index,
+        order: next++,
         resolve: () => appleSearch(keywords, cc),
       });
     });
   }
 
+  // 4) 网易云官方直连：接口最稳，负责"官方那条路能拿到时的补充"。
   if (mode !== 'apple') {
-    const storefrontCount = mode === 'meting' ? 0 : storefronts(env).length;
-    const bases = metingBases(env);
-
-    /**
-     * 中转源（GD Studio 等）：**排在苹果之后、网易云官方接口之前**。
-     *
-     * 2026-10-07 由用户要求"优先用 GD Studio 这个 API"后从末位提上来。
-     * 为什么提一级、而不是提到最前（这个位置是权衡过的，改之前先读）：
-     *   · 提到网易云官方之前 —— 两者其实都是"网易云抓取"，但中转站的覆盖面
-     *     更宽（官方公开搜索接口会隐藏主流版权曲），候选质量不差且更全，
-     *     所以让它先说话是纯收益。
-     *   · 不提到苹果之前 —— 苹果是**官方目录**，是"搜周杰伦能出周杰倫原唱"
-     *     的唯一保证；第三方抓取排到它前面，就会退回"搜七里香出来的是无名
-     *     翻唱"那个已经修过一轮的老问题上（见本文件顶部与 mergeCandidates 的说明）。
-     *   想让它**连苹果也压过去**（完全以中转源为准）不需要改这里，设
-     *   `MUSIC_PROVIDER=meting` 即可 —— 那个模式下没有苹果源，它就是第一位。
-     *
-     * order 同时也是**去重时的胜出顺序**：同名同歌手的条目只有第一条能进候选池，
-     * 所以把中转源提前意味着"同一首歌同时被中转站与官方接口搜到时，用中转站那条"。
-     * 这正好是我们要的：中转站给的是完整歌曲，官方接口常常只给片段。
-     */
-    bases.forEach((base, index) => {
-      sources.push({
-        name: `meting:${hostOf(base)}:${index}`,
-        order: storefrontCount + index,
-        resolve: () => metingSearch(base, keywords),
-      });
-    });
-
-    // 网易云官方接口直连：排在苹果与中转源之后，负责"官方那条路能拿到时的兜底与补充"。
     sources.push({
       name: 'netease-native',
-      order: storefrontCount + bases.length,
+      order: next++,
       resolve: () => neteaseSearch(keywords),
     });
   }
@@ -1261,9 +1441,22 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
     });
 
     // 4) 选结果：**合并所有源**（见 mergeCandidates 的说明），
-    //    再过一道"网易云候选能不能播"的过滤（见 keepPlayableNetease）。
+    //    再过一道"这一版能不能播"的过滤（见 keepPlayableNetease）。
+    //
+    //    判据注入的是**和播放完全同一条链**（resolveAudioUrl）——
+    //    咪咕走它自己的接口、mt- 走"网易云 -> 中转源"，这正是"说能播就得真能播"的前提。
+    //    注入真值（而不是 trackPlayable 的三态）是刻意的：这里的语义只有
+    //    "这条路拿不到音频"要被标出来；探测本身出错不算"没音频"（见 playable.js 的三种返回值）。
     const merged = mergeCandidates(settled, titleForMatch || keywords, artist);
-    const ranked = await keepPlayableNetease(merged);
+    const ranked = await keepPlayableNetease(merged, {
+      resolve: async (trackId) => {
+        try {
+          return Boolean(await resolveAudioUrl(env, trackId));
+        } catch {
+          return null;                    // 探测出错 -> 不确定，不打"无音频"标记
+        }
+      },
+    });
     cacheSet(cacheKey, ranked);
     return ranked;
   })();
@@ -1290,6 +1483,11 @@ async function searchWithFallback(env, title, artist, titleForMatch) {
   // 关键：过滤/排序一律用**拆出来的歌名**。调用方没传时这里自己拆一次
   //（少一层依赖 —— 无论谁调用 searchWithFallback 都不会再犯"整段当歌名"的错）。
   const matchAgainst = String(titleForMatch || titlePartOf(title) || title || '');
+  // 歌手线索：优先用前端填的那个字段（选过歌才有）；没有就从查询词里拆
+  //（学生手打「雨爱 杨丞琳」时，那个只读字段是空的 —— 见 artistHintOf 的说明）。
+  // 它**只影响排序**，不参与过滤，所以猜错不会把结果筛没。
+  const artistForRank = String(artist || artistHintOf(title) || '');
+
   const attempts = [];
   if (artist) attempts.push({ keywords: `${title} ${artist}`, filter: true, tier: '歌名+歌手' });
   attempts.push({ keywords: title, filter: true, tier: '歌名' });
@@ -1298,7 +1496,7 @@ async function searchWithFallback(env, title, artist, titleForMatch) {
   for (const attempt of attempts) {
     // searchOnce 内部有短期缓存，所以第二、三级用同一个关键词时不会重打上游。
     // artist 传进去只影响**排序**（歌手吻合的候选更靠前），不影响搜索词。
-    const songs = await searchOnce(env, attempt.keywords, artist, matchAgainst);
+    const songs = await searchOnce(env, attempt.keywords, artistForRank, matchAgainst);
     if (!songs.length) continue;
     const filtered = attempt.filter ? songs.filter((s) => matchesTitle(s.name, matchAgainst)) : songs;
     if (filtered.length) return { tier: attempt.tier, songs: filtered };
@@ -1352,32 +1550,81 @@ async function resolveAudioUrl(env, prefixedId) {
 
   if (prefix === 'ap') return appleResolve(realId);
 
+  // 咪咕：contentId 是长数字串，走它自己的 official CDN（实测完整整曲）。
+  // 与 mt- 分开成两个前缀是**必要的**，不是命名洁癖：mt- 的数字 id 语义是
+  // "网易云歌曲 id"，_lib/playable.js 会拿它去拼 outer/url（neteaseIdOf 只认 mt-）。
+  // 若把咪咕也写成 mt-，那串 contentId 会被当成网易云 id 去探测，**必然全部判成
+  // 拿不到音频**，于是所有咪咕候选都被标上"无音频"。
+  if (prefix === 'mg') return miguResolve(realId);
+
   // 网易云官方接口：**纯数字 id** 才可能是它（网易云歌曲 id 都是数字）。
   //
-  // 这里为什么能安全地"先猜网易云"：mt- 前缀同时被三种源使用，
-  // 而它们的 id 形态不同 ——
+  // mt- 前缀同时被几种源使用，而它们的 id 形态不同 ——
   //   · 网易云官方  → 纯数字（如 mt-2712018330）
-  //   · GD Studio   → 带字母的 url_id（如 mt-ab12cd34）
+  //   · GD Studio   → 通常也是网易云的数字 url_id，偶尔带字母
   //   · Meting      → 数字，但它是自建服务、用户自己配的
-  // 所以对纯数字 id：先按网易云官方解析；万一那是自建 Meting 的 id，
-  // 我们的代理会把"打不开的地址"变成一次失败的转发并报 502 ——
-  // 不会更糟（原本它也未必可用），而常见情况（公共中转站全挂、
-  // 只有官方接口活着）下这是唯一能播的路。
-  // 历史数据的兼容性：009 之前入库的 track_id 是这三家的混合，
-  // 但**试听失败只是提示重试**，不会破坏数据，所以不为此加新表列。
+  // 所以纯数字 id 先按网易云官方解析。
+  //
+  // ⚠️ 2026-10-07 修掉一个"搜得到却播不了、还被标成无音频"的成因：
+  //   旧代码对纯数字 id **直接返回网易云那条地址就完事**。可网易云对受版权
+  //   限制的歌只会把你导回它自己的页面（拿不到音频），而此时**中转源往往是
+  //   能拿到的**（用户原话："我能找到资源免费的音乐也显示无音频"，
+  //   举的例子是《希望有羽毛和翅膀》）。所以：
+  //     先看探测结论（搜索时已经探过，命中 10 分钟缓存，几乎不花时间）；
+  //     网易云明确拿不到 -> 逐个问中转源；都拿不到才把网易云那条交回去，
+  //     让转发层给出统一的失败提示（总比返回 null 变成"这首歌不存在"诚实）。
   if (prefix === 'mt' && /^\d{1,20}$/.test(realId)) {
-    return neteaseResolveUrl(realId);
+    if (await probeNeteasePlayable(realId) !== false) return neteaseOuterUrl(realId);
+    const viaRelay = await metingResolveAny(env, realId);
+    return viaRelay || neteaseOuterUrl(realId);
   }
 
   if (prefix === 'mt') {
-    for (const base of metingBases(env)) {
-      const url = await metingResolve(base, realId);
-      if (url) return url;
-    }
-    return null;
+    return metingResolveAny(env, realId);
   }
 
   return null;
+}
+
+/**
+ * 逐个问中转源要直链，返回第一个拿到的。
+ *
+ * 抽出来是为了两处共用同一条顺序：**播放解析**（resolveAudioUrl）与
+ * **可播性判断**（trackPlayable）—— 判断和播放必须走同一批源，
+ * 否则又会出现"说能播却播不了"或反过来的分歧。
+ */
+async function metingResolveAny(env, songId) {
+  for (const base of metingBases(env)) {
+    // eslint-disable-next-line no-await-in-loop
+    const url = await metingResolve(base, songId);
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
+ * 「这个音源 id 到底能不能播」——**导出给 admin-list.js 复用**。
+ *
+ * 为什么让它住在这里而不是 _lib/playable.js：判断必须包含"问中转源 / 问咪咕"这一步，
+ * 而"怎么问"（miguResolve / metingResolve / 各家的参数形状）就在本文件里。
+ * 把 URL 解析逻辑复制一份到 _lib 里，迟早会出现两边判据不一致 —— 那正是
+ * 这次假阴性的教训（判据只覆盖了一条路，于是把能播的歌标成"无音频"）。
+ *
+ * 咪咕单独走一条：它的 contentId 不适用"网易云那条路"的判据（见 resolveAudioUrl
+ * 里 mg- 那段的说明），直接问它自己的接口即可。
+ */
+export async function trackPlayable(env, trackId) {
+  const contentId = miguContentIdOf(trackId);
+  if (contentId) {
+    try {
+      return Boolean(await miguResolve(contentId));
+    } catch {
+      return null;                          // 探测本身出错 -> 不确定，不能判成"没音频"
+    }
+  }
+  // 历史（009 迁移之前的）track_id 带的是别的形状，统一交给探测链：
+  // 它自己会按前缀决定用哪条路，这里传的是"非 mt- 就只问中转源"的老语义。
+  return probeTrackPlayable(trackId, (id) => metingResolveAny(env, id));
 }
 
 /**
@@ -1444,6 +1691,35 @@ async function proxyAudio(env, prefixedId, request) {
 
 /* ======================= 入口 ======================= */
 
+/**
+ * 只发一个 Range 请求量出音频**总字节数**（给 `?probe=1` 用）。
+ *
+ * 为什么需要一个专门的"量体积"函数：判断"拿到的是完整整曲还是几十秒试听"
+ * 靠听是听不出来的（`auditionsLength` 这类字段也不可信）——
+ * 唯一可靠的办法是读 `Content-Range: bytes 0-0/<总字节>`，
+ * 再和歌曲时长反算码率。128kbps 左右就是完整曲子；明显偏低就是片段。
+ *
+ * 只读 1 个字节，不下载音频内容。
+ */
+async function probeAudioSize(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-0', 'User-Agent': 'yczx-musicvote/1.0', Referer: 'https://y.migu.cn/' },
+      signal: controller.signal,
+    });
+    const contentRange = res.headers.get('Content-Range') || '';
+    const total = Number((contentRange.match(/\/(\d+)/) || [])[1]) || 0;
+    try { await res.body?.cancel(); } catch { /* 只要头部，body 立刻关掉 */ }
+    return { status: res.status, bytes: total, contentType: res.headers.get('Content-Type') || '' };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -1466,8 +1742,42 @@ export async function onRequestGet(context) {
    * （它不泄露用户数据，而"能直接打开"正是它的价值）。
    */
   if (url.searchParams.get('probe') === '1') {
-    const report = { build: MUSIC_BUILD, provider: providerMode(env), apple: null, netease: null, gdstudio: null };
+    const report = { build: MUSIC_BUILD, provider: providerMode(env), migu: null, apple: null, netease: null, gdstudio: null };
     const keyword = '七里香';
+
+    /**
+     * 咪咕：**现在排第一位，所以它的自检也排第一位**。
+     *
+     * 口径和别的源一样：只回"搜到几条 / 第一条能不能取到并量到音频字节数"，
+     * 不回 contentId、不回歌名。`bytes` 是关键指标 —— 它是**实测到的整曲总字节数**，
+     * 拿它和时长反算就能一眼看出拿到的是完整曲子（128kbps 左右）还是几十秒的试听片段。
+     * 数字明显偏小（比如不到 1MB）就说明上游把"试听"变成真的了 —— 那时要重新选源。
+     *
+     * 为什么值得专门量：本机测通不代表 Cloudflare 出口也通（上游常按来源 IP 分别对待），
+     * 而咪咕是官方 CDN、对境外数据中心 IP 的态度无法从本机推断。
+     * 部署完打开 `?probe=1` 就能看到这一节，不必靠猜。
+     */
+    try {
+      const songs = await miguSearch(keyword);
+      let resolvable = null;
+      let measured = null;
+      const first = songs.find((s) => /^mg-\d{1,24}$/.test(String(s.id || '')));
+      if (first) {
+        const url = await miguResolve(miguContentIdOf(first.id));
+        resolvable = Boolean(url);
+        if (url) measured = await probeAudioSize(url);
+      }
+      report.migu = {
+        ok: songs.length > 0,
+        count: songs.length,
+        resolvable,
+        bytes: measured && measured.bytes ? measured.bytes : null,
+        durationSeconds: first ? first.duration : null,
+        hint: '官方 CDN 直链；bytes 是实测整曲总字节数（与时长反算即可判断是否完整曲子）',
+      };
+    } catch {
+      report.migu = { ok: false, count: 0, error: 'unreachable' };
+    }
 
     // 苹果
     try {
@@ -1497,14 +1807,11 @@ export async function onRequestGet(context) {
     }
 
     /**
-     * GD Studio / 中转源：逐个配置基址试一次搜索，再拿第一条候选试一次"能不能取到播放地址"。
+     * 中转源（Meting 形状）：逐个配置基址试一次搜索，再拿第一条候选试一次
+     * "能不能取到播放地址"。默认清单里现在只剩实测可用的 qijieya，
+     * 谁被 `MUSIC_API_BASE` 换成自建基址，这一节就报那台的结果。
      *
-     * 为什么值得单独报：用户指定接入的 `music.gdstudio.org` 在本机探测时回
-     * `401 {"detail":"Invalid request."}`，但**本机通不代表 Cloudflare 出口通、
-     * 本机不通也不代表出口不通**（上游常按来源 IP 分别对待）。所以给它一个
-     * 能在真实部署上直接看结论的口子。
-     *
-     * 口径与上面两段一致：只回**序号 / 通不通 / 几条候选 / 能否取到地址**，
+     * 口径与上面几段一致：只回**序号 / 通不通 / 几条候选 / 能否取到地址**，
      * 不回域名、不回 id、不回歌名 —— 所以它仍然可以公开访问。
      */
     try {
@@ -1531,7 +1838,10 @@ export async function onRequestGet(context) {
 
     return json({
       ...report,
-      verdict: (report.apple && report.apple.ok) || (report.netease && report.netease.ok) || (report.gdstudio && report.gdstudio.ok)
+      verdict: (report.migu && report.migu.ok)
+        || (report.apple && report.apple.ok)
+        || (report.netease && report.netease.ok)
+        || (report.gdstudio && report.gdstudio.ok)
         ? 'at-least-one-source-works'
         : 'all-sources-unreachable',
     });
@@ -1574,9 +1884,14 @@ export async function onRequestGet(context) {
     // 苹果给的是官方 previewUrl，必有音频；其它前缀来源无法判断 -> null（放行）
     if (/^ap-/.test(checkId)) return json({ ok: true, playable: true });
 
-    if (/^mt-\d+$/.test(checkId)) {
-      const realId = checkId.slice(3);
-      const playable = await probeNeteasePlayable(realId);
+    // 咪咕与 mt- 都交给 trackPlayable —— 它内部按前缀分派：
+    // mg- 问咪咕自己的接口，mt- 走"网易云 -> 中转源"那条链。
+    // ⚠️ 这里原本写的是 `if (/^mt-/.test(checkId))`，把 mg- 漏在外面会静默滑到
+    //    最后那个 `playable: null`（"不确定"）—— 表现是"咪咕的歌点了没反应也不报错"，
+    //    所以判据必须覆盖所有会带 ?check= 的前缀。
+    if (/^(mt|mg)-/.test(checkId)) {
+      // 判据与搜索结果、审核列表、播放解析**完全同一条链**（见 trackPlayable）
+      const playable = await trackPlayable(env, checkId);
       return json({ ok: true, playable });
     }
 

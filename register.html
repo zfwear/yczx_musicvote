@@ -698,6 +698,31 @@
   .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
   .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  /* 「无试听」是**状态标记**（disabled 按钮），不是可点的操作。
+     用户要求"就算无音频，还是要加上选这首这个按钮"，所以旁边那颗
+     「选这首」永远在；这里只把"没有音频"这件事安静地说清楚，
+     做成虚线描边的小标签，与实心的主按钮拉开层级。 */
+  .cand-noop{font-size:12px;color:var(--warn);background:var(--surface-2);
+    border:1px dashed var(--line-strong);border-radius:var(--v6-r-pill);
+    padding:6px 12px;min-height:32px;cursor:default;white-space:nowrap;}
+  .cand-noop:disabled{color:var(--warn);opacity:1;}
+
+  /* ------------------------------------------------------------
+     十二之二、候选行在**窄屏**上要换行，不能硬挤四列
+     ------------------------------------------------------------
+     上面那条 [data-track-row] 是 grid（序号 / 歌名+歌手 / 时长 / 操作）四列。
+     手机上（390px）算下来歌名只剩几十像素，实测被压成「雨…」，
+     而「选这首」也被挤成两行 —— 截图里一眼就能看出不对。
+     窄屏改成两行：第一行 序号 + 歌名歌手 + 时长，第二行整行给操作按钮。
+     宽屏保持四列不变（那边空间够，四列更紧凑）。
+     ------------------------------------------------------------ */
+  @media(max-width:560px){
+    .cand-panel [data-track-row]{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;column-gap:10px;}
+    .cand-panel [data-track-row]>div:not(.cand-acts){flex:1 1 auto;min-width:0;}
+    .cand-panel [data-track-row] .cand-dur{margin-left:auto;}
+    .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
+    .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
+  }
   .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
@@ -752,6 +777,20 @@
   body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
   body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
   @media(min-width:900px){ body>div.header h1{font-size:19px;} }
+
+  /* ------------------------------------------------------------
+     十四之三、状态提示条（「这一版没有音频」/「暂停接收投稿」）
+     ------------------------------------------------------------
+     两处都用"左侧一道粗边 + 极浅琥珀底"：它们都是**需要看清、但不必惊动**的
+     状态说明 —— 用 danger 红会像报错，用普通灰又会被一眼掠过。
+     颜色全部走令牌（--warn / --warn-soft / --ink），所以深色模式自动跟着翻转。
+     .no-audio 用在后台审核卡片上，.paused-notice 用在首页与点歌页。 */
+  .no-audio,.paused-notice{
+    background:var(--warn-soft);border:1px solid var(--warn);border-left:4px solid var(--warn);
+    color:var(--ink);font-size:13px;line-height:1.75;padding:10px 12px;border-radius:var(--v6-r-sm);
+    margin:10px 0;text-align:left;
+  }
+  .paused-notice{margin:0 0 14px;}
 
   /* ------------------------------------------------------------
      十五、深色模式：暖黑分层 + 紫青提亮
@@ -896,7 +935,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.0.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -992,6 +1031,11 @@ function uiStyles(){
     '.ui-toast-err{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 12px 30px -8px rgba(225,29,72,.55)}',
     '.ui-toast.ui-hide{opacity:0;transform:translate(-50%,12px)}',
     /* ---- 设计层 v2 · 弹窗与轻提示 ---- */
+    ".ui-actions{flex-wrap:wrap}",
+    ".ui-actions .ui-btn{width:auto;max-width:100%;box-sizing:border-box;flex:0 1 auto}",
+    ".ui-actions-single{display:block}",
+    ".ui-actions-single .ui-btn{display:block;width:100%;box-sizing:border-box;padding:11px 12px;text-align:center}",
+    ".ui-overlay{box-sizing:border-box}",
     ".ui-overlay{background:rgba(15,23,42,.40);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}",
     ".ui-overlay.ui-closing{animation:uiFadeOut .18s var(--ease,ease) forwards}",
     ".ui-box{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:var(--r-xl,20px);box-shadow:var(--shadow-pop,0 18px 44px -18px rgba(15,23,42,.34))}",
@@ -1049,7 +1093,9 @@ function uiDialog(opt){
     }
 
     const actions = document.createElement('div');
-    actions.className = 'ui-actions';
+    // 没有取消按钮 = 提示型弹窗（只有「知道了」这一个动作），
+    // 用整行居中而不是挤在右下角 —— 用户反馈过「这个按钮位置看着很难受」。
+    actions.className = 'ui-actions' + (opt.cancelText === '' ? ' ui-actions-single' : '');
 
     let settled = false;
     const close = (result) => {

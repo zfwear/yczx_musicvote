@@ -16,6 +16,18 @@ import { isMissingTable } from './db.js';
 
 export const SETTING_VOTE_CAP = 'vote_cap';
 export const SETTING_REPORT_THRESHOLD = 'report_threshold';
+/**
+ * 「暂停接收投稿」开关（2026-10-07 用户要求，以按钮形式给管理员）。
+ *
+ * 为什么要有它：广播站的排期是有节奏的 —— 一周的 6 首排满之后再收投稿，
+ * 只会让待审核列表堆一堆下一周用不上的歌；考试周、放假前后也需要临时停收。
+ * 以前只能靠"把班级口令换掉"或让管理员盯着，都不是办法。
+ *
+ * 取值：'1' = 暂停，其它（含没配过）= 正常接收。**默认必须是"正常接收"** ——
+ * 表不存在（007 没跑）时 getSetting 会返回 fallback，所以默认值只能是"不收着"，
+ * 否则一次迁移没跑就会把全校的投稿功能关掉。
+ */
+export const SETTING_SUBMISSIONS_PAUSED = 'submissions_paused';
 
 /** 举报进入收件箱所需的"被举报次数"阈值。默认 3，可后台调整。 */
 export const DEFAULT_REPORT_THRESHOLD = 3;
@@ -88,4 +100,16 @@ export async function getReportThreshold(env) {
   const n = Number(raw);
   if (Number.isInteger(n) && n >= 2 && n <= 20) return n;
   return DEFAULT_REPORT_THRESHOLD;
+}
+
+/**
+ * 现在是否**暂停接收投稿**。
+ *
+ * 读不到（system_settings 表还没建）时返回 false ——
+ * 也就是"照常接收"。理由见 SETTING_SUBMISSIONS_PAUSED 的注释：
+ * 默认值落在"不影响正常使用"的那一侧。
+ */
+export async function isSubmissionsPaused(env) {
+  const raw = await getSetting(env, SETTING_SUBMISSIONS_PAUSED, '');
+  return String(raw) === '1';
 }

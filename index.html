@@ -860,6 +860,31 @@
   .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
   .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  /* 「无试听」是**状态标记**（disabled 按钮），不是可点的操作。
+     用户要求"就算无音频，还是要加上选这首这个按钮"，所以旁边那颗
+     「选这首」永远在；这里只把"没有音频"这件事安静地说清楚，
+     做成虚线描边的小标签，与实心的主按钮拉开层级。 */
+  .cand-noop{font-size:12px;color:var(--warn);background:var(--surface-2);
+    border:1px dashed var(--line-strong);border-radius:var(--v6-r-pill);
+    padding:6px 12px;min-height:32px;cursor:default;white-space:nowrap;}
+  .cand-noop:disabled{color:var(--warn);opacity:1;}
+
+  /* ------------------------------------------------------------
+     十二之二、候选行在**窄屏**上要换行，不能硬挤四列
+     ------------------------------------------------------------
+     上面那条 [data-track-row] 是 grid（序号 / 歌名+歌手 / 时长 / 操作）四列。
+     手机上（390px）算下来歌名只剩几十像素，实测被压成「雨…」，
+     而「选这首」也被挤成两行 —— 截图里一眼就能看出不对。
+     窄屏改成两行：第一行 序号 + 歌名歌手 + 时长，第二行整行给操作按钮。
+     宽屏保持四列不变（那边空间够，四列更紧凑）。
+     ------------------------------------------------------------ */
+  @media(max-width:560px){
+    .cand-panel [data-track-row]{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;column-gap:10px;}
+    .cand-panel [data-track-row]>div:not(.cand-acts){flex:1 1 auto;min-width:0;}
+    .cand-panel [data-track-row] .cand-dur{margin-left:auto;}
+    .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
+    .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
+  }
   .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
@@ -914,6 +939,20 @@
   body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
   body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
   @media(min-width:900px){ body>div.header h1{font-size:19px;} }
+
+  /* ------------------------------------------------------------
+     十四之三、状态提示条（「这一版没有音频」/「暂停接收投稿」）
+     ------------------------------------------------------------
+     两处都用"左侧一道粗边 + 极浅琥珀底"：它们都是**需要看清、但不必惊动**的
+     状态说明 —— 用 danger 红会像报错，用普通灰又会被一眼掠过。
+     颜色全部走令牌（--warn / --warn-soft / --ink），所以深色模式自动跟着翻转。
+     .no-audio 用在后台审核卡片上，.paused-notice 用在首页与点歌页。 */
+  .no-audio,.paused-notice{
+    background:var(--warn-soft);border:1px solid var(--warn);border-left:4px solid var(--warn);
+    color:var(--ink);font-size:13px;line-height:1.75;padding:10px 12px;border-radius:var(--v6-r-sm);
+    margin:10px 0;text-align:left;
+  }
+  .paused-notice{margin:0 0 14px;}
 
   /* ------------------------------------------------------------
      十五、深色模式：暖黑分层 + 紫青提亮
@@ -1042,6 +1081,9 @@
   <div id="guestNotice" hidden>
     当前为游客模式，只能查看排行（榜单里的试听仍然可用）；不能投稿、投票或举报。
   </div>
+  <!-- 暂停接收投稿的提示：进页面问一次 /api/config 再决定是否显示。
+       「去投稿」**仍然可点** —— 点歌页会说明"暂停中"，比在主页把入口藏起来更好懂。 -->
+  <div id="pausedNotice" class="paused-notice" hidden></div>
   <a id="goVoteBtn" href="/vote.html" class="btn">去投稿</a>
   <a href="/schedule.html" class="btn" style="background:rgba(255,255,255,0.85);color:var(--brand-ink);box-shadow:none;border:1px solid #bae6fd;">查看每周排期</a>
   <button onclick="logoutUser()" style="background:rgba(255,255,255,0.85);color:var(--ink-3);box-shadow:none;border:1px solid #e2e8f0;font-weight:600;">退出登录</button>
@@ -1086,7 +1128,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.0.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1098,7 +1140,18 @@
   try {
     const r = await fetch('/api/config');
     if(!r.ok) return;
-    const b = (await r.json()).beian;
+    const cfg = await r.json();
+
+    // 顺便处理"是否暂停接收投稿"（同一个响应里就有，不必再多发一次请求）。
+    // 只做提示：「去投稿」仍然可点，点歌页会说明暂停中。
+    // 取不到时保持隐藏 —— 弱网下不该让人看到一个假的"停收"横幅。
+    const notice = document.getElementById('pausedNotice');
+    if(notice && cfg.submit && cfg.submit.paused === true){
+      notice.textContent = '广播站现在暂停接收投稿：仍然可以看排行、看排期，但暂时不能提交点歌。';
+      notice.hidden = false;
+    }
+
+    const b = cfg.beian;
     if(!b) return;
 
     const holder = document.getElementById('beianHolder');
@@ -1185,6 +1238,11 @@ function uiStyles(){
     '.ui-toast-err{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 12px 30px -8px rgba(225,29,72,.55)}',
     '.ui-toast.ui-hide{opacity:0;transform:translate(-50%,12px)}',
     /* ---- 设计层 v2 · 弹窗与轻提示 ---- */
+    ".ui-actions{flex-wrap:wrap}",
+    ".ui-actions .ui-btn{width:auto;max-width:100%;box-sizing:border-box;flex:0 1 auto}",
+    ".ui-actions-single{display:block}",
+    ".ui-actions-single .ui-btn{display:block;width:100%;box-sizing:border-box;padding:11px 12px;text-align:center}",
+    ".ui-overlay{box-sizing:border-box}",
     ".ui-overlay{background:rgba(15,23,42,.40);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}",
     ".ui-overlay.ui-closing{animation:uiFadeOut .18s var(--ease,ease) forwards}",
     ".ui-box{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:var(--r-xl,20px);box-shadow:var(--shadow-pop,0 18px 44px -18px rgba(15,23,42,.34))}",
@@ -1205,6 +1263,9 @@ function uiStyles(){
     ".ui-toast-err{background:var(--danger,#e11d48)}",
     "@media(prefers-reduced-motion:reduce){.ui-overlay,.ui-box,.ui-toast{animation:none !important}}",
     "/* ---- 设计层 v2 · 弹窗与轻提示 ---- */ */",
+
+
+
 
 
 
@@ -1245,7 +1306,9 @@ function uiDialog(opt){
     }
 
     const actions = document.createElement('div');
-    actions.className = 'ui-actions';
+    // 没有取消按钮 = 提示型弹窗（只有「知道了」这一个动作），
+    // 用整行居中而不是挤在右下角 —— 用户反馈过「这个按钮位置看着很难受」。
+    actions.className = 'ui-actions' + (opt.cancelText === '' ? ' ui-actions-single' : '');
 
     let settled = false;
     const close = (result) => {
@@ -1374,6 +1437,102 @@ async function recaptchaToken(action){
   } catch(e) {
     // 拿不到 token：交给后端决定放行还是拒绝
     return '';
+  }
+}
+
+/* ============================================================
+   浏览器端工作量证明（PoW）—— 与 reCAPTCHA 并列的第二道，默认关闭。
+   开关与难度由后端 /api/config 的 pow 下发（配置里没有就当没启用）。
+   可用性优先：拿不到谜题、算不出来、超过 6 秒，一律返回 null，
+   后端只在功能开启时才校验 —— 算不出来不能让学生投不了票。
+   ============================================================ */
+
+let powConfig = null;
+
+async function getPowConfig(){
+  if(powConfig) return powConfig;
+  try {
+    const r = await fetch('/api/config');
+    const d = r.ok ? await r.json() : {};
+    powConfig = (d && d.pow) || { enabled: false };
+  } catch(e) {
+    powConfig = { enabled: false };
+  }
+  return powConfig;
+}
+
+/** 摘要按十六进制位算，前 target 位是不是全 0。 */
+function powDigestOk(buffer, target){
+  const bytes = new Uint8Array(buffer);
+  let hex = '';
+  for(let i = 0; i < bytes.length && hex.length < target.length; i++){
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex.slice(0, target.length) === target;
+}
+
+/**
+ * 取谜题时要带的本机标识（存 localStorage，一次生成长期复用）。
+ *
+ * 为什么必须有它：/api/pow 不需要登录，服务端只能靠这个 `cid` 认出"这是同一台设备"。
+ * 不带的话限流会退化成按 IP —— 而校园网全校共用一个出口 IP，
+ * 等于**全校共享 120 次/小时的取谜题额度**，正常学生会被同学挡住。
+ * 它只是限流分桶用的、能伪造，不是身份凭据（真正的去重还是设备指纹）。
+ */
+function powClientId(){
+  try {
+    let id = localStorage.getItem('yczx_pow_cid');
+    if(!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)){
+      id = '';
+      const bytes = new Uint8Array(12);
+      crypto.getRandomValues(bytes);
+      for(let i = 0; i < bytes.length; i++) id += bytes[i].toString(16).padStart(2, '0');
+      localStorage.setItem('yczx_pow_cid', id);
+    }
+    return id;
+  } catch(e) {
+    return '';
+  }
+}
+
+/** 解一道谜题：返回 { challenge, nonce }；任何一步失败都返回 null。 */
+async function powProof(action){
+  const cfg = await getPowConfig();
+  if(!cfg.enabled) return null;
+  // 老浏览器 / file:// 下 crypto.subtle 可能不存在 —— 直接当"算不出来"（放行）
+  if(!window.crypto || !crypto.subtle || typeof crypto.subtle.digest !== 'function') return null;
+
+  try {
+    const cid = powClientId();
+    const r = await fetch('/api/pow?action=' + encodeURIComponent(action || 'vote')
+      + (cid ? '&cid=' + encodeURIComponent(cid) : ''));
+    if(!r.ok) return null;
+    const d = await r.json();
+    if(!d || d.enabled !== true || !d.challenge) return null;
+
+    const challenge = String(d.challenge);
+    const difficulty = Math.max(0, Math.min(8, Number(d.difficulty) || 0));
+    const target = '0'.repeat(difficulty);
+    // 上限 10 秒：后端给谜题 300 秒有效期（见 _lib/pow.js），这里只是别让页面无限算下去。
+    // 难度 3 在手机上通常 0.2 秒内出结果，这个上限是给极慢机型的兜底。
+    const deadline = Date.now() + 10000;
+    const enc = new TextEncoder();
+    let nonce = 0;
+
+    // 分片计算：每 2000 次让出一次主线程，弱机型也不会把页面卡死。
+    // 刻意**不用 Web Worker / Blob**：本站 CSP 是 script-src 'self' 'unsafe-inline'，
+    // 没有放行 worker-src blob:，用 Worker 会直接失败。
+    while(Date.now() < deadline){
+      for(let i = 0; i < 2000; i++){
+        const digest = await crypto.subtle.digest('SHA-256', enc.encode(challenge + ':' + nonce));
+        if(powDigestOk(digest, target)) return { challenge: challenge, nonce: String(nonce) };
+        nonce++;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return null;
+  } catch(e) {
+    return null;
   }
 }
 
@@ -1603,12 +1762,19 @@ async function checkPw(){
       // 就要按身份决定投票与举报按钮是否禁用（见 guestDisabledAttrs）。
       applyGuestMode(!!d.guest);
       showApp();
-      loadAnnouncements();
+      // 公告与榜单并行拉；公告的返回值里带着弹窗公告（popups），
+      // 要先拿到它才能排"须知 -> 弹窗"这个先后顺序。
+      const announcementsTask = loadAnnouncements();
       loadPending();
       loadApproved();
       // 首次进入弹一次规定须知 —— 但游客不弹：那段话讲的是投稿规则与每周额度，
       // 对一个连投稿按钮都点不了的人只会造成误解（他没法"投稿前先看一遍"）。
-      if(!d.guest) maybeShowFirstVisitNotice();
+      // 须知关掉**之后**再弹公告（用户要求弹窗公告"作为初始弹窗后面一个弹窗"），
+      // 所以这里是**串行**的：等公告数据 + 等须知弹窗都结束，再依次弹公告。
+      if(!d.guest){
+        const firstVisit = maybeShowFirstVisitNotice();
+        Promise.all([announcementsTask, firstVisit]).then(([popups]) => showPopupAnnouncements(popups));
+      }
       // 主页公告已加载，登录页公告不用再占位
       const gateBox = document.getElementById('gateAnnounceBox');
       if(gateBox) gateBox.innerHTML = '';
@@ -1657,7 +1823,7 @@ function renderPendingCard(s){
         <div class="song-acts">
           <button class="btn-upvote act-secondary" data-audition="${id}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.track_id || '')}" onclick="auditionFromButton(this)">试听</button>
           <button class="btn-upvote act-quiet" data-report="${id}" onclick="reportFromButton(this)"${guestDisabledAttrs('游客模式只能查看排行，不能举报')}>举报</button>
-          <button class="btn-upvote act-primary" onclick="upvote(${id})"${guestDisabledAttrs('游客模式只能查看排行，不能投票')}>投票</button>
+          <button class="btn-upvote act-primary" onclick="upvote(${id}, this)"${guestDisabledAttrs('游客模式只能查看排行，不能投票')}>投票</button>
         </div>
       </div>
       <div id="audition-${id}"></div>`;
@@ -1800,15 +1966,26 @@ async function loadGateAnnouncements(){
   } catch(e) { box.innerHTML = ''; }
 }
 
+/**
+ * 弹窗式公告的条数上限由服务端控制（见 functions/api/announcements.js）。
+ *
+ * 这里**不再用一个模块级变量缓存**它 —— 早先那版把 `popups` 存进变量、
+ * 再由 `showPopupAnnouncements()` 去读，结果是一个竞态：
+ * 登录路径里 `loadAnnouncements()` 与"首次须知弹窗"是并发的，学生点得快时
+ * 须知已经关掉、而 `popups` 还没写进来，第二次弹窗就**永远不出现**。
+ * 改成 `loadAnnouncements()` **把结果返回出来**，弹窗直接用返回值 ——
+ * 没有共享状态，就没有那个竞态。
+ */
 async function loadAnnouncements(){
   const box = document.getElementById('announceBox');
-  if(!box) return;
   try {
     const res = await getJson('/api/announcements');
-    if(!res.ok){ box.innerHTML = ''; return; }
+    if(!res.ok){ if(box) box.innerHTML = ''; return []; }
     const data = await res.json();
+    const popups = Array.isArray(data.popups) ? data.popups : [];
+    if(!box) return popups;
     const list = Array.isArray(data.announcements) ? data.announcements : [];
-    if(!list.length){ box.innerHTML = ''; return; }
+    if(!list.length){ box.innerHTML = ''; return popups; }
     box.innerHTML = list.map(a => `
       <div class="panel" style="background:rgba(2,132,199,0.06);border-color:rgba(2,132,199,0.22);">
         <div class="rank-info">
@@ -1818,7 +1995,11 @@ async function loadAnnouncements(){
         </div>
       </div>
     `).join('');
-  } catch(e) { box.innerHTML = ''; }
+    return popups;
+  } catch(e) {
+    if(box) box.innerHTML = '';
+    return [];
+  }
 }
 
 /* ---------------- 试听 ---------------- */
@@ -2237,23 +2418,92 @@ function renderDisclaimer(){
   `;
 }
 
-/** 首次进入时弹一次规定须知。 */
-function maybeShowFirstVisitNotice(){
+/**
+ * 首次进入时弹一次规定须知。
+ *
+ * **返回 Promise**：弹窗公告（`showPopupAnnouncements`）要等这一条关掉之后
+ * 才作为"第二个弹窗"冒出来（用户明确要求"在登录进去的时候会作为初始弹窗
+ * 后面一个弹窗，第二个冒出来"）。不返回 Promise 的话两个模态框会同时插进 DOM、
+ * 叠在一起 —— 那不是"先后两个"，是一团糟。
+ */
+async function maybeShowFirstVisitNotice(){
   const KEY = 'yczx_rules_seen_v1';
   let seen = null;
   try { seen = localStorage.getItem(KEY); } catch(e) { /* 隐私模式下不可用 */ }
   if(seen) return;
 
-  uiDialog({
+  await uiDialog({
     title: '投稿前请先看一遍投稿须知',
-    message: '本页是盐中之声广播站的校内投稿工具，非学校官方发布渠道。\n\n投稿每周限一首，须从搜索结果里选歌；违禁词会被直接拦下；投稿将由广播站老师和分管校长审核。\n\n完整须知可在首页「投稿须知」里展开查看，页面底部有免责声明。',
-    okText: '我已阅读投稿须知并知晓该歌曲可能无法播出',
+    // 那句"知晓该歌曲可能无法播出"原本**塞在按钮文案里**，18 个字在 390px 上折成两行，
+    // 按钮显得又高又笨（用户反馈"那个知道了按钮位置不对"）。
+    // 同一句话放进正文更合适：按钮只留一个干脆的动作词。
+    message: '本页是盐中之声广播站的校内投稿工具，非学校官方发布渠道。\n\n投稿每周限一首，须从搜索结果里选歌；违禁词会被直接拦下；投稿将由广播站老师和分管校长审核。\n\n投稿即表示已知晓：审核不通过的歌曲会被驳回，个别歌曲也可能因版权限制而无法播出。\n\n完整须知可在首页「投稿须知」里展开查看，页面底部有免责声明。',
+    okText: '我已阅读，知道了',
     cancelText: '',
-  }).then(() => {
-    try { localStorage.setItem(KEY, '1'); } catch(e) { /* 忽略 */ }
-    // 顺手把规定展开一次，方便他直接看到全文
-    toggleRules(true);
   });
+  try { localStorage.setItem(KEY, '1'); } catch(e) { /* 忽略 */ }
+  // 顺手把规定展开一次，方便他直接看到全文
+  toggleRules(true);
+}
+
+/* ---------------- 弹窗式公告 ----------------
+   管理员发一条 scope='popup' 的公告，学生**登录后**会看到一个模态框
+   （排在"首次投稿须知"之后，第二个冒出来）。UI 与须知弹窗完全一致 ——
+   用的就是同一个 uiDialog。
+
+   为什么每台设备只弹一次（按公告 id 记在 localStorage）：
+   这是个模态框，每次切页面/刷新都弹一遍会让人没法用页面。
+   要"重新提醒一次"就再发一条新公告（id 不同 -> 会重新弹）。 */
+
+/** 记住哪些弹窗公告已经看过（存 id 列表，最多留 20 个）。 */
+function popupSeenIds(){
+  try {
+    const raw = localStorage.getItem('yczx_announce_popup_seen');
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.map((x) => String(x)) : [];
+  } catch(e) { return []; }
+}
+
+function markPopupSeen(id){
+  try {
+    const list = popupSeenIds();
+    const value = String(id);
+    if(list.includes(value)) return;
+    // 只留最近 20 条：公告删了之后这些 id 再也不会出现，
+    // 不清就会一直涨（localStorage 有配额，涨满了写不进去会连带影响别的键）。
+    const next = list.concat([value]).slice(-20);
+    localStorage.setItem('yczx_announce_popup_seen', JSON.stringify(next));
+  } catch(e) { /* 隐私模式下写不了：那就每次弹，不影响功能 */ }
+}
+
+/**
+ * 依次弹出还没看过的弹窗公告。
+ *
+ * **串行**：`await` 每一条，后一条等前一条关掉才出现 ——
+ * 同时插三个模态框会全部叠在一起，学生以为自己把页面点坏了。
+ *
+ * @param {Array} list `/api/announcements` 返回的 `popups`（由调用方传入，
+ *        不经共享变量 —— 那会引入"须知关得比公告到得快"的竞态）。
+ */
+async function showPopupAnnouncements(list){
+  const items = Array.isArray(list) ? list : [];
+  if(!items.length) return;
+
+  const seen = popupSeenIds();
+  for(const a of items){
+    if(!a || a.id === undefined || a.id === null) continue;
+    if(seen.includes(String(a.id))) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await uiDialog({
+      title: a.title || '广播站公告',
+      message: (a.content || '') + (a.created_by_name || a.created_at
+        ? '\n\n—— ' + [a.created_by_name, a.created_at].filter(Boolean).join(' · ')
+        : ''),
+      okText: '知道了',
+      cancelText: '',
+    });
+    markPopupSeen(a.id);
+  }
 }
 
 /* ---------------- 举报 ---------------- */
@@ -2289,12 +2539,19 @@ async function reportFromButton(button){
   } catch(e) { uiAlert('网络错误'); }
 }
 
-async function upvote(id){  if(!await uiConfirm('确认给这首歌投一票吗？')) return;
+async function upvote(id, btn){  if(!await uiConfirm('确认给这首歌投一票吗？')) return;
+  // 算 PoW 可能要几百毫秒到几秒：期间把按钮置灰并换文案，
+  // 与别处禁用按钮同一套做法（disabled + 文案），免得学生以为没点上。
+  const idleText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '正在校验…'; }
   try {
     const fingerprint = await deviceFingerprint();
     // 人机校验令牌（reCAPTCHA v3，无感）。没启用时是空串。
     const rcToken = await recaptchaToken('upvote');
-    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id), fingerprint: fingerprint, recaptcha_token: rcToken})});
+    // 工作量证明答案（默认关闭时是 null）。算不出来 / 没启用都传 null，
+    // 由后端按开关决定：功能开着才会校验。
+    const proof = await powProof('upvote');
+    const r = await fetch('/api/upvote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: safeInt(id), fingerprint: fingerprint, recaptcha_token: rcToken, pow: proof})});
     const d = await r.json();
     if(r.ok){
       // 借鉴 VoiceHub 的做法：动作接口返回结果后，前端**只更新受影响的数据**，
@@ -2309,6 +2566,13 @@ async function upvote(id){  if(!await uiConfirm('确认给这首歌投一票吗�
     }
     else { uiAlert(d.error || '操作失败'); }
   } catch(e) { uiAlert('网络错误'); }
+  finally {
+    if(btn){
+      btn.textContent = idleText;
+      // 恢复成"当前身份该有的样子"：游客模式下它本来就该是灰的
+      setDisabledWithReason(btn, isGuestMode, '游客模式只能查看排行，不能投票');
+    }
+  }
 }
 
 // 启动：用一次探测请求判断会话是否还有效，有效就直接进主页。
@@ -2323,9 +2587,15 @@ async function upvote(id){  if(!await uiConfirm('确认给这首歌投一票吗�
       // 先问清身份再渲染：loadPending 渲染投票/举报按钮时就要用这个状态。
       const guest = await loadIdentity();
       applyGuestMode(guest);
-      showApp(); loadAnnouncements(); loadPending(); loadApproved();
+      showApp();
+      const announcementsTask = loadAnnouncements();
+      loadPending();
+      loadApproved();
       // 会话还在、直接进主页的情况下也算"首次进入"（游客同样不弹，理由同上）
-      if(!guest) maybeShowFirstVisitNotice();
+      if(!guest){
+        const firstVisit = maybeShowFirstVisitNotice();
+        Promise.all([announcementsTask, firstVisit]).then(([popups]) => showPopupAnnouncements(popups));
+      }
     } else { showGate(); }
   } catch(e) { showGate(); }
 })();</script>

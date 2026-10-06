@@ -3,8 +3,10 @@ import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows, lastRowId, isMissingColumn } from '../../_lib/db.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
+import { verifyPow } from '../../_lib/pow.js';
 import { verifyTrackToken } from '../../_lib/tracktoken.js';
 import { parseRequestId } from '../../_lib/idempotency.js';
+import { isSubmissionsPaused } from '../../_lib/settings.js';
 
 /** 查重窗口：每人每周一次。 */
 const DEDUP_WINDOW_DAYS = 7;
@@ -46,6 +48,20 @@ export async function onRequestPost(context) {
   const guestDenied = denyGuest(auth.session, '游客模式只能查看排行，不能投稿');
   if (guestDenied) return guestDenied;
 
+  /**
+   * 「暂停接收投稿」闸门（2026-10-07 用户要求，管理员用按钮开关）。
+   *
+   * 位置很讲究，与 denyGuest 同样的理由：**排在读请求体、限流与任何写入之前**。
+   *   · 停收期间被拒的提交不该留下限流计数（否则停收一阵子之后，
+   *     正常学生的额度已经被自己反复尝试吃掉了）；
+   *   · 也不该有任何一行落库。
+   * 调试模式（管理员用管理员身份在学生端登录）**照样拦** —— 停收就是停收，
+   * 想压测就先恢复。前端那两个按钮只是提示，真正的闸门在这里。
+   */
+  if (await isSubmissionsPaused(env)) {
+    return error('广播站现在暂停接收投稿，请稍后再来', 403);
+  }
+
   const classId = auth.session.subject_id;
   // 调试模式（用管理员身份在学生端登录）不走每周限次、不查重
   const isDebug = auth.session.role === 'debug';
@@ -74,6 +90,11 @@ export async function onRequestPost(context) {
   // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
   const human = await verifyRecaptcha(env, data.recaptcha_token, { ip });
   if (!human.ok) return error(human.error, 403);
+
+  // 浏览器端 PoW（第二道，默认关闭）。位置：reCAPTCHA 之后、任何写入之前。
+  // 功能没开时 verifyPow 返回 skipped 直接放行，所以这里不需要再判断开关。
+  const pow = await verifyPow(env, data.pow, { action: 'vote' });
+  if (!pow.ok) return error(pow.error, 403);
 
   const fingerprint = parseFingerprint(data.fingerprint);
   if (!fingerprint.ok) return error(fingerprint.error, 400);

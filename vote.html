@@ -717,7 +717,7 @@
   .cand-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
               border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .cand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 4px;}
-  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;}
+  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;min-width:0;}
   .cand-hint{font-size:12px;color:var(--ink-4);padding:0 14px 8px;line-height:1.6;}
   .cand-hint>button{margin:8px 0 0;}
   .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
@@ -733,13 +733,41 @@
   .cand-name{color:var(--ink);font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cand-sub{color:var(--ink-4);font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cand-dur{flex:0 0 auto;color:var(--ink-4);font-size:13px;}
-  .cand-acts{flex:0 0 auto;display:flex;gap:8px;}
+  .cand-acts{flex:0 0 auto;display:flex;gap:8px;align-items:center;}
   .cand-acts button,[data-track-row] button{min-height:36px;font-size:13px;padding:7px 14px;
               background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
-  .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
-  .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
-  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
+  .cand-acts button[data-name],[data-track-row] button[data-name]{flex:1 1 auto;background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
+  .cand-acts button[data-target],[data-track-row] button[data-target]{flex:0 0 auto;background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
+  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;flex:0 0 auto;width:auto;}
   .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  /* 「无试听」是个**不可点的状态标记**，不是按钮（用户要求：无音频也要能选这首，
+     但别让人以为这里还能点播放）。做成描边小标签，与旁边的实心「选这首」拉开层级。 */
+  .cand-noop{font-size:12px;color:var(--warn);background:var(--surface-2);border:1px dashed var(--warn-line,var(--line-strong));
+              border-radius:var(--v6-r-pill);padding:6px 12px;min-height:32px;cursor:default;opacity:1;}
+  .cand-noop:disabled{color:var(--warn);opacity:1;}
+
+  /* ------------------------------------------------------------
+     十二之二、候选行在**窄屏**上要换行，不能硬挤四列
+     ------------------------------------------------------------
+     上面那条 [data-track-row] 是 grid（序号 / 歌名+歌手 / 时长 / 操作）四列。
+     手机上（390px）算下来歌名只剩几十像素，实测被压成「雨…」，
+     而「选这首」也被挤成两行 —— 截图里一眼就能看出不对。
+     窄屏改成两行：第一行 序号 + 歌名歌手 + 时长，第二行整行给操作按钮。
+     宽屏保持四列不变（那边空间够，四列更紧凑）。
+     ------------------------------------------------------------ */
+  @media(max-width:560px){
+    .cand-panel [data-track-row]{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;column-gap:10px;}
+    .cand-panel [data-track-row]>div:not(.cand-acts){flex:1 1 auto;min-width:0;}
+    .cand-panel [data-track-row] .cand-dur{margin-left:auto;}
+    /* 操作行整行占满。**「选这首」吃掉全部剩余宽度**（它是这一行唯一的主操作，
+       右对齐的两个不等宽按钮看起来是歪的 —— 用户直接指出"按钮位置不对"）。
+       播放/无试听按内容宽度靠右，触控下限 40px。 */
+    .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
+    .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
+    .cand-acts button[data-name]{width:100%;}
+    .cand-acts button[data-target]{width:auto;}
+    .cand-noop{width:auto;}
+  }
   .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
   .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
@@ -794,6 +822,20 @@
   body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
   body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
   @media(min-width:900px){ body>div.header h1{font-size:19px;} }
+
+  /* ------------------------------------------------------------
+     十四之三、状态提示条（「这一版没有音频」/「暂停接收投稿」）
+     ------------------------------------------------------------
+     两处都用"左侧一道粗边 + 极浅琥珀底"：它们都是**需要看清、但不必惊动**的
+     状态说明 —— 用 danger 红会像报错，用普通灰又会被一眼掠过。
+     颜色全部走令牌（--warn / --warn-soft / --ink），所以深色模式自动跟着翻转。
+     .no-audio 用在后台审核卡片上，.paused-notice 用在首页与点歌页。 */
+  .no-audio,.paused-notice{
+    background:var(--warn-soft);border:1px solid var(--warn);border-left:4px solid var(--warn);
+    color:var(--ink);font-size:13px;line-height:1.75;padding:10px 12px;border-radius:var(--v6-r-sm);
+    margin:10px 0;text-align:left;
+  }
+  .paused-notice{margin:0 0 14px;}
 
   /* ------------------------------------------------------------
      十五、深色模式：暖黑分层 + 紫青提亮
@@ -905,6 +947,9 @@
 <body>
 <div class="box">
   <h2>音乐投稿</h2>
+  <!-- 暂停接收投稿时的提示条：默认隐藏，进页面问一次 /api/config 再决定显示。
+       目的是"打开就知道"，而不是填完表单点提交才吃一个 403。 -->
+  <p id="pausedNotice" class="paused-notice" style="display:none;"></p>
   <p class="sub">每人每周只能投稿一首，请慎重提交</p>
   <label class="field-label" for="title">歌名（同时是搜索框）</label>
   <input id="title" placeholder="输入歌名或歌手，回车搜索" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();searchSongs();}">
@@ -957,7 +1002,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.0.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1055,6 +1100,11 @@ function uiStyles(){
     '.ui-toast-err{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 12px 30px -8px rgba(225,29,72,.55)}',
     '.ui-toast.ui-hide{opacity:0;transform:translate(-50%,12px)}',
     /* ---- 设计层 v2 · 弹窗与轻提示 ---- */
+    ".ui-actions{flex-wrap:wrap}",
+    ".ui-actions .ui-btn{width:auto;max-width:100%;box-sizing:border-box;flex:0 1 auto}",
+    ".ui-actions-single{display:block}",
+    ".ui-actions-single .ui-btn{display:block;width:100%;box-sizing:border-box;padding:11px 12px;text-align:center}",
+    ".ui-overlay{box-sizing:border-box}",
     ".ui-overlay{background:rgba(15,23,42,.40);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}",
     ".ui-overlay.ui-closing{animation:uiFadeOut .18s var(--ease,ease) forwards}",
     ".ui-box{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:var(--r-xl,20px);box-shadow:var(--shadow-pop,0 18px 44px -18px rgba(15,23,42,.34))}",
@@ -1112,7 +1162,9 @@ function uiDialog(opt){
     }
 
     const actions = document.createElement('div');
-    actions.className = 'ui-actions';
+    // 没有取消按钮 = 提示型弹窗（只有「知道了」这一个动作），
+    // 用整行居中而不是挤在右下角 —— 用户反馈过「这个按钮位置看着很难受」。
+    actions.className = 'ui-actions' + (opt.cancelText === '' ? ' ui-actions-single' : '');
 
     let settled = false;
     const close = (result) => {
@@ -1244,6 +1296,102 @@ async function recaptchaToken(action){
   }
 }
 
+/* ============================================================
+   浏览器端工作量证明（PoW）—— 与 reCAPTCHA 并列的第二道，默认关闭。
+   开关与难度由后端 /api/config 的 pow 下发（配置里没有就当没启用）。
+   可用性优先：拿不到谜题、算不出来、超过 6 秒，一律返回 null，
+   后端只在功能开启时才校验 —— 算不出来不能让学生投不了票。
+   ============================================================ */
+
+let powConfig = null;
+
+async function getPowConfig(){
+  if(powConfig) return powConfig;
+  try {
+    const r = await fetch('/api/config');
+    const d = r.ok ? await r.json() : {};
+    powConfig = (d && d.pow) || { enabled: false };
+  } catch(e) {
+    powConfig = { enabled: false };
+  }
+  return powConfig;
+}
+
+/** 摘要按十六进制位算，前 target 位是不是全 0。 */
+function powDigestOk(buffer, target){
+  const bytes = new Uint8Array(buffer);
+  let hex = '';
+  for(let i = 0; i < bytes.length && hex.length < target.length; i++){
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex.slice(0, target.length) === target;
+}
+
+/**
+ * 取谜题时要带的本机标识（存 localStorage，一次生成长期复用）。
+ *
+ * 为什么必须有它：/api/pow 不需要登录，服务端只能靠这个 `cid` 认出"这是同一台设备"。
+ * 不带的话限流会退化成按 IP —— 而校园网全校共用一个出口 IP，
+ * 等于**全校共享 120 次/小时的取谜题额度**，正常学生会被同学挡住。
+ * 它只是限流分桶用的、能伪造，不是身份凭据（真正的去重还是设备指纹）。
+ */
+function powClientId(){
+  try {
+    let id = localStorage.getItem('yczx_pow_cid');
+    if(!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)){
+      id = '';
+      const bytes = new Uint8Array(12);
+      crypto.getRandomValues(bytes);
+      for(let i = 0; i < bytes.length; i++) id += bytes[i].toString(16).padStart(2, '0');
+      localStorage.setItem('yczx_pow_cid', id);
+    }
+    return id;
+  } catch(e) {
+    return '';
+  }
+}
+
+/** 解一道谜题：返回 { challenge, nonce }；任何一步失败都返回 null。 */
+async function powProof(action){
+  const cfg = await getPowConfig();
+  if(!cfg.enabled) return null;
+  // 老浏览器 / file:// 下 crypto.subtle 可能不存在 —— 直接当"算不出来"（放行）
+  if(!window.crypto || !crypto.subtle || typeof crypto.subtle.digest !== 'function') return null;
+
+  try {
+    const cid = powClientId();
+    const r = await fetch('/api/pow?action=' + encodeURIComponent(action || 'vote')
+      + (cid ? '&cid=' + encodeURIComponent(cid) : ''));
+    if(!r.ok) return null;
+    const d = await r.json();
+    if(!d || d.enabled !== true || !d.challenge) return null;
+
+    const challenge = String(d.challenge);
+    const difficulty = Math.max(0, Math.min(8, Number(d.difficulty) || 0));
+    const target = '0'.repeat(difficulty);
+    // 上限 10 秒：后端给谜题 300 秒有效期（见 _lib/pow.js），这里只是别让页面无限算下去。
+    // 难度 3 在手机上通常 0.2 秒内出结果，这个上限是给极慢机型的兜底。
+    const deadline = Date.now() + 10000;
+    const enc = new TextEncoder();
+    let nonce = 0;
+
+    // 分片计算：每 2000 次让出一次主线程，弱机型也不会把页面卡死。
+    // 刻意**不用 Web Worker / Blob**：本站 CSP 是 script-src 'self' 'unsafe-inline'，
+    // 没有放行 worker-src blob:，用 Worker 会直接失败。
+    while(Date.now() < deadline){
+      for(let i = 0; i < 2000; i++){
+        const digest = await crypto.subtle.digest('SHA-256', enc.encode(challenge + ':' + nonce));
+        if(powDigestOk(digest, target)) return { challenge: challenge, nonce: String(nonce) };
+        nonce++;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return null;
+  } catch(e) {
+    return null;
+  }
+}
+
 
 // 设备指纹：用于"每人每周一次"的去重，替代旧版可被"换个 User-Agent"绕过的方案。
 // 刻意不使用 localStorage / Cookie，这样清缓存不会把限制重置；
@@ -1321,15 +1469,42 @@ function blockGuestSubmit(){
   }
 }
 
+/* ---------------- 暂停接收投稿（管理员用按钮开关） ----------------
+   状态来自公开的 GET /api/config（submit.paused）。前端这套只是**让学生打开就知道**，
+   真正拦住提交的是 /api/vote 的 POST 闸门 —— 绕过页面直接 POST 一样会被 403。
+   与游客模式的处理刻意保持同一个形状（先说明原因、再置灰按钮），
+   这样"为什么点不了"永远有一句人话在页面上。
+*/
+let submitPaused = false;
+
+function applySubmitPaused(paused){
+  submitPaused = paused === true;
+  const notice = document.getElementById('pausedNotice');
+  if(notice){
+    notice.style.display = submitPaused ? 'block' : 'none';
+    notice.textContent = submitPaused
+      ? '广播站现在暂停接收投稿。你仍然可以看榜单、看排期，但暂时不能提交点歌 —— 恢复之后再来。'
+      : '';
+  }
+  const btn = document.getElementById('submitVoteBtn');
+  if(btn && submitPaused){
+    btn.disabled = true;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = '广播站现在暂停接收投稿';
+  }
+}
+
 /** 普通学生 / 调试身份：解开提交按钮。 */
 function enableSubmit(){
   isGuestMode = false;
 
   const btn = document.getElementById('submitVoteBtn');
   if(btn){
-    btn.disabled = false;
+    // 注意：停收期间**不能**因为"不是游客"就把按钮解开 —— 两件事互不覆盖。
+    btn.disabled = submitPaused;
     btn.removeAttribute('aria-disabled');
     btn.removeAttribute('title');
+    if(submitPaused) applySubmitPaused(true);
   }
 }
 
@@ -1343,6 +1518,17 @@ async function vote(){
     if(guestMsg){
       guestMsg.style.color = '#075985';
       guestMsg.textContent = '当前为游客模式：只能查看排行，不能投稿。请点下方「返回主页」查看排行。';
+    }
+    return;
+  }
+
+  // 暂停接收投稿：同样放在读表单之前。按钮已经是灰的，但脚本 / 键盘 /
+  // 旧版缓存页面仍可能调到这个函数（服务端还会 403 兜底）。
+  if(submitPaused){
+    const pausedMsg = document.getElementById('msg');
+    if(pausedMsg){
+      pausedMsg.style.color = '#b45309';
+      pausedMsg.textContent = '广播站现在暂停接收投稿，请稍后再来。';
     }
     return;
   }
@@ -1394,12 +1580,18 @@ async function vote(){
   if(!await uiConfirm('确认提交这首歌吗？\n歌名：' + title + '\n歌手：' + artist)) return;
 
   msg.style.color = '#0284c7'; msg.textContent = '提交中...';
+  // 算 PoW 可能要几百毫秒到几秒：按钮置灰 + 换文案，让人看得出在忙。
+  const submitBtn = document.getElementById('submitVoteBtn');
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = '正在校验…'; }
   try {
     // 不再传 password / class_id：登录态由 HttpOnly 会话 Cookie 自动携带，
     // 班级身份由服务端决定，客户端无从伪造。
     const fingerprint = await deviceFingerprint();
     // 人机校验令牌（reCAPTCHA v3，无感）。没启用时是空串。
     const rcToken = await recaptchaToken('vote');
+    // 工作量证明答案（默认关闭时是 null）。算不出来 / 没启用都传 null，
+    // 由后端按开关决定：功能开着才会校验。
+    const proof = await powProof('vote');
     const r = await fetch('/api/vote', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1413,6 +1605,7 @@ async function vote(){
         // 上面那三个字段只是老版接口的兼容字段（也方便出问题时对照排查）。
         track_token: trackToken,
         recaptcha_token: rcToken,
+        pow: proof,
       })
     });
     const d = await r.json();
@@ -1451,6 +1644,15 @@ async function vote(){
       msg.style.color = '#e11d48'; msg.textContent = d.error || '出错了';
     }
   } catch(e) { msg.style.color = '#e11d48'; msg.textContent = '网络错误'; }
+  finally {
+    // 恢复成"当前状态该有的样子"：停收期间不能因为一次提交失败就把按钮解开
+    if(submitBtn){
+      submitBtn.textContent = '提交点歌';
+      submitBtn.disabled = submitPaused;
+      if(submitPaused) submitBtn.setAttribute('aria-disabled', 'true');
+      else submitBtn.removeAttribute('aria-disabled');
+    }
+  }
 }
 
 /** 清空已选中的那一首。 */
@@ -1747,21 +1949,19 @@ function bindAudioFallback(audio){
  */
 function candidatePanelHtml(title, hint, list, boxId, withPick){
   const rows = list.map((s, index) => `
-    <div data-track-row="${escapeHtml(s.id)}" style="flex-wrap:wrap;">
+    <div class="cand-row" data-track-row="${escapeHtml(s.id)}" style="flex-wrap:wrap;">
       <span class="cand-no">${index + 1}</span>
       <div>
         <div class="cand-name">${escapeHtml(s.name)}</div>
-        <div class="cand-sub">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}${s.source ? ' · ' + escapeHtml(s.source) : ''}</div>
+        <div class="cand-sub">${escapeHtml(s.artist)}${s.album ? ' · ' + escapeHtml(s.album) : ''}</div>
       </div>
       <span class="cand-dur">${escapeHtml(formatDuration(s.duration))}</span>
       <div class="cand-acts">
-        ${withPick && s.playable !== false
+        ${withPick
           ? `<button data-name="${escapeHtml(s.name)}" data-artist="${escapeHtml(s.artist)}" data-track="${escapeHtml(s.id)}" data-token="${escapeHtml(s.track_token || s.token || '')}" data-clear="${boxId}" onclick="pickSong(this)">选这首</button>`
-          : (withPick
-            ? '<span class="cand-off">这一版无音频，不能入选</span>'
-            : '')}
+          : ''}
         ${s.playable === false
-          ? (withPick ? '' : '<span class="cand-off">暂无试听</span>')
+          ? '<button class="cand-noop" type="button" disabled title="这一版暂时取不到音频，但照样可以选它投稿">无试听</button>'
           : `<button data-track="${escapeHtml(s.id)}" data-target="${boxId}" onclick="playFromButton(this)">播放</button>`}
       </div>
     </div>
@@ -1776,7 +1976,7 @@ function candidatePanelHtml(title, hint, list, boxId, withPick){
       <div class="cand-hint">${escapeHtml(hint)}</div>
 
       <div class="cand-player" id="player-${boxId}">
-        <div class="cand-hint" style="padding:0;">点下面任意一行的「播放」开始试听</div>
+        <div class="cand-hint" style="padding:0;">点下面任意一行的「播放」开始试听；标着「无试听」的也照样可以选</div>
       </div>
 
       <div class="cand-rows">${rows}</div>
@@ -1838,6 +2038,17 @@ function playTrack(trackId, boxId){
 
   if(guest) blockGuestSubmit();
   else enableSubmit();
+
+  // 顺便问一次"现在收不收投稿"。与身份是两个独立的轴，所以单独问、不要混进上面那段。
+  // 取不到就不显示提示（弱网下不该让学生看到一个假的"停收"横幅），
+  // 服务端的闸门照旧兜底。
+  try {
+    const cr = await fetch('/api/config');
+    if(cr.ok){
+      const cfg = await cr.json();
+      if(cfg && cfg.submit) applySubmitPaused(cfg.submit.paused === true);
+    }
+  } catch(e) { /* 取不到就按"正常接收"处理 */ }
 })();
 </script>
 </body>
