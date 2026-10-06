@@ -32,6 +32,25 @@ const PLAYABLE_TTL_MS = 10 * 60 * 1000;
 /** 缓存条目上限（Worker isolate 内存有限）。 */
 const PLAYABLE_MAX = 400;
 
+/**
+ * 这一版是"官方试听片段"而不是完整曲子吗。
+ *
+ * ⚠️ 为什么必须与 playable **分开**（2026-10-07 实测后的补充）：
+ *   苹果 `ap-` 的 previewUrl 一定能出音频（所以 `playable: true` 是对的），
+ *   但它只有 30 秒 —— 实测 1,024,937 字节 / 269kbps = **30.0s**，而搜索返回的
+ *   `duration` 是**整曲时长**（213~271s）。这是两个不同的事实：
+ *     · "能不能出音频"   → `playable`
+ *     · "是不是完整曲子" → `complete`
+ *   混成一个布尔值必然错两种之一：要么把 30 秒片段当整曲，
+ *   要么把苹果整个标成"无音频"（学生就看不到原唱目录了）。
+ *
+ * 判据只看前缀：`ap-`（iTunes Search 的试听片段）是**上游的定义**，
+ * 与网络无关，所以不需要探测就能下结论。
+ */
+export function isPreviewOnlyTrack(trackId) {
+  return /^ap-/.test(String(trackId || ''));
+}
+
 const playableCache = new Map();      // id -> { ok: boolean|null, at: number }
 
 function cached(id) {
@@ -125,8 +144,8 @@ export async function probeNeteasePlayable(songId) {
  */
 export async function trackPlayable(trackId, fallback) {
   const id = String(trackId || '');
-  // 苹果给的是官方 previewUrl，一定有音频。
-  if (/^ap-/.test(id)) return true;
+  // 苹果给的是官方 previewUrl，一定有音频（但只有 30 秒 —— 见 isPreviewOnlyTrack）。
+  if (isPreviewOnlyTrack(id)) return true;
 
   const numeric = neteaseIdOf(id);
   if (numeric) {
@@ -174,7 +193,11 @@ export async function playableMapForIds(trackIds, { resolve, limit = 40, concurr
   for (const id of trackIds) {
     const key = String(id || '');
     if (!key || out.has(key)) continue;
-    if (/^ap-/.test(key)) { out.set(key, true); continue; }
+    // ⚠️ 这里**不再跳过 `ap-`**（2026-10-07 改）：原来 ap- 直接记 true，
+    //    于是"苹果那种 30 秒试听"和"能出整曲"在结果里长得一模一样，
+    //    从结果上分不出"完整曲子"和"官方片段"。现在它和其他前缀一样走真实判定 ——
+    //    调用方（music.js）会把自己的解析链注入 resolve，ap- 就是问 iTunes 的 previewUrl。
+    //    若调用方没给 resolve，则由 playableTrackId 的回退分支处理（不会去打上游）。
     targets.push(key);
   }
 
@@ -185,9 +208,23 @@ export async function playableMapForIds(trackIds, { resolve, limit = 40, concurr
   const worker = async () => {
     while (queue.length && Date.now() < deadline) {
       const key = queue.shift();
-      // eslint-disable-next-line no-await-in-loop
-      const ok = await resolve(key);
-      out.set(key, ok);
+      /**
+       * ⚠️ 单条探测抛异常**不能**让整批失败（2026-10-07 补）。
+       *
+       * 旧写法直接 `await resolve(key)`：`resolve` 是调用方注入的解析链
+       * （咪咕 / 中转 / 网易云，全是网络请求），它对某一个 id 抛异常时
+       * Promise.all 会整体 reject —— 后果是**整次搜索 500**，
+       * 而真实原因只是"这一条候选这次探不动"。弱网下这就是"整页候选打不出来"。
+       * 所以折成 null（不确定）：与 trackPlayable 的三种返回值语义一致。
+       */
+      let verdict = null;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        verdict = await resolve(key);
+      } catch {
+        verdict = null;
+      }
+      out.set(key, verdict);
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
@@ -197,7 +234,30 @@ export async function playableMapForIds(trackIds, { resolve, limit = 40, concurr
 }
 
 /**
- * 并发过滤网易云候选：给"确认拿不到音频"的候选打 `playable: false` 标记。
+ * 一条候选 id 的**默认**判定（调用方没注入 resolve 时才用得上）。
+ *
+ * 为什么要有它（2026-10-07）：batch 探测原先写死一句
+ * `resolve || ((id) => probeNeteasePlayable(neteaseIdOf(id)))` —— 对 `mg-` / `ap-`
+ * 这种**不是网易云数字 id** 的前缀，`neteaseIdOf()` 返回空串，于是拿着空 id 去请求
+ * `outer/url?id=`，白白打一次上游、还把结论记成 null（不确定）。
+ * 现在按前缀分派：网易云数字 id 走网易云那条路，苹果是官方片段（确认能出音频、
+ * 但不是完整曲），剩下的（咪咕/中转自己的 id）**没有默认答案**，如实回 null。
+ *
+ * ⚠️ 返回 `null` 绝不是"没音频"：没有判定依据 ≠ 拿不到。这里只影响
+ *    "搜索页上给不给候选打标签"，真播放时那条链照样会自己解析并验真。
+ *
+ * @returns {Promise<{playable: boolean|null, complete?: boolean}>}
+ */
+async function playableTrackId(trackId) {
+  const id = String(trackId || '');
+  if (isPreviewOnlyTrack(id)) return { playable: true, complete: false };
+  const numeric = neteaseIdOf(id);
+  if (numeric) return { playable: await probeNeteasePlayable(numeric) };
+  return { playable: null };
+}
+
+/**
+ * 并发过滤候选：给"确认拿不到音频"的候选打 `playable: false` 标记。
  *
  * ⚠️ 这里**从不删除**候选，只打标记。
  *
@@ -215,22 +275,67 @@ export async function playableMapForIds(trackIds, { resolve, limit = 40, concurr
  *    以前的写法只解构 `resolve`、把其余参数**静默丢掉**，调用方设了 limit 也不生效
  *    （看起来"改了没效果"，最难查的一类）。
  *
+ * ⚠️ 2026-10-07 二次修订（**改名与覆盖范围**）：原名 `keepPlayableNetease`、
+ *    而且 `targets` 写死 `songs.filter((s) => /^mt-/.test(...))` —— 于是
+ *    **咪咕（现在排第一的源）的候选永远拿不到任何标记**（实测 27 条候选全是"未标记"），
+ *    搜索页也就没法告诉学生"这条没有试听"。现在改成**对所有前缀一致**：
+ *    每条候选都过一遍调用方注入的解析链（搜索阶段只探最前面的几条，见调用方的 limit）。
+ *
+ *    两个字段的语义（**不能合并**，合并必然错一种）：
+ *      · `playable: false` —— 确认这一版**拿不到音频**（探测失败/不确定时**不写**）
+ *      · `complete: false` —— 能出音频，但**不是完整曲子**（目前只有苹果 30 秒片段）
+ *
  * @param {Array} songs
  * @param {{resolve?: Function, limit?: number, concurrency?: number, deadlineMs?: number}} [opts]
+ * @param {Function} [opts.resolve] 每个 id -> `boolean|null`，或 `{playable, complete}`。
+ *   由调用方注入（"怎么问咪咕 / 怎么问中转源"的逻辑在 music.js 里）。
  */
-export async function keepPlayableNetease(songs, opts = {}) {
+export async function keepPlayableCandidates(songs, opts = {}) {
   const { resolve, limit, concurrency, deadlineMs } = opts;
   if (!Array.isArray(songs) || !songs.length) return songs;
-  const targets = songs.filter((s) => /^mt-/.test(String(s.id || '')));
+
+  const targets = songs.filter((s) => /^[A-Za-z0-9_-]{1,40}$/.test(String(s.id || '')));
   if (!targets.length) return songs;
 
+  const run = typeof resolve === 'function' ? resolve : playableTrackId;
   const verdicts = await playableMapForIds(targets.map((s) => s.id), {
-    resolve: resolve || ((id) => probeNeteasePlayable(neteaseIdOf(id))),
+    resolve: run,
     // 搜索候选本来就只有几十条；调用方给得比候选数小就按它来（省上游请求）
     limit: Number.isFinite(limit) ? Math.max(1, Number(limit)) : targets.length,
     concurrency: Number.isFinite(concurrency) ? Math.max(1, Number(concurrency)) : 6,
     deadlineMs: Number.isFinite(deadlineMs) ? Math.max(200, Number(deadlineMs)) : 4000,
   });
 
-  return songs.map((s) => (verdicts.get(String(s.id)) === false ? { ...s, playable: false } : s));
+  /**
+   * 把探测结论折成两个**互不覆盖**的字段。
+   *
+   * ⚠️ 为什么"探测抛异常"必须在 playableMapForIds 里就折成 null（而不是这里兜）：
+   *    那边是 `await resolve(key)`，resolve 是调用方注入的网络解析链。
+   *    让异常冒出来 → Promise.all 整体 reject → **整次搜索 500**，
+   *    而真实原因只是"这一条候选这次探不动"。弱网下那就是整页候选打不出来。
+   *
+   * 另外：`isPreviewOnlyTrack` 兜底打 `complete: false`，是为了**不依赖调用方**
+   * 也成立 —— 苹果 30 秒片段这个事实是上游定义，谁来判都一样。
+   */
+  return songs.map((s) => {
+    const raw = verdicts.get(String(s.id));
+    const verdict = raw === false || raw === true || raw === null || raw === undefined
+      ? { playable: raw === undefined ? null : raw }
+      : (raw && typeof raw === 'object' ? raw : { playable: null });
+    const out = { ...s };
+    if (verdict.playable === false) out.playable = false;
+    // ap- 那类"能出音频但不是完整曲"：两个字段分别表达，互不覆盖
+    if (verdict.complete === false || (verdict.complete === undefined && isPreviewOnlyTrack(s.id))) {
+      out.complete = false;
+    }
+    return out;
+  });
 }
+
+/**
+ * 旧名字，保留**只为兼容**（语义已扩大：不再只覆盖网易云）。
+ *
+ * 新代码请直接 import `keepPlayableCandidates` —— 旧名字会消失，
+ * 而"名字说只做网易云、实际要做所有源"正是这回踩过的坑。
+ */
+export const keepPlayableNetease = keepPlayableCandidates;

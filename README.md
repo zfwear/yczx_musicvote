@@ -18,12 +18,27 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 
 ### 1. 整体替换仓库内容
 
-把本目录下的**全部文件**覆盖到仓库根目录（含 `assets/`、`functions/`、`_lib/`、`sql/`），
+把本目录下的**全部文件**覆盖到仓库根目录（含 `public/`、`functions/`、`_lib/`、`sql/`），
 然后提交，Cloudflare 会自动重新部署。
+
+> **重要（2026-10-08 起）：前端与后端已经物理分离。**
+> 五个页面、`_headers`、`_routes.json` 与 `assets/` 全都搬进了 **`public/`**，
+> 它同时是 Cloudflare Pages 的 **Build output directory**。
+> 所以第一次用这一版时，必须去
+> Cloudflare Pages → 项目 → **Settings → Build configuration**，
+> 把 **Build output directory 从 `/`（或空）改成 `public`**。
+> 不改的话站点会 404：Pages 会去根目录找 `index.html`，而它已经不在那儿了。
+> 改完之后 `functions/` 仍然从**仓库根**读取（Pages 的约定），不用动。
+
+> 以后只改后端时，不要整包替换 —— 用交付目录里的
+> `yczx_musicvote_更新/`（里面**一个页面都没有**），把里面的东西拖进 GitHub 即可，
+> 前端不会被覆盖。
 
 > 注意：必须**整体替换**。`assets/` 里只有两张页面真正引用的图：
 > `school-badge.png`（右上角校徽）与 `radio-logo.png`（盐中之声）。
 > 旧仓库里多出来的 `Image_*.png`、`zf1.png`（1 字节空文件）等都可以删掉。
+> 页面自己的样式与脚本在各页对应的 `public/assets/css/<页>.css` 与
+> `public/assets/js/<页>-<n>.js` 里，改样式/脚本就是直接改这些文件。
 
 ### 2. 在 D1 控制台执行 SQL
 
@@ -593,16 +608,37 @@ DELETE FROM sessions WHERE subject = 'admin';
 
 ## 五、文件清单
 
-```
-index.html                              主页：口令墙 + 公告 + 待审核榜 + 正式榜
-vote.html                               点歌页：搜索选歌（锁定音源）+ 试听
-admin.html                              管理后台：审核 / 回收站 / 举报收件箱 / 系统设置
-register.html                           普通管理员注册（用动态口令）
-_headers                                静态资源安全响应头
-_routes.json                            只让 /api/* 走 Functions，保住每日调用额度
-assets/school-badge.png                 右上角校徽
-assets/radio-logo.png                   盐中之声
+共 81 个文件。`public/` 是**唯一**的前端产物目录（也是 Pages 的 Build output directory），
+其余都是后端与文档 —— 这个边界就是"只想更新后端时不会覆盖前端"的依据。
 
+```
+public/                                   ← Pages 的 Build output directory（前端全在这里）
+  index.html                              主页：口令墙 + 公告 + 待审核榜 + 正式榜
+  vote.html                               点歌页：搜索选歌（锁定音源）+ 试听
+  admin.html                              管理后台：审核 / 回收站 / 举报收件箱 / 系统设置
+  register.html                           普通管理员注册（用动态口令）
+  schedule.html                           每周歌单排期（上周 / 本周 / 下周）
+  _headers                                安全响应头（含 CSP：禁止外链资源）
+  _routes.json                            让**所有**路径都进 Functions
+                                          （只写 /api/* 的话域名白名单中间件对页面完全不生效）
+  assets/css/<页>.css                      每页一份样式，由原先的内联 <style> 按原顺序合并
+  assets/js/<页>-<n>.js                    每页的脚本，由原先的内联 <script> 逐个拆出
+                                          （**不加 defer/async**，顺序就是执行顺序）
+  assets/school-badge.png                 右上角校徽
+  assets/radio-logo.png                   盐中之声
+  assets/gongan-badge.png                 公安备案徽标
+
+functions/  _lib/  sql/                   后端，仍在**仓库根**（Pages 从根目录找 functions/）
+server.mjs                                自建服务器适配层（`node server.mjs --init`，可脱离 Cloudflare 跑）
+迁移到自有服务器.md                        迁移步骤说明
+API.md                                    接口文档
+```
+
+> 改样式 / 改脚本就是直接改 `public/assets/` 下对应的文件；
+> 页面 HTML 里只剩 `<link>` 与 `<script src>`。原来的那些
+> `apply-*.mjs` / `fix-*.cjs` 正则改页面的生成器已经作废（见 `_harness/retired/`）。
+
+```
 functions/api/login.js                  班级口令登录（游客口令与"账号:密码"调试模式共用此入口）
 functions/api/me.js                     当前身份（role / isGuest / className），未登录返回 401
 functions/api/logout.js                 退出（两种身份 Cookie 一起清）
@@ -663,9 +699,12 @@ sql/009_song_track_id.sql               点歌时锁定的音源 id
 - **认证用的是 HttpOnly Cookie，不是 `sessionStorage`。**
   交接文档建议存 `sessionStorage`，但那会让 XSS 直接读到令牌；HttpOnly Cookie
   脚本读不到，安全性明显更好。代价是需要同站 Cookie（本项目前后端同域，没问题）。
-- **CSP 里的 `script-src` 含 `'unsafe-inline'`。** 因为按要求保留了内联
-  `<script>` 和 `onclick`，无法去掉。所以 CSP 挡不住"页面内联脚本注入"，
-  XSS 的主要防线是代码里的 `escapeHtml` 转义。若要彻底收紧，需要把脚本外链化。
+- **CSP 里的 `script-src` 仍含 `'unsafe-inline'`。** 内联 `<script>` 已经在
+  2026-10-08 前端分离时搬到 `public/assets/js/` 了，但**行内事件属性
+  （`onclick="…"`）仍然保留**，而它同样受 `script-src 'unsafe-inline'` 管辖，
+  所以这一项暂时去不掉。CSP 目前挡不住"行内属性注入"，
+  XSS 的主要防线仍是代码里的 `escapeHtml` 转义。
+  要彻底收紧，得先把 `onclick` 改成 `addEventListener`（属独立一件事）。
 - **`sql/001` 不可重复执行**（列已存在会报 `duplicate column name`），这是预期行为；
   重复部署请用增量补丁。
 - **改 `AUTH_PEPPER` 会锁死已有班级口令**，见上文第 3 步的说明。

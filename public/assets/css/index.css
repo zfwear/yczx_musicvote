@@ -1,0 +1,1089 @@
+
+  /* ============================================================
+     设计令牌（四个页面各自内联一份完全相同的副本）
+     —— 不能引外部 CSS 文件（CSP default-src 'none'，且要能离线用），
+        所以这里把"同一个值"写四遍。改的时候四处一起改。
+     间距节奏 8 / 12 / 16 / 24 / 32；圆角常规一档、大容器大一档。
+     ============================================================ */
+  :root{
+    --brand:#0284c7;--brand-strong:#0369a1;--brand-soft:#e0f2fe;--brand-line:#bae6fd;
+    --ink:#0f172a;--ink-2:#334155;--ink-3:#64748b;--ink-4:#94a3b8;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --surface:#ffffff;--surface-2:#f8fafc;
+    --danger:#e11d48;--danger-soft:#fff1f2;--success:#059669;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+    --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-pill:999px;
+  }
+  body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','HarmonyOS Sans SC','MiSans','PingFang SC','Hiragino Sans GB','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;max-width:520px;margin:0 auto;padding:20px 16px;min-height:100vh;color:#1e293b;background-color:#eef3f9;background-image:radial-gradient(72% 52% at 50% -8%,rgba(56,189,248,0.20) 0%,rgba(56,189,248,0) 62%),linear-gradient(180deg,#f1f6fb 0%,#eef3f9 44%,#e7eef6 100%);background-attachment:fixed;}
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(12px);padding:16px 20px;border-radius:16px;border:1px solid rgba(255,255,255,0.8);box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);}
+  .header h1{font-size:22px;margin:0;color:#0f172a;letter-spacing:1px;}
+  .header p{color:#64748b;font-size:12px;margin:4px 0 0 0;letter-spacing:2px;}
+  .badge{width:44px;height:44px;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+  .btn{display:block;width:100%;padding:16px;border:0;border-radius:14px;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-size:16px;font-weight:bold;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:24px;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);transition:transform 0.2s ease;}
+  .btn:active{transform:scale(0.97);}
+  .rank-card{background:rgba(255,255,255,0.85);backdrop-filter:blur(8px);padding:16px 20px;border-radius:14px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);display:flex;justify-content:space-between;align-items:center;animation:fadeInUp 0.4s ease forwards;opacity:0;}
+  @keyframes fadeInUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  .rank-info h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;}
+  .rank-info p{margin:0;font-size:13px;color:#64748b;}
+  .rank-votes{color:#e11d48;font-weight:800;font-size:18px;}
+  footer{text-align:center;margin-top:48px;padding-bottom:24px;}
+  footer img{width:80px;height:80px;border-radius:50%;opacity:0.6;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  footer p{color:#94a3b8;font-size:11px;margin-top:12px;letter-spacing:1px;}
+  #gate{background:rgba(255,255,255,0.8);backdrop-filter:blur(10px);padding:20px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.05);margin-top:40px;}
+  #app{display:none}
+  input,button{font-size:16px;padding:14px;width:100%;box-sizing:border-box;margin:0 0 12px 0;border-radius:10px;border:1px solid #e2e8f0;background:rgba(255,255,255,0.9);}
+  .err{color:#e11d48;font-size:13px;text-align:center;min-height:18px;}
+  /* ==== 设计层 · 起点（由 _harness/apply-design.mjs 生成，勿手改） ==== */
+/* ---- 双端适配：手机上用顶部按钮切换，宽屏上左右分栏同时显示 ---- */
+  .mobile-tabs{display:flex;gap:8px;margin-bottom:16px;}
+  .mobile-tabs button{margin:0;padding:10px;font-size:14px;font-weight:600;background:rgba(255,255,255,0.7);backdrop-filter:blur(8px);color:var(--ink-3);border:1px solid rgba(255,255,255,0.9);box-shadow:none;}
+  .mobile-tabs button.active{background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;box-shadow:0 4px 14px 0 rgba(14,165,233,0.39);}
+  .col{display:none;}
+  .col.active{display:block;}
+  .col-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 12px 0;padding-left:10px;border-left:4px solid #0ea5e9;letter-spacing:0.5px;}
+  .col-title span{font-weight:400;font-size:12px;color:var(--ink-4);letter-spacing:0;}
+  @media(min-width:900px){
+    body{max-width:1080px;}
+    .mobile-tabs{display:none;}
+    #rankList{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;}
+    .col{display:block;}
+    .col-title{margin-top:0;}
+  }
+  /* ============================================================
+     视觉重构 · 第一档：手机歌曲卡片与行内按钮尺寸
+     —— 只追加，不动上面任何一条原有规则。
+
+     为什么要改：
+       原版卡片是**单行 flex**：左边 .rank-info、右边「票数 + 试听 + 举报 + 投票」。
+       在 390px 下实测（_harness/layout-audit.mjs，按真实字宽算）：
+         · 右侧那组（票数 33px + 三个 60px 按钮 + 3×6px 间隔）固有宽度 249px
+         · 卡片内容区只有 318px → 分给 .rank-info 只剩 68.7px
+         · 歌名「起风了（Live 版）」固有 132.8px → 被折成 3 行，歌手行再折 2 行
+         · 票数「128票」中的数字与「票」之间没有不断行保护 → 断成两行
+         · 行内按钮继承全局 input,button{padding:14px}，被压窄时文字折行
+
+     怎么改：
+       卡片改成**上下两层**：
+         上层 = 歌曲信息（可收缩，最少让歌名放得下） + 票数（flex:none，锁在一行）
+         下层 = 操作区（试听 / 举报 / 投票，允许换行，按钮文字永不折行）
+       这样"挤"发生在该让步的地方（歌曲信息允许换行），
+       而不是所有元素一起被压扁。
+     ============================================================ */
+  .rank-card{flex-direction:column;align-items:stretch;gap:12px;padding:14px 16px;}
+  .rank-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+  /* min-width:0 是这里的关键：flex 项默认 min-width:auto，会被内容顶住不肯收缩，
+     于是"两个都不让"就变成两边一起溢出。允许收缩之后，宽度分配才有意义。 */
+  .song-main{min-width:0;flex:1 1 auto;}
+  .song-main h3{margin:0 0 6px 0;font-size:16px;color:#1e293b;font-weight:600;line-height:1.4;overflow-wrap:anywhere;}
+  .song-main p{margin:0;font-size:13px;color:var(--ink-3);line-height:1.5;}
+  /* 票数不参与收缩：它是这块区域里唯一"绝对不能断行"的内容 */
+  .song-votes{flex:0 0 auto;display:inline-flex;align-items:baseline;gap:2px;padding:2px 8px;border-radius:999px;background:rgba(225,29,72,0.08);}
+  .song-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+  /* 行内按钮的尺寸规则：原版只有全局 input,button{width:100%;padding:14px}，
+     没有给小按钮的规则，所以这里的 width:auto + 固定最小高度是必需的。
+     min-height 44px = 触控目标下限；white-space:nowrap = 文字永不折行。 */
+  .song-acts button{width:auto;flex:0 0 auto;min-height:44px;margin:0;padding:9px 14px;font-size:14px;font-weight:600;
+    border-radius:10px;white-space:nowrap;line-height:1.35;box-shadow:none;}
+  .song-acts .act-secondary{background:rgba(255,255,255,0.9);color:#0c4a6e;border:1px solid #bae6fd;}
+  .song-acts .act-quiet{background:transparent;color:var(--ink-3);border:1px solid #e2e8f0;}
+  .song-acts .act-primary{background:#0284c7;color:#fff;border:1px solid #0284c7;font-weight:700;}
+
+  /* ============================================================
+     视觉重构 · 第二档：统一「主要 / 次要 / 危险」三层按钮
+
+     问题：原来同一屏里所有按钮都是"饱和蓝渐变 + 投影"，
+     局部再各自覆盖成红/绿/灰 —— 主要与次要长得一模一样，
+     谁也看不出该先点哪个；主按钮的投影还偏重。
+
+     三层：
+       主要 = 实心品牌蓝、几乎无阴影（一个页面通常只有一个：
+              进入 / 去投稿 / 提交点歌 / 投票 / 保存）
+       次要 = 浅底或描边（试听 / 搜索 / 退出 / 编辑 / 取消…）
+       危险 = 红色文字或轻量红描边（删除 / 清空 / 拒绝）
+     —— 举报归到"安静"层，刻意不与投票抢注意力。
+     ============================================================ */
+  .btn-primary,.btn-secondary,.btn-quiet,.btn-danger{
+    width:auto;box-sizing:border-box;font-family:inherit;font-weight:600;
+    border-radius:var(--r-md);cursor:pointer;transition:background-color .16s,color .16s,border-color .16s,box-shadow .16s;
+  }
+  .btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);box-shadow:none;}
+  .btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
+  .btn-secondary{background:#fff;color:#0c4a6e;border:1px solid var(--brand-line);box-shadow:none;}
+  .btn-secondary:hover{background:var(--brand-soft);}
+  .btn-quiet{background:transparent;color:var(--ink-3);border:1px solid var(--line);box-shadow:none;}
+  .btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid #fecdd3;box-shadow:none;}
+  .btn-danger:hover{background:var(--danger-soft);}
+  .btn-sm{padding:9px 14px;font-size:13px;}
+  .btn-block{display:block;width:100%;text-align:center;padding:14px 16px;font-size:16px;border-radius:var(--r-lg);text-decoration:none;}
+  /* 站内大按钮：主次要拉开 —— 去投稿是实心，其余是浅底 */
+  .btn{padding:15px 16px;font-size:17px;letter-spacing:.5px;margin-bottom:var(--s3);}
+  .btn.btn-primary{background:var(--brand);border:1px solid var(--brand);}
+  .btn.btn-secondary{background:rgba(255,255,255,0.86);color:var(--brand-ink);border:1px solid var(--brand-line);box-shadow:none;}
+  /* 手机切换页签的选中态：原版是"渐变 + 投影"，统一成实心品牌蓝（与后台页签一致） */
+  .mobile-tabs button.active{background:var(--brand);box-shadow:none;}
+  /* 首页两个入口链接的主次（不改标记，用属性选择器定位，避免动到被逐字钉住的 DOM）：
+     「去投稿」= 主要（实心蓝、无投影），「查看每周排期」= 次要（浅底描边） */
+  a.btn[href="/vote.html"]{background:var(--brand);border:1px solid var(--brand);box-shadow:none;}
+  a.btn[href="/schedule.html"]{background:rgba(255,255,255,0.86);color:var(--brand-ink);border:1px solid var(--brand-line);box-shadow:none;}
+  .gate-enter{padding:14px 16px;font-size:16px;border-radius:var(--r-md);background:var(--brand);box-shadow:none;color:#fff;font-weight:600;}
+  #rulesBox .rules-toggle{background:transparent;border:0;box-shadow:none;color:var(--brand);font-size:13px;padding:2px 4px;margin:0;min-height:44px;display:inline-flex;align-items:center;width:auto;flex:0 0 auto;white-space:nowrap;}
+  #rulesBox .rules-toggle:hover{color:var(--brand-strong);}
+  /* 须知标题不参与收缩：右侧按钮曾因全局 width:100% 把标题挤成两行 */
+  #rulesBox .panel>div>h3{flex:1 1 auto;min-width:0;}
+
+  /* ============================================================
+     视觉重构 · 第三档：降低背景、阴影、毛玻璃的存在感
+
+     评审原话：「缺的不是更多效果，而是"安静的地方"」。
+     做法：
+       · 背景从"蓝紫青粉四团光斑"改成**一处**品牌蓝渐变 + 线性基色
+       · 歌曲列表从"每首歌一个浮起的大盒子"改成
+         **一个白色列表容器 + 内部轻分隔线**（更像音乐产品，也更紧凑）
+       · 阴影只留给真正需要与背景分离的元素：
+         悬浮的试听播放器、候选面板、弹窗、登录卡
+     ============================================================ */
+  /* 列表容器：唯一的"白底 + 圆角 + 边框"，内部不再有盒子 */
+  .list-panel{margin-bottom:var(--s3);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
+  /* 面板：公告、投稿须知这类"独立成块"的内容（与列表行区分开） */
+  .panel{margin-bottom:var(--s3);padding:var(--s4) var(--s4);border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);}
+  /* 覆盖第一档给 .rank-card 的圆角与投影：行不再是"卡片"，而是列表项。
+     padding 左右 16px 与卡片内容宽度一致，所以第一档的宽度预算不变。 */
+  .rank-card{margin-bottom:0;border:0;border-radius:0;background:var(--surface);box-shadow:none;backdrop-filter:none;}
+  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
+  /* 悬浮元素才配拥有明显阴影：试听播放器与候选面板 */
+  #auditionBox audio{display:block;width:100%;}
+
+  /* ============================================================
+     视觉重构 · 第四档：统一字体 / 间距 / 圆角，并补上无障碍
+
+     评审原话：「说明文字太多，而且有些太淡、太小」。
+     要减少的是说明的**数量**，而不是把它一律缩小变淡。
+     所以：辅助文字最低 12px、颜色从 #94a3b8 提到 #64748b；
+     间距统一走 --s1..--s6 的节奏；键盘焦点必须看得见。
+     ============================================================ */
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(2,132,199,0.42);outline-offset:2px;border-radius:var(--r-sm);}
+  .header{margin-bottom:var(--s5);}
+  .col-title{margin-bottom:var(--s3);padding-left:var(--s3);}
+  .mobile-tabs{gap:var(--s2);margin-bottom:var(--s4);}
+  .mobile-tabs button{min-height:44px;border-radius:var(--r-md);}
+  /* 持久标签：口令输入框原来只有 placeholder，一输入就没了提示 */
+  .field-label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 6px;}
+  /* 无障碍：系统开了"减少动态效果"就全部静态化 */
+  @media(prefers-reduced-motion:reduce){
+    .rank-card{animation:none;opacity:1;transform:none;}
+    *{transition:none !important;animation:none !important;}
+  }
+
+  /* ============================================================
+     游客模式：只读身份的禁用态与提示条
+     
+     置灰不靠"把颜色调淡"实现（那样键盘和读屏仍能操作）：
+       · 投票 / 举报是 <button>，直接上 disabled 属性 —— 浏览器不再派发点击；
+       · 「去投稿」是 <a>，disabled 属性对链接不生效，所以去掉 href
+         （没有 href 的链接既不响应点击、也进不了 Tab 顺序），
+         再补 aria-disabled 让辅助技术读得出"这是被禁用的"；
+       · pointer-events:none 是第三层兜底，触控与鼠标一起挡住。
+     ============================================================ */
+  #guestNotice{margin:0 0 var(--s3);padding:var(--s3) var(--s4);border:1px solid var(--brand-line);border-left:3px solid var(--brand);border-radius:var(--r-lg);background:var(--brand-soft);color:var(--brand-ink);font-size:13px;line-height:1.7;}
+  a.btn[disabled],button[disabled]{pointer-events:none;cursor:not-allowed;}
+  a.btn[disabled]{background:var(--line-soft);color:var(--ink-4);border:1px solid var(--line);box-shadow:none;}
+  .btn-upvote[disabled]{background:var(--surface-2);color:var(--ink-4);border:1px solid var(--line);box-shadow:none;}
+/* ============================================================
+     视觉系统 v3
+     ------------------------------------------------------------
+     这一版是一次**整体重写**，不再是"在原版上叠补丁"。目标是把界面的
+     排版、配色、密度统一到一套自洽的尺度上，解决四个具体问题：
+
+       1. 字号千篇一律 → 建立五档排版尺度（--fs-display 30px 到 --fs-cap 12px），
+          标题与正文拉开 2 倍以上差距，扫一眼就知道哪是标题、哪是正文。
+       2. 有些字看不清 → 正文 15px / 1.65，辅助文字 13px 且颜色提到
+          --ink-3（对白底约 7:1），不再用 #94a3b8 那种发虚的灰。
+       3. 红色很突兀   → 红色只留给"真的危险"（删除 / 拒绝 / 报错）。
+          票数、举报、公告都不再用红：票数是中性数据（墨黑数字 + 浅底），
+          举报是安静层，公告用品牌色。
+       4. 观感平庸     → 收敛色相（一套中性灰 + 一支品牌蓝 + 一支暖琥珀），
+          加大留白节奏，卡片按 iOS 分组列表处理：hairline 分隔、几乎无投影。
+
+     双端适配：
+       · 手机：触控目标 ≥44px、正文 15px、列表行两行结构（信息在上、操作在下）；
+       · 宽屏：对比更强、行高更紧、容器 1120px、分组之间用间距而不是分隔线。
+     ============================================================ */
+
+  /* ------------------------------------------------------------
+     一、令牌：少色相、明确层级
+     ------------------------------------------------------------ */
+  :root{
+    /* 中性层：一整套来自同一色族的灰，避免"蓝灰混用"的脏感 */
+    --canvas:#f2f4f7;--surface:#ffffff;--surface-2:#f7f8fa;--surface-3:#eef0f4;--surface-4:#e7eaef;
+    --ink:#111827;--ink-2:#3f4756;--ink-3:#5b6472;--ink-4:#8a93a1;
+    --line:#e3e7ee;--line-soft:#eef1f5;--line-strong:#ccd2dc;
+    /* 品牌：一支冷静的蓝，只出现在"该被点的地方" */
+    --brand:#2563eb;--brand-strong:#1d4ed8;--brand-soft:#eef4ff;--brand-line:#c7d9fe;
+    --brand-ink:#1e40af;
+    /* 危险：只在删除/拒绝/错误出现 */
+    --danger:#c0392b;--danger-soft:#fdf2f0;
+    /* 提示：暖琥珀（"未通过/注意"用它，比红色不刺眼） */
+    --warn:#a16207;--warn-soft:#fef8ec;
+    --success:#0f7b53;--ok-soft:#eefaf4;
+
+    /* 排版尺度：五档，跨度 12 → 30 */
+    --fs-display:30px;--fs-title:21px;--fs-head:17px;--fs-body:15px;--fs-sub:13px;--fs-cap:12px;
+    /* 行高：标题紧、正文松 */
+    --lh-tight:1.25;--lh-body:1.65;
+    /* 字重：Windows 上 700 的小字会糊，所以正文权重压到 400/500，标题才用 650/700 */
+    --fw-body:400;--fw-medium:520;--fw-strong:650;--fw-bold:720;
+
+    /* 间距节奏（8 的倍数为主） */
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:44px;
+    /* 圆角：控件 12、卡片 18、大容器 22、胶囊 999 */
+    --r-sm:10px;--r-md:12px;--r-lg:18px;--r-xl:22px;--r-pill:999px;
+    --r-ctl:12px;--r-card:18px;
+
+    /* 动效：一条曲线、三档时长 */
+    --ease:cubic-bezier(.2,.8,.2,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --d1:140ms;--d2:240ms;--d3:400ms;
+
+    /* 投影：几乎不用（靠 hairline 分层），只有浮层才浮起来 */
+    --shadow-card:0 1px 2px rgba(17,24,39,.04);
+    --shadow-pop:0 20px 48px -20px rgba(17,24,39,.32);
+    --ring:0 0 0 4px rgba(37,99,235,.14);
+  }
+
+  /* ------------------------------------------------------------
+     二、画布：一处极淡的品牌渐晕 + 线性基色（测试要求保留这三样）
+     ------------------------------------------------------------ */
+  body{
+    font-family:'Segoe UI Variable Display','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,
+      BlinkMacSystemFont,'MiSans','HarmonyOS Sans SC','PingFang SC','Hiragino Sans GB',
+      'Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+    font-size:var(--fs-body);
+    line-height:var(--lh-body);
+    letter-spacing:.01em;
+    color:var(--ink-2);
+    background-color:var(--canvas);
+    background-image:
+      radial-gradient(900px 420px at 50% -220px,rgba(37,99,235,.10),rgba(37,99,235,0) 68%),
+      linear-gradient(180deg,#f7f9fc 0%,var(--canvas) 58%,#eaedf2 100%);
+    background-attachment:fixed;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    font-kerning:normal;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ------------------------------------------------------------
+     三、排版层级：五档尺度落到具体元素上
+     ------------------------------------------------------------ */
+  h1,h2,h3{color:var(--ink);letter-spacing:-.01em;line-height:var(--lh-tight);font-weight:var(--fw-strong);}
+  /* 页面主标题：唯一一处 30px */
+  .header h1,.top-bar h2{font-size:var(--fs-display);font-weight:var(--fw-bold);letter-spacing:-.022em;}
+  /* 卡片标题 / 栏目标题：21px */
+  .col-title,.panel h3,#rulesBox h3{font-size:var(--fs-title);font-weight:var(--fw-strong);letter-spacing:-.014em;}
+  /* 正文里的标题：17px */
+  .song-main h3,.card h3,.rank-info h3,.ui-title{font-size:var(--fs-head);font-weight:var(--fw-strong);}
+  /* 正文与辅助：15 / 13，颜色都提到可读灰阶 */
+  .song-main p,.rank-info p,.card p,.slot,.ui-msg{font-size:var(--fs-body);color:var(--ink-3);line-height:var(--lh-body);}
+  .header p,.sub,.col-title span,.card h3 .range,.slot .idx,.slot .meta,
+  .field-label,.ui-msg,.siteVersion,#siteVersion{font-size:var(--fs-sub);}
+  /* 页脚与免责声明：最小 12px，颜色 --ink-4（不是发虚的浅灰） */
+  footer p,#disclaimerBox p{font-size:var(--fs-cap);color:var(--ink-4);line-height:1.7;}
+  /* 数字一律等宽：票数、排名、时长、日期对齐不跳 */
+  .rank-votes,.song-votes,.slot .idx,.slot .tag,.card h3 .range,#siteVersion{font-variant-numeric:tabular-nums;}
+  .rank-votes{font-size:18px;font-weight:var(--fw-strong);letter-spacing:-.01em;}
+  /* 表单标签：小一号、半粗、带字距 */
+  .field-label{font-weight:var(--fw-medium);color:var(--ink-2);letter-spacing:.02em;}
+  /* 输入框 16px：小于 16px 会触发 iOS 聚焦自动放大 */
+  input,select,textarea{font-size:16px;letter-spacing:0;color:var(--ink);}
+
+  /* ------------------------------------------------------------
+     四、卡片与分组：iOS 分组列表观感（hairline 分层，几乎不用投影）
+     ------------------------------------------------------------ */
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box{
+    background:var(--surface);
+    border:1px solid var(--line);
+    box-shadow:var(--shadow-card);
+    border-radius:var(--r-card);
+  }
+  .header,.login-box,#gate{border-radius:var(--r-xl);}
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box,.tabs button,
+  .mobile-tabs,.mobile-tabs button{backdrop-filter:none;-webkit-backdrop-filter:none;}
+  /* 分组之间用间距，不用分隔线；组内用 hairline */
+  .header{margin-bottom:var(--s5);}
+
+  /* 列表行：唯一的白底圆角容器 + 行之间 hairline */
+  .list-panel{margin-bottom:var(--s4);overflow:hidden;}
+  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
+  .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
+  .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
+  /* 空榜：**不要**留一个巨大的空白盒子。
+     宽屏下两栏并排时，空的"正式榜"曾经是一块 450px 高的白板，看着像加载失败。
+     列表为空时里面只有一个 .sub 段落，这里把它做成"矮而安静"的提示卡。 */
+  .list-panel{min-height:180px;}
+  .list-panel:has(>.sub:only-child){
+    min-height:0;display:flex;align-items:center;justify-content:center;
+    padding:var(--s6) var(--s4);background:var(--surface-2);border-style:dashed;
+  }
+  .list-panel>.sub:only-child{margin:0;color:var(--ink-4);}
+  @supports not (selector(:has(*))){
+    /* 老浏览器（不支持 :has）退化成"列表为空时不撑高"，效果略差但不会出错 */
+    .list-panel{min-height:0;}
+  }
+
+  /* ------------------------------------------------------------
+     五、票数：从"降价标签"改成中性数据
+     ------------------------------------------------------------ */
+  .song-votes{
+    flex:0 0 auto;display:inline-flex;align-items:baseline;gap:3px;
+    padding:3px 10px;border-radius:var(--r-pill);
+    background:var(--surface-3);border:1px solid var(--line);
+  }
+  .song-votes .rank-votes{color:var(--ink);}
+  /* 单位"票"用辅助色；数字用墨黑 —— 靠字重与底色分层，不用红色 */
+  .song-votes>span{color:var(--ink-4) !important;}
+
+  /* ------------------------------------------------------------
+     六、按钮：三层级 + 统一尺寸（大 48 / 标准 40 / 小 36，手机行内 44）
+     ------------------------------------------------------------ */
+  button,.gate-enter{
+    letter-spacing:.02em;font-weight:var(--fw-medium);
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;
+  }
+  .btn{display:flex;align-items:center;justify-content:center;font-weight:var(--fw-strong);line-height:1.25;letter-spacing:.02em;}
+  .btn,.gate-enter,.box>button,.ui-btn{
+    min-height:48px;font-size:16px;padding:12px 18px;border-radius:var(--r-lg);
+  }
+  .song-acts button,.tabs button,.mobile-tabs button,.back,.more,
+  .card .actions button,.top-bar button{
+    min-height:40px;font-size:var(--fs-body);padding:9px 14px;border-radius:var(--r-ctl);
+  }
+  .card .actions .btn-quiet,.card .actions .btn-danger,.btn-sm,.btn-xs{
+    min-height:36px;font-size:var(--fs-sub);padding:7px 12px;
+  }
+  @media(max-width:560px){.song-acts button,.card .actions button{min-height:44px;}}
+
+  /* 三层级的观感：主要=实心品牌；次要=白底细描边；安静=无底；危险=红字描边 */
+  .btn,.box>button[onclick="vote()"],.gate-enter,.btn-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);}
+  .btn:hover,.box>button[onclick="vote()"]:hover,.btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);}
+  .btn-secondary,.back,.song-acts .act-secondary,
+  .box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+    background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);
+  }
+  .btn-secondary:hover,.back:hover,.song-acts .act-secondary:hover{background:var(--surface-2);}
+  .song-acts .act-quiet,.btn-quiet{background:transparent;color:var(--ink-3);border:1px solid var(--line);}
+  .song-acts .act-quiet:hover,.btn-quiet:hover{background:var(--surface-2);color:var(--ink-2);}
+  .song-acts .act-primary{background:var(--brand);color:#fff;border:1px solid var(--brand);}
+  .btn-danger{background:var(--surface);color:var(--danger);border:1px solid #eccfc9;}
+  .btn-pass{background:var(--success);border-color:var(--success);}
+  .btn-reject{background:var(--danger);border-color:var(--danger);}
+  /* 按下：轻微收缩（iOS 手感），不做位移 */
+  button:active,.btn:active,.song-acts button:active,.tabs button:active,.mobile-tabs button:active{
+    transform:scale(.975);
+  }
+  button,.btn,.song-acts button,.tabs button,.mobile-tabs button,.back,.more{
+    transition:background-color var(--d1) var(--ease),border-color var(--d1) var(--ease),
+               color var(--d1) var(--ease),transform var(--d2) var(--ease),box-shadow var(--d1) var(--ease);
+  }
+
+  /* ------------------------------------------------------------
+     七、输入控件：浅底 + 大圆角 + 焦点环
+     ------------------------------------------------------------ */
+  input,select,textarea{
+    background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-ctl);
+    transition:background-color var(--d2) var(--ease),border-color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
+  }
+  input::placeholder,textarea::placeholder{color:var(--ink-4);opacity:1;}
+  input:focus,select:focus,textarea:focus{background:var(--surface);border-color:var(--brand);box-shadow:var(--ring);outline:none;}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(37,99,235,.45);outline-offset:2px;border-radius:var(--r-sm);}
+
+  /* ------------------------------------------------------------
+     八、页签与分段控件
+     ------------------------------------------------------------ */
+  .tabs{gap:var(--s2);}
+  .tabs button{background:transparent;color:var(--ink-3);border:1px solid transparent;font-weight:var(--fw-medium);}
+  .tabs button:hover:not(.active){background:var(--surface-3);color:var(--ink);}
+  .tabs button.active{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:var(--fw-strong);}
+  .mobile-tabs{
+    display:flex;gap:4px;padding:3px;border-radius:var(--r-ctl);
+    background:var(--surface-3);border:1px solid var(--line);
+  }
+  .mobile-tabs button{
+    flex:1 1 0;min-height:38px;margin:0;border:0;border-radius:9px;background:transparent;
+    color:var(--ink-3);font-size:var(--fs-body);font-weight:var(--fw-medium);
+    transition:background-color var(--d2) var(--ease),color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
+  }
+  .mobile-tabs button.active{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(17,24,39,.10);}
+
+  /* ------------------------------------------------------------
+     九、栏目标题：细竖条 + 说明文字
+     ------------------------------------------------------------ */
+  .col-title{border-left-width:3px;border-left-color:var(--brand);padding-left:var(--s3);margin-bottom:var(--s3);}
+  .col-title span{font-weight:var(--fw-body);color:var(--ink-4);}
+
+  /* ------------------------------------------------------------
+     十、公告 / 须知 / 页脚
+     ------------------------------------------------------------ */
+  #announceBox .panel{
+    background:var(--brand-soft);border:1px solid var(--brand-line);
+    border-left:3px solid var(--brand);border-radius:var(--r-card);
+  }
+  #announceBox .panel h3{color:var(--brand-ink);}
+  #rulesBox .panel>div:first-child{border-bottom:1px solid var(--line);}
+  #rulesBox .rules-toggle{background:transparent;border:0;color:var(--brand);font-size:var(--fs-sub);font-weight:var(--fw-medium);}
+  footer img{box-shadow:none;background:transparent;opacity:.4;}
+  #siteVersion{color:var(--ink-4);}
+  /* 空态不再占位（票页那个"大空洞"的真身就是等文案的状态行） */
+  p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
+  #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
+  .song-acts:empty{display:none;}
+  .more[style*="display:none"],.more[style*="display: none"]{display:none !important;margin:0;padding:0;height:0;}
+
+  /* ------------------------------------------------------------
+     十之二、试听面板：在列表里也要像一个"播放器"
+     ------------------------------------------------------------
+     试听面板是 JS 在每张卡片**后面**插的动态元素（形如 div#audition-N），
+     它没有类名，所以只能靠"列表容器里的直接子 div"来定位。
+     为什么要专门给它一条规则：列表行是 flex/column 结构，
+     动态插入的播放器如果是行内元素，会被压成很窄的一条 —— 看着像"坏了"。
+     ------------------------------------------------------------ */
+  .list-panel>div:not(.rank-card){
+    display:block;width:100%;box-sizing:border-box;
+    margin:0;padding:0;border-top:1px solid var(--line-soft);background:var(--surface-2);
+  }
+  .list-panel>div:not(.rank-card):empty{display:none;}
+  .list-panel>div:not(.rank-card) audio{width:100%;display:block;}
+
+  /* ------------------------------------------------------------
+     十一、动效：一条时间轴 + 列表错峰
+     ------------------------------------------------------------ */
+  @keyframes riseIn3{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes colIn3{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .rank-card{animation:riseIn3 var(--d3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 30ms);}
+  .col.active{animation:colIn3 var(--d2) var(--ease-out) both;}
+  .card{animation:riseIn3 var(--d3) var(--ease-out) both;}
+  #listBox>.card:nth-child(2){animation-delay:30ms;}
+  #listBox>.card:nth-child(3){animation-delay:60ms;}
+  #listBox>.card:nth-child(4){animation-delay:90ms;}
+  #listBox>.card:nth-child(5){animation-delay:120ms;}
+  #listBox>.card:nth-child(6){animation-delay:150ms;}
+  #listBox>.card:nth-child(7){animation-delay:180ms;}
+  #listBox>.card:nth-child(n+8){animation-delay:210ms;}
+
+  /* ------------------------------------------------------------
+     十二、宽屏：更强的对比、更紧的行高、更宽的容器
+     ------------------------------------------------------------ */
+  @media(min-width:900px){
+    body{max-width:1120px;padding:28px 24px;}
+    .header h1,.top-bar h2{font-size:34px;}
+    .rank-card{padding:18px 20px;}
+    .song-acts button{min-height:40px;}
+    /* 注意：必须重述这一条：设计层在样式表**更后面**，而基类的
+       .mobile-tabs{display:flex} 与断点里的 .mobile-tabs{display:none;}
+       特异性相同 —— 后面的赢。漏了这条，电脑端就会多出一排
+       "待审核榜 / 正式榜"切换按钮，而下面两栏已经并排列出来了（改版时踩过）。 */
+    .mobile-tabs{display:none;}
+  }
+  @media(min-width:1080px){
+    /* 后台工作台：导航栏去掉卡片感，做成 iOS 侧边栏 */
+    .tabs{background:transparent;border:0;padding:0;}
+    .tabs button{text-align:left;justify-content:flex-start;}
+  }
+
+  /* ------------------------------------------------------------
+     十三、深色模式：把中性层整体下移，品牌色提亮
+     ------------------------------------------------------------ */
+  @media(prefers-color-scheme:dark){
+    :root{
+      --canvas:#0f1216;--surface:#171b21;--surface-2:#1d222a;--surface-3:#242a33;--surface-4:#2b323c;
+      --ink:#f2f4f7;--ink-2:#ccd3dd;--ink-3:#a3adba;--ink-4:#7c8794;
+      --line:#272e37;--line-soft:#212730;--line-strong:#3a434e;
+      --brand:#5b8def;--brand-strong:#7ba4f5;--brand-soft:#16233a;--brand-line:#2c4370;
+      --brand-ink:#a8c5ff;
+      --danger:#e2705f;--danger-soft:#2e1a17;
+      --warn:#d9a441;--warn-soft:#2b2313;
+      --success:#3ecf8e;--ok-soft:#12281f;
+      --shadow-card:0 1px 2px rgba(0,0,0,.35);
+      --shadow-pop:0 20px 48px -20px rgba(0,0,0,.7);
+      --ring:0 0 0 4px rgba(91,141,239,.22);
+    }
+    body{
+      background-color:var(--canvas);
+      background-image:
+        radial-gradient(900px 420px at 50% -220px,rgba(91,141,239,.16),rgba(91,141,239,0) 68%),
+        linear-gradient(180deg,#141922 0%,var(--canvas) 58%,#0b0e12 100%);
+    }
+    .header,.card,.box,.panel,.list-panel,#gate,.login-box{box-shadow:var(--shadow-card);}
+    /* 原版与旧层里写死的浅色文字逐条翻转（只换令牌覆盖不到它们） */
+    .song-main h3,.rank-card h3,.rank-info h3,.card h3,.header h1,.top-bar h2,.ui-title{color:var(--ink);}
+    .song-main p,.rank-info p,.rank-card p,.card p{color:var(--ink-3);}
+    .song-main p span,.rank-card p span{color:var(--brand-ink) !important;}
+    #gate h2{color:var(--ink) !important;}
+    #gate p{color:var(--ink-3) !important;}
+    .col-title span,.sub,.slot .idx,.slot .meta,footer p,#disclaimerBox p{color:var(--ink-4);}
+    .btn-secondary,.back,.box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+      background:var(--surface-2);color:var(--ink-2);border-color:var(--line-strong);
+    }
+    .song-votes{background:var(--surface-3);border-color:var(--line);}
+    .mobile-tabs{background:var(--surface-3);border-color:var(--line);}
+    .mobile-tabs button.active{background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.4);}
+    #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
+    /* 内联写死的浅底面板 */
+    [style*="background:rgba(255,255,255"]{background:var(--surface) !important;}
+    [style*="background:rgba(225,29,72"]{background:var(--danger-soft) !important;}
+    [style*="background:rgba(5,150,105"]{background:var(--ok-soft) !important;}
+    [style*="border:1px solid #bae6fd"]{border-color:var(--brand-line) !important;}
+    [style*="border:1px solid #e2e8f0"]{border-color:var(--line-strong) !important;}
+  }
+
+  /* ------------------------------------------------------------
+     十四、无障碍
+     ------------------------------------------------------------ */
+  @media(prefers-reduced-motion:reduce){
+    .rank-card,.card,.col.active{animation:none !important;opacity:1 !important;transform:none !important;}
+    *{transition-duration:.01ms !important;animation-duration:.01ms !important;}
+    button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
+  }
+/* ==== 设计层 · 终点 ==== */
+/* ============================================================
+     视觉系统 v4（文件名沿用旧版；这一层就是当前生效的设计层）
+     ------------------------------------------------------------
+     这一层是 v6「夜航 / Night Flight」：它整段替换了旧版的 v4 + v5 两段追加层。
+     维护提示：apply-design.mjs 会**数上面那串特征字出现几次**来校验"设计层恰好一份"，
+     所以那串字在本层正文里只能出现一次，别在别处再写它，否则会被判成叠了两份。
+     设计取向：把"校园后台"改成"深夜电台的节目单" ——
+       冷白纸底 + 靛紫主色 + 青作点缀 + 琥珀读票数；
+       主按钮是胶囊 + 对角渐变 + 外发光；卡片靠三档阴影分层；
+       页签是分段控件；标题大字号 + 紧字距。
+     红线（有测试盯着，改前先读）：
+       1. body 必须含 #eef3f9 + 恰好 1 处 radial-gradient + 1 处 linear-gradient；
+       2. 最后一条带 background 的 .rank-card{...} 必须是
+          background:var(--surface) + box-shadow:none（榜单行保持平底）；
+       3. 样式块里至少一处 backdrop-filter:blur( ；
+       4. 宽屏隐藏切换按钮、双端分栏、后台工作台栅格必须重述；
+       5. 正文里的规则**一律写成一行** —— 选择器后换行会让前端守卫扫不到。
+     ============================================================ */
+
+  /* ------------------------------------------------------------
+     一、亮色令牌（覆盖现有令牌名，全站立刻换肤）
+     ------------------------------------------------------------ */
+  /* 浅色文字三档在 2026-10-07 一起收口，**规则是"每一档都要在页面最暗的那层底上过 AA"**
+     —— 页面底是 body 的那条 linear-gradient，最暗一档 #e7ecf5，
+     比卡片白底(--surface #ffffff)还暗，所以只按白底挑色是不够的：
+       · --ink-3 原 #586180 在白底 6.1:1 过，在 #e7ecf5 上 5.15:1 也过 —— 保留；
+       · --ink-4 原 #6d7694 在白底就只有 4.35:1（不过），在 #e7ecf5 上更低 —— 必须加深。
+     现在两档都留出余量，且彼此仍有可见的层级差（#333b52 → #4f5878 → #5b6480）。
+     用户 2026-10-07 说"不要求原样保留了"，这一类遗留色因此可以一次改到位。 */
+  :root{
+    --brand:#5b3df5;--brand-strong:#4326d8;--brand-soft:#eeeaff;--brand-line:#d3caff;
+    --brand-ink:#2f1a9e;--accent:#06b6d4;--accent-soft:#e6fbff;
+    --ink:#0b0e18;--ink-2:#333b52;--ink-3:#4f5878;--ink-4:#5b6480;
+    --canvas:#eef3f9;--surface:#ffffff;--surface-2:#fafbff;--surface-3:#f1f4fb;--surface-4:#e8ecf7;
+    --line:#e6e9f4;--line-soft:#eef1f9;--line-strong:#ccd2e6;
+    --danger:#e5484d;--danger-soft:#fff1f1;--warn:#b45309;--warn-soft:#fff7e8;
+    --success:#12b76a;--ok-soft:#eafaf1;
+    --v6-grad:linear-gradient(135deg,#6244ee 0%,#5230e0 45%,#4338ca 100%);
+    --v6-grad-soft:linear-gradient(135deg,rgba(109,76,255,.12),rgba(6,182,212,.10));
+    --v6-r-sm:12px;--v6-r:14px;--v6-r-lg:18px;--v6-r-xl:22px;--v6-r-pill:999px;
+    --v6-sh-1:0 1px 2px rgba(11,14,24,.05),0 1px 3px rgba(11,14,24,.04);
+    --v6-sh-2:0 8px 24px -12px rgba(11,14,24,.22);
+    --v6-sh-3:0 28px 64px -28px rgba(11,14,24,.38);
+    --v6-glow:0 10px 30px -12px rgba(91,61,245,.55);
+    --v6-amber:rgba(245,158,11,.10);
+    --ring:0 0 0 4px rgba(91,61,245,.18);
+    --shadow-card:var(--v6-sh-1);--shadow-pop:var(--v6-sh-3);
+    --r-sm:var(--v6-r-sm);--r-md:var(--v6-r);--r-lg:var(--v6-r-lg);--r-xl:var(--v6-r-xl);
+    --r-pill:var(--v6-r-pill);--r-ctl:var(--v6-r-pill);--r-card:var(--v6-r-xl);--radius:var(--v6-r-lg);
+    --fs-display:34px;--fs-title:20px;--fs-head:17px;--fs-body:15.5px;--fs-sub:13px;--fs-cap:12px;
+    --lh-tight:1.2;--lh-body:1.7;
+    --fw-body:400;--fw-medium:500;--fw-strong:600;--fw-bold:800;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:44px;
+    --ease:cubic-bezier(.22,.61,.36,1);--ease-out:cubic-bezier(.22,.61,.36,1);
+    --d1:140ms;--d2:240ms;--d3:400ms;
+  }
+
+  /* ------------------------------------------------------------
+     二、画布：冷白纸底 + 一处品牌渐晕（网格取消）
+     ------------------------------------------------------------ */
+  body{
+    font-family:'Segoe UI Variable Display','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,
+      BlinkMacSystemFont,'MiSans','HarmonyOS Sans SC','PingFang SC','Hiragino Sans GB',
+      'Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+    font-size:var(--fs-body);line-height:var(--lh-body);letter-spacing:.006em;
+    color:var(--ink-2);background-color:#eef3f9;
+    background-image:
+      radial-gradient(1000px 520px at 50% -240px,rgba(91,61,245,.12),rgba(91,61,245,0) 68%),
+      linear-gradient(180deg,#f6f8fd 0%,#eef3f9 55%,#e7ecf5 100%);
+    background-attachment:fixed;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+    font-kerning:normal;text-rendering:optimizeLegibility;
+  }
+  /* 紫青光晕 + 2% 细颗粒：放在伪元素上，body 规则本身保持"只有一处径向渐变" */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background-image:
+      radial-gradient(680px 380px at 8% 0%,rgba(91,61,245,.10),rgba(91,61,245,0) 70%),
+      radial-gradient(720px 420px at 100% 12%,rgba(6,182,212,.09),rgba(6,182,212,0) 72%);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+    background-image:repeating-conic-gradient(from 0deg at 50% 50%,rgba(11,14,24,.020) 0deg 1deg,rgba(11,14,24,0) 1deg 2deg);
+  }
+
+  /* ------------------------------------------------------------
+     三、排版
+     ------------------------------------------------------------ */
+  h1,h2,h3{color:var(--ink);line-height:var(--lh-tight);font-weight:var(--fw-bold);letter-spacing:-.03em;}
+  .header h1,.top-bar h2{font-size:34px;font-weight:800;letter-spacing:-.04em;line-height:1.16;}
+  .col-title,.panel h3,#rulesBox h3{font-size:var(--fs-title);font-weight:var(--fw-bold);letter-spacing:-.022em;}
+  .song-main h3,.card h3,.rank-info h3,.ui-title{font-size:var(--fs-head);font-weight:var(--fw-strong);letter-spacing:-.014em;}
+  .song-main p,.rank-info p,.card p,.slot,.ui-msg{font-size:var(--fs-body);color:var(--ink-3);line-height:var(--lh-body);}
+  .header p,.sub,.col-title span,.card h3 .range,.slot .idx,.slot .meta,.field-label,.ui-msg,#siteVersion{font-size:var(--fs-sub);}
+  footer p,#disclaimerBox p{font-size:var(--fs-cap);color:var(--ink-4);line-height:1.8;}
+  .rank-votes,.song-votes,.slot .idx,.slot .tag,.card h3 .range,#siteVersion,.cand-dur{font-variant-numeric:tabular-nums;}
+  .rank-votes{font-size:19px;font-weight:800;letter-spacing:-.02em;}
+  .field-label{display:block;font-weight:var(--fw-medium);color:var(--ink-2);letter-spacing:.05em;}
+  input,select,textarea{font-size:16px;letter-spacing:0;color:var(--ink);}
+
+  /* ------------------------------------------------------------
+     四、容器：三档阴影 + 描边
+     ------------------------------------------------------------ */
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--v6-r-xl);
+    box-shadow:var(--v6-sh-1);
+  }
+  .header{background:var(--surface);border-color:var(--brand-line);box-shadow:var(--v6-sh-2);margin-bottom:var(--s5);}
+  .card:hover,.box:hover{box-shadow:var(--v6-sh-2);}
+  .header,.card,.box,.panel,.list-panel,#gate,.login-box,.tabs button,.mobile-tabs,.mobile-tabs button{
+    backdrop-filter:none;-webkit-backdrop-filter:none;
+  }
+  /* R3：至少一处毛玻璃面 —— 登录卡与浮层是唯一需要"真的分离"的地方 */
+  .login-box,#gate{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(255,255,255,.86);}
+
+  /* ------------------------------------------------------------
+     五、票数：琥珀数字 + 极浅琥珀底（不再是蓝色实心标签）
+     ------------------------------------------------------------ */
+  .song-votes{
+    flex:0 0 auto;display:inline-flex;align-items:baseline;gap:4px;
+    padding:5px 13px;border-radius:var(--v6-r-pill);
+    background:var(--v6-amber);border:1px solid rgba(245,158,11,.22);
+  }
+  .song-votes .rank-votes{color:var(--warn);font-weight:800;font-variant-numeric:tabular-nums;}
+  .song-votes>span{color:var(--ink-3) !important;font-size:var(--fs-cap) !important;}
+
+  /* ------------------------------------------------------------
+     六、按钮：胶囊 + 对角渐变 + 外发光
+     ------------------------------------------------------------ */
+  button,.gate-enter{
+    letter-spacing:.02em;font-weight:var(--fw-medium);
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;
+    border-radius:var(--v6-r-pill);
+  }
+  /* 必须是 block：.btn 是个 <a>，靠它撑满整行（改成 inline-flex 会缩成一团） */
+  .btn{display:block;text-align:center;font-weight:var(--fw-strong);line-height:1.25;letter-spacing:.03em;}
+  .btn,.gate-enter,.box>button,.ui-btn{min-height:48px;font-size:16px;padding:12px 22px;border-radius:var(--v6-r-pill);}
+  .song-acts button,.tabs button,.mobile-tabs button,.back,.more,.card .actions button,.top-bar button{
+    min-height:40px;font-size:14px;padding:9px 16px;border-radius:var(--v6-r-pill);
+  }
+  .card .actions .btn-quiet,.card .actions .btn-danger,.btn-sm,.btn-xs{min-height:36px;font-size:var(--fs-sub);padding:7px 14px;}
+  @media(max-width:560px){.song-acts button,.card .actions button{min-height:44px;}}
+  .btn,.btn-primary,.gate-enter,.song-acts .act-primary,.box>button[onclick="vote()"],
+  #goVoteBtn,#regBtn{
+    background:var(--v6-grad);color:#fff;border:0;box-shadow:var(--v6-glow);
+  }
+  .btn:hover,.btn-primary:hover,.gate-enter:hover,.song-acts .act-primary:hover,.box>button[onclick="vote()"]:hover,
+  #goVoteBtn:hover,#regBtn:hover{
+    background:var(--v6-grad);border:0;box-shadow:0 14px 34px -12px rgba(91,61,245,.62);transform:translateY(-1px);
+  }
+  .btn:active,.btn-primary:active,.gate-enter:active,.song-acts button:active,.tabs button:active,.mobile-tabs button:active{transform:scale(.985);}
+  .btn-secondary,.back,.song-acts .act-secondary,.box>button[onclick="searchSongs()"],.box>button[onclick="auditionInput()"]{
+    background:transparent;color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;
+  }
+  .btn-secondary:hover,.back:hover,.song-acts .act-secondary:hover,.box>button[onclick="searchSongs()"]:hover,.box>button[onclick="auditionInput()"]:hover{
+    background:var(--surface-3);border-color:var(--brand-line);color:var(--ink);
+  }
+  .song-acts .act-quiet,.btn-quiet{background:transparent;color:var(--ink-2);border:1px solid transparent;box-shadow:none;}
+  /* 原版后台另有一条把 btn-quiet 的背景刷成 --ink-3（浅色下就是个深灰块），
+     文字却留在深灰上 —— 实测 1.23:1，等于看不见。显式钉死一对过线的值。 */
+  #adminBox .btn-quiet,.top-bar .btn-quiet{background:var(--surface-3);color:var(--ink-2);border:1px solid var(--line);}
+  #adminBox .btn-quiet:hover,.top-bar .btn-quiet:hover{background:var(--surface-4);color:var(--ink);}
+  .song-acts .act-quiet:hover,.btn-quiet:hover{background:var(--surface-3);color:var(--ink-2);}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid rgba(229,72,77,.34);box-shadow:none;}
+  .btn-danger:hover{background:var(--danger-soft);border-color:var(--danger);}
+  .btn-pass{background:var(--success);border-color:var(--success);color:#fff;}
+  .btn-reject{background:var(--danger);border-color:var(--danger);color:#fff;}
+  button,.btn,.song-acts button,.tabs button,.mobile-tabs button,.back,.more{
+    transition:background-color var(--d1) var(--ease),border-color var(--d1) var(--ease),
+               color var(--d1) var(--ease),transform var(--d2) var(--ease),box-shadow var(--d1) var(--ease);
+  }
+
+  /* ------------------------------------------------------------
+     七、输入控件
+     ------------------------------------------------------------ */
+  input,select,textarea{
+    background:var(--surface-2);border:1px solid var(--line);border-radius:var(--v6-r);
+    transition:background-color var(--d2) var(--ease),border-color var(--d2) var(--ease),box-shadow var(--d2) var(--ease);
+  }
+  input::placeholder,textarea::placeholder{color:var(--ink-4);opacity:1;}
+  input:focus,select:focus,textarea:focus{background:var(--surface);border-color:var(--brand);box-shadow:var(--ring);outline:none;}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,audio:focus-visible{
+    outline:3px solid rgba(91,61,245,.42);outline-offset:2px;border-radius:var(--v6-r-sm);}
+
+  /* ------------------------------------------------------------
+     八、页签：分段控件（槽 + 滑块）
+     ------------------------------------------------------------ */
+  .tabs{gap:var(--s2);}
+  .tabs button{background:transparent;color:var(--ink-3);border:1px solid transparent;font-weight:var(--fw-medium);}
+  .tabs button:hover:not(.active){background:var(--surface-3);color:var(--ink);}
+  .tabs button.active{background:var(--v6-grad);border:1px solid transparent;color:#fff;font-weight:var(--fw-strong);box-shadow:var(--v6-sh-2);}
+  .mobile-tabs{display:flex;gap:4px;padding:4px;border-radius:var(--v6-r-pill);background:var(--surface-3);border:1px solid var(--line);}
+  .mobile-tabs button{
+    flex:1 1 0;min-height:38px;margin:0;border:0;border-radius:var(--v6-r-pill);background:transparent;
+    color:var(--ink-3);font-size:14px;font-weight:var(--fw-medium);
+  }
+  /* 分段控件的未选中态：--ink-3 on --surface-3 实测 4.2:1，差一点点，
+     这里单独压到 --ink-2（#app 前缀用来盖过原版同特异性规则）。
+     【必须带 :not(.active)】"#app .mobile-tabs button" 的特异性是 (1,1,1)，
+     它**盖得过**下面 button.active 的 (0,2,1)（id 数优先于 class 数）。
+     最初漏了这个 :not()，于是**选中的那个页签文字是深色、压在深紫渐变上**，
+     浅色下只有 1.41:1、深色下 4.18:1 —— 用户看到的"选中项反而看不清"就是这个。
+     这个 bug 一直是靠 check-contrast 的渐变盲区躲过检查的，2026-10-07 修好盲区后立刻暴露。 */
+  #app .mobile-tabs button:not(.active),.mobile-tabs button:not(.active){color:var(--ink-2);}
+  .mobile-tabs button.active{background:var(--v6-grad);color:#fff;box-shadow:var(--v6-sh-2);}
+  /* 宽屏下分段控件的槽也收成透明（1080 以上后台是左导航） */
+  @media(min-width:1080px){
+    .tabs{background:transparent;border:0;padding:0;border-radius:0;}
+    .tabs button{text-align:left;justify-content:flex-start;box-shadow:none;}
+    .tabs button.active{background:var(--v6-grad-soft);color:var(--brand-ink);border:1px solid var(--brand-line);}
+  }
+
+  /* ------------------------------------------------------------
+     九、栏目标题
+     ------------------------------------------------------------ */
+  .col-title{border-left:0;padding-left:0;padding-bottom:var(--s2);border-bottom:1px solid var(--line);
+             text-transform:none;letter-spacing:.02em;margin-bottom:var(--s3);}
+  .col-title span{font-weight:var(--fw-body);color:var(--ink-4);}
+
+  /* ------------------------------------------------------------
+     十、榜单：列表容器才是"浮起的盒子"，行保持平底（R4）
+     ------------------------------------------------------------ */
+  .list-panel{margin-bottom:var(--s4);overflow:hidden;min-height:180px;counter-reset:rankno;}
+  .list-panel>.rank-card{counter-increment:rankno;}
+  .rank-no::before{content:counter(rankno);}
+  .rank-no{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+           min-width:26px;height:26px;padding:0 6px;border-radius:var(--v6-r-sm);
+           background:var(--surface-3);color:var(--ink-3);font-size:13px;font-weight:700;
+           font-variant-numeric:tabular-nums;}
+  /* 「已加入排期 · 本周 / 下周」徽章：刻意沿用分类标签那一套令牌
+     （品牌色文字 + 品牌浅底 + 药丸圆角），不引入新的颜色体系。
+     上周的歌已经被 /api/rank 移出正式榜，所以这里不会出现"上周"。 */
+  .sched-badge{display:inline-flex;align-items:center;flex:0 0 auto;margin-left:var(--s2);
+               padding:1px 8px;border-radius:var(--r-pill);border:1px solid var(--brand-line);
+               background:var(--brand-soft);color:var(--brand-ink);
+               font-size:var(--fs-cap);font-weight:var(--fw-medium);white-space:nowrap;}
+  .list-panel>.rank-card+.rank-card{border-top:1px solid var(--line-soft);}
+  .list-panel>.rank-top{transition:background-color var(--d1) var(--ease);}
+  .list-panel>.rank-card:hover>.rank-top{background:var(--surface-2);}
+  .list-panel:has(>.sub:only-child){
+    min-height:0;display:flex;align-items:center;justify-content:center;
+    padding:var(--s6) var(--s4);background:var(--surface-2);border-style:dashed;box-shadow:none;
+  }
+  .list-panel>.sub:only-child{margin:0;color:var(--ink-4);}
+  @supports not (selector(:has(*))){.list-panel{min-height:0;}}
+  /* 动态插入的试听面板（每张卡片后面的 div#audition-N） */
+  .list-panel>div:not(.rank-card){
+    display:block;width:100%;box-sizing:border-box;margin:0;padding:0;
+    border-top:1px solid var(--line-soft);background:var(--surface-2);
+  }
+  .list-panel>div:not(.rank-card):empty{display:none;}
+  .list-panel>div:not(.rank-card) audio{width:100%;display:block;}
+
+  /* ------------------------------------------------------------
+     十一、公告 / 须知 / 页脚 / 空态
+     ------------------------------------------------------------ */
+  #announceBox .panel{background:var(--brand-soft);border:1px solid var(--brand-line);border-left:0;border-radius:var(--v6-r-xl);}
+  #announceBox .panel h3{color:var(--brand-ink);}
+  /* 页脚小字：原版规则把字号压到 11px、颜色定成 #94a3b8（2.48:1，低于 AA）。
+     字号与颜色都改成过线的值 —— 备案信息属于"必须能看清"的内容。 */
+  footer p{font-size:12px;color:var(--ink-3);}
+  #beianFooter,#beianFooter a,#beianFooter span{color:var(--ink-3);}
+  #siteVersion{font-size:12px;}
+  /* 备案页脚里那几个内联 color:#… 的 span/a：属性选择器 + !important 才压得住
+     行内样式（行内优先级高于任何选择器）。文案与顺序一个字都没动。 */
+  #beianFooter [style*="color:#94a3b8"],#beianFooter [style*="color:#cbd5e1"],
+  #beianFooter [style*="color:#8b93a7"]{color:var(--ink-3) !important;}
+  #beianFooter [style*="color:#cbd5e1"]{color:var(--ink-4) !important;}
+  #rulesBox .panel>div:first-child{border-bottom:1px solid var(--line);}
+  #rulesBox .rules-toggle{background:transparent;border:0;color:var(--brand);font-size:var(--fs-sub);font-weight:var(--fw-medium);}
+  footer img{box-shadow:none;background:transparent;opacity:.4;}
+  #siteVersion{color:var(--ink-4);}
+  /* 页脚**不再是一个方框**（用户 2026-10-07："最底下有个方框，那里面的东西能不能融入背景"）：
+     备案号与版权本来就是页面的收尾语，套一层白底卡片反而像一块没做完的模块，
+     还把视线从内容上拉走。去掉底色、描边与阴影，文字直接落在页面背景上。
+     深色那一节里有同样一条声明，必须一起改（否则只有浅色融入、深色还是方框）。 */
+  #beianFooter{background:transparent;border:0;box-shadow:none;border-radius:0;}
+  p#msg:empty,.msg:empty,.err:empty{min-height:0;margin:0;padding:0;height:0;overflow:hidden;}
+  #searchBox:empty,#auditionBox:empty{margin:0;padding:0;min-height:0;}
+  .song-acts:empty{display:none;}
+  .more[style*="display:none"],.more[style*="display: none"]{display:none !important;margin:0;padding:0;height:0;}
+
+  /* ------------------------------------------------------------
+     十二、候选面板 / 试听面板（T11 把 JS 内联样式收进这些 class）
+     ------------------------------------------------------------
+     以前这块是 JS 拼内联样式，v5 只能用 [style*="…"] + !important 硬压，
+     所以是"半接管"。v6 直接给它们 class 规格，内联样式退休。
+     ------------------------------------------------------------ */
+  .cand-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
+              border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
+  .cand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 4px;}
+  .cand-title{font-size:14px;font-weight:700;color:var(--brand-ink);letter-spacing:-.01em;}
+  .cand-hint{font-size:12px;color:var(--ink-4);padding:0 14px 8px;line-height:1.6;}
+  .cand-hint>button{margin:8px 0 0;}
+  .cand-player{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
+  .cand-rows{padding:0 14px 12px;}
+  .cand-panel [data-track-row]{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;align-items:center;gap:10px;
+              padding:12px 4px;border-top:1px solid var(--line-soft);min-height:54px;flex-wrap:wrap;
+              transition:background-color var(--d1) var(--ease);}
+  .cand-panel [data-track-row]:first-child{border-top:0;}
+  .cand-panel [data-track-row]:hover{background:var(--surface-2);}
+  .cand-no{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+           width:24px;height:24px;border-radius:var(--v6-r-pill);background:var(--surface-3);
+           color:var(--ink-3);font-size:12px;font-weight:700;}
+  .cand-name{color:var(--ink);font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cand-sub{color:var(--ink-4);font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cand-dur{flex:0 0 auto;color:var(--ink-4);font-size:13px;}
+  .cand-acts{flex:0 0 auto;display:flex;gap:8px;}
+  .cand-acts button,[data-track-row] button{min-height:36px;font-size:13px;padding:7px 14px;
+              background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);box-shadow:none;}
+  .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;box-shadow:var(--v6-sh-2);}
+  .cand-acts button[data-target],[data-track-row] button[data-target]{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-strong);}
+  .cand-quiet{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);padding:7px 14px;min-height:34px;}
+  .cand-off{font-size:12px;color:var(--warn);white-space:nowrap;}
+  /* 「无试听」是**状态标记**（disabled 按钮），不是可点的操作。
+     用户要求"就算无音频，还是要加上选这首这个按钮"，所以旁边那颗
+     「选这首」永远在；这里只把"没有音频"这件事安静地说清楚，
+     做成虚线描边的小标签，与实心的主按钮拉开层级。 */
+  .cand-noop{font-size:12px;color:var(--warn);background:var(--surface-2);
+    border:1px dashed var(--line-strong);border-radius:var(--v6-r-pill);
+    padding:6px 12px;min-height:32px;cursor:default;white-space:nowrap;}
+  .cand-noop:disabled{color:var(--warn);opacity:1;}
+
+  /* ------------------------------------------------------------
+     十二之二、候选行在**窄屏**上要换行，不能硬挤四列
+     ------------------------------------------------------------
+     上面那条 [data-track-row] 是 grid（序号 / 歌名+歌手 / 时长 / 操作）四列。
+     手机上（390px）算下来歌名只剩几十像素，实测被压成「雨…」，
+     而「选这首」也被挤成两行 —— 截图里一眼就能看出不对。
+     窄屏改成两行：第一行 序号 + 歌名歌手 + 时长，第二行整行给操作按钮。
+     宽屏保持四列不变（那边空间够，四列更紧凑）。
+     ------------------------------------------------------------ */
+  @media(max-width:560px){
+    .cand-panel [data-track-row]{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;column-gap:10px;}
+    .cand-panel [data-track-row]>div:not(.cand-acts){flex:1 1 auto;min-width:0;}
+    .cand-panel [data-track-row] .cand-dur{margin-left:auto;}
+    .cand-panel [data-track-row] .cand-acts{flex:1 1 100%;justify-content:flex-end;}
+    .cand-acts button,[data-track-row] button{white-space:nowrap;min-height:40px;}
+  }
+  .aud-panel{margin:12px 0 18px;border:1px solid var(--brand-line);border-left:3px solid var(--brand);
+             border-radius:var(--v6-r-xl);background:var(--surface);box-shadow:var(--v6-sh-1);overflow:hidden;}
+  .aud-title{font-size:14px;font-weight:700;color:var(--brand-ink);}
+  .aud-sub{font-size:12px;color:var(--ink-4);}
+  .aud-slot{margin:0 14px 10px;padding:10px 12px;border-radius:var(--v6-r);background:var(--surface-2);border:1px solid var(--line);}
+  .audio-fallback{display:block;}
+
+  /* ------------------------------------------------------------
+     十三、动效
+     ------------------------------------------------------------ */
+  @keyframes riseIn6{from{opacity:0;transform:translateY(10px) scale(.995);}to{opacity:1;transform:translateY(0) scale(1);}}
+  @keyframes colIn6{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .rank-card{animation:riseIn6 var(--d3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 24ms);}
+  .col.active{animation:colIn6 var(--d2) var(--ease-out) both;}
+  .card{animation:riseIn6 var(--d3) var(--ease-out) both;}
+  #listBox>.card:nth-child(2){animation-delay:24ms;}
+  #listBox>.card:nth-child(3){animation-delay:48ms;}
+  #listBox>.card:nth-child(4){animation-delay:72ms;}
+  #listBox>.card:nth-child(5){animation-delay:96ms;}
+  #listBox>.card:nth-child(6){animation-delay:120ms;}
+  #listBox>.card:nth-child(n+7){animation-delay:144ms;}
+
+  /* ------------------------------------------------------------
+     十四、双端适配（宽屏隐藏切换按钮必须重述）
+     ------------------------------------------------------------ */
+  @media(min-width:900px){
+    body{max-width:1140px;padding:32px 28px;}
+    .header h1,.top-bar h2{font-size:40px;}
+    .rank-card{padding:18px 22px;}
+    .song-acts button{min-height:40px;}
+    .mobile-tabs{display:none;}
+  }
+
+  /* 十七、平板/大屏可读性（2026-10-07）。实测（_harness/probe-tablet-pages.mjs，改动前）：
+       · 页脚免责声明最长行 960 / 1128 / 1140px（1024 / 1194 / 1440），
+         11px 字一行接近 100 个汉字，远超"一行 ~40 字"的可读上限；
+       · 「退出登录」被全局 `input,button{width:100%}`（本页第 40 行）拉成 968~1140px 整行宽。
+     页脚用 660px 上限：11px 正文一行约 55 个汉字、12px 备案行约 43 个，
+     且 768/820 下容器本身只有 520/724px，660 不会生效 —— 手机与竖屏平板观感不变。
+     上界 1079 与 admin.html 的平板档口径一致。 */
+  @media(min-width:561px) and (max-width:1079px){
+    body{max-width:820px;padding:24px 22px;}
+  }
+  /* 561 起就收住这几类按钮 —— 768/820 也在这一档里。
+     改动前实测：768 下「去投稿」「查看每周排期」「退出登录」各 724px（= body 整宽），
+     1280/1440 下各 1140px。主操作给 360px、次操作给 220px 上限。
+     `.btn` 是设计层给「去投稿 / 查看每周排期」的整行主按钮类，
+     这里只在大屏收窄；手机（<=560）保持整行，那是设计意图。 */
+  @media(min-width:561px){
+    .btn{width:auto;max-width:360px;margin-left:auto;margin-right:auto;}
+    button[onclick="logoutUser()"]{width:auto;max-width:220px;margin-left:auto;margin-right:auto;display:block;}
+    /* 「待审核榜 / 正式榜」这一对切换按钮在宽屏是隐藏的（>=900 由 .mobile-tabs{display:none} 接管），
+       但 768/820 下会显示，实测各 381px（`flex:1 1 0` 平分了一整行）。
+       给它们一个上限，别再各占半屏。 */
+    .mobile-tabs button{max-width:220px;}
+    /* 页脚免责声明：11px 正文一行别超过 660px。
+       改动前实测 768/820/1024/1194/1440 分别是 720/768/960/1128/1140px。 */
+    footer,#disclaimerBox{max-width:660px;margin-left:auto;margin-right:auto;}
+  }
+
+  /* ------------------------------------------------------------
+     十四之二、排期页的标题尺度
+     ------------------------------------------------------------
+     用户反馈（三轮，最终形态也来自用户）：
+       ① "那个每周歌单四个字太大了" → 从 v6 继承的 34px 压到 22px；
+       ② "缩小点，看着太不合理了，太难看了" → 再压到 18px、字重 800→700、去负字距；
+       ③ **"应该是一行内放每周歌单……还有那下面一段小文字，放一行，然后一行居中"**
+          → 最终形态：标题与副标题**同一行**、整行**居中**。
+     所以这里覆盖两处：原版那条 .header 是 display:flex +
+     justify-content:space-between（标题贴最左、副标题被推到最右，中间空一整条），
+     v6 上面又把 h1 放大到 34px —— 两条一起才造成"太不合理"。
+     现在改成 flex + center + baseline 对齐 + 10px 间距，其余（底色、圆角、内边距）保持 v6。
+     专用性说明：body>div.header 的特异性是 (0,1,3)，压得过 v6 上面那条 .header (0,1,1)；
+     而且只有排期页的 .header 是 body 的直接子级（其它页的 .header 在 #app / .box 里），
+     所以这一组天然只命中排期页。
+     （原版那条 19px 仍然原样保留在样式表靠前的位置，这里只做覆盖 —— R1 守卫照旧能过。）
+     ------------------------------------------------------------ */
+  body>div.header{display:flex;justify-content:center;align-items:baseline;gap:10px;text-align:center;}
+  body>div.header h1{font-size:18px;font-weight:700;letter-spacing:0;line-height:1.35;min-width:0;}
+  body>div.header p{font-size:12px;white-space:nowrap;margin:0;}
+  @media(min-width:900px){ body>div.header h1{font-size:19px;} }
+
+  /* ------------------------------------------------------------
+     十四之三、状态提示条（「这一版没有音频」/「暂停接收投稿」）
+     ------------------------------------------------------------
+     两处都用"左侧一道粗边 + 极浅琥珀底"：它们都是**需要看清、但不必惊动**的
+     状态说明 —— 用 danger 红会像报错，用普通灰又会被一眼掠过。
+     颜色全部走令牌（--warn / --warn-soft / --ink），所以深色模式自动跟着翻转。
+     .no-audio 用在后台审核卡片上，.paused-notice 用在首页与点歌页。 */
+  .no-audio,.paused-notice{
+    background:var(--warn-soft);border:1px solid var(--warn);border-left:4px solid var(--warn);
+    color:var(--ink);font-size:13px;line-height:1.75;padding:10px 12px;border-radius:var(--v6-r-sm);
+    margin:10px 0;text-align:left;
+  }
+  .paused-notice{margin:0 0 14px;}
+
+  /* ------------------------------------------------------------
+     十五、深色模式：暖黑分层 + 紫青提亮
+     ------------------------------------------------------------ */
+  @media(prefers-color-scheme:dark){
+    :root{
+      --brand:#8b7bff;--brand-strong:#a496ff;--brand-soft:#1a1730;--brand-line:#332c5c;
+      --brand-ink:#c9c0ff;--accent:#22d3ee;--accent-soft:#0d2a30;
+      --ink:#f2f4fa;--ink-2:#ccd3e0;--ink-3:#a8b0c2;--ink-4:#8d95a8;
+      --canvas:#0a0c14;--surface:#141824;--surface-2:#181d2b;--surface-3:#1e2434;--surface-4:#252c3e;
+      --line:#242a3a;--line-soft:#1d2230;--line-strong:#333b4f;
+      --danger:#ff6b7a;--danger-soft:#2c1418;--success:#34d399;--warn:#ffb020;--warn-soft:#2a2113;
+      --ok-soft:#12281f;--v6-amber:rgba(255,176,32,.12);
+      --v6-grad:linear-gradient(135deg,#6a58e8 0%,#5b3df5 45%,#4f46e5 100%);
+      --v6-grad-soft:linear-gradient(135deg,rgba(139,123,255,.18),rgba(34,211,238,.14));
+      --v6-sh-1:0 1px 2px rgba(0,0,0,.5);
+      --v6-sh-2:0 10px 28px -14px rgba(0,0,0,.72);
+      --v6-sh-3:0 30px 72px -30px rgba(0,0,0,.88);
+      --v6-glow:0 12px 34px -14px rgba(139,123,255,.5);
+      --ring:0 0 0 4px rgba(139,123,255,.22);
+    }
+    body{
+      background-color:var(--canvas);
+      background-image:
+        radial-gradient(1000px 520px at 50% -240px,rgba(139,123,255,.18),rgba(139,123,255,0) 68%),
+        linear-gradient(180deg,#11131f 0%,var(--canvas) 55%,#07080e 100%);
+    }
+    body::before{
+      background-image:
+        radial-gradient(680px 380px at 8% 0%,rgba(139,123,255,.16),rgba(139,123,255,0) 70%),
+        radial-gradient(720px 420px at 100% 12%,rgba(34,211,238,.12),rgba(34,211,238,0) 72%);
+    }
+    .login-box,#gate{background:rgba(20,24,36,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
+    .song-main h3,.rank-card h3,.rank-info h3,.card h3,.header h1,.top-bar h2,.ui-title{color:var(--ink);}
+    .song-main p,.rank-info p,.rank-card p,.card p{color:var(--ink-2);}
+    .song-main p span,.rank-card p span{color:var(--brand-ink) !important;}
+    #gate h2{color:var(--ink) !important;}
+    #gate p{color:var(--ink-2) !important;}
+    .col-title span,.sub,.slot .idx,.slot .meta,footer p,#disclaimerBox p{color:var(--ink-4);}
+    /* 下面这几条必须比原版规则**更具体**，否则原版写死的颜色会赢：
+       · 原版 .header p{color:#64748b} 在深色下实测只有 3.72:1（低于 AA）；
+       · 原版 #scheduleBox .period{color:#0369a1} 是 CSS 规则不是行内样式，
+         通用属性选择器接不到它，深色下 2.34:1。
+       写法上刻意用 #app / #scheduleBox 前缀把特异性拉高。 */
+    #app .header p,.header .sub,.header p.sub,.box>p.sub,.card>p.sub{color:var(--ink-2);}
+    #scheduleBox .period,#scheduleBox .card h3 .tag,#scheduleBox .more{color:var(--brand-ink);}
+    #scheduleBox .more{border-color:var(--brand-line);background:var(--surface-2);}
+    .song-votes{background:var(--v6-amber);border-color:rgba(255,176,32,.28);}
+    .song-votes .rank-votes{color:var(--warn);}
+    .mobile-tabs{background:var(--surface-3);border-color:var(--line);}
+    .mobile-tabs button.active{background:var(--v6-grad);color:#fff;box-shadow:var(--v6-sh-2);}
+    #announceBox .panel{background:var(--brand-soft);border-color:var(--brand-line);}
+    [style*="background:rgba(255,255,255"]{background:var(--surface) !important;}
+    [style*="background:rgba(225,29,72"]{background:var(--danger-soft) !important;}
+    [style*="background:rgba(5,150,105"]{background:var(--ok-soft) !important;}
+    [style*="border:1px solid #bae6fd"]{border-color:var(--brand-line) !important;}
+    [style*="border:1px solid #e2e8f0"]{border-color:var(--line-strong) !important;}
+    /* 内联的天空蓝/深蓝在深色下会变成"看不见的字"：逐个翻成令牌 */
+    [style*="color:#075985"]{color:var(--brand-ink) !important;}
+    [style*="color:#0369a1"]{color:var(--brand-ink) !important;}
+    [style*="color:#0e7490"]{color:var(--accent) !important;}
+    [style*="color:#0ea5e9"]{color:var(--accent) !important;}
+    [style*="color:#0284c7"]{color:var(--brand) !important;}
+    [style*="color:#0369a1"]{color:var(--brand-ink) !important;}
+    [style*="color:#0f172a"]{color:var(--ink) !important;}
+    [style*="color:#1e293b"]{color:var(--ink) !important;}
+    [style*="color:#334155"]{color:var(--ink-2) !important;}
+    [style*="color:#475569"]{color:var(--ink-3) !important;}
+    [style*="color:#64748b"]{color:var(--ink-3) !important;}
+    [style*="color:#94a3b8"]{color:var(--ink-4) !important;}
+    [style*="color:#b45309"]{color:var(--warn) !important;}
+    [style*="color:#e11d48"]{color:var(--danger) !important;}
+    [style*="color:#059669"]{color:var(--success) !important;}
+    [style*="color:#7c3aed"]{color:var(--brand) !important;}
+    [style*="border:1px solid #ddd6fe"]{border-color:var(--brand-line) !important;}
+    [style*="background:linear-gradient(180deg,#fff"]{background:var(--surface-2) !important;}
+    .cand-panel,.aud-panel{background:var(--surface);border-color:var(--brand-line);}
+    .cand-player,.aud-slot{background:var(--surface-2);border-color:var(--line);}
+    .cand-no{background:var(--surface-3);color:var(--ink-3);}
+    .cand-acts button,[data-track-row] button{background:var(--surface-2);color:var(--ink-2);border-color:var(--line-strong);}
+    .cand-acts button[data-name],[data-track-row] button[data-name]{background:var(--v6-grad);border:0;color:#fff;}
+    .rank-no{background:var(--surface-3);color:var(--ink-3);}
+    /* 页脚小字在深色下也必须过 AA（原版 #94a3b8 在暖黑上只有 4.0:1） */
+    footer p,#beianFooter,#beianFooter a,#beianFooter span,#siteVersion{color:var(--ink-3);}
+    /* 这一条是原版遗留的坑：安静按钮的 hover/active 态把背景刷成
+       var(--ink-3)（一个会随深色切换变浅的令牌），文字却留在深灰上 ——
+       深色下"退出"那个安静按钮实测 1.59:1，属于完全看不清。
+       原版那条在媒体查询里，特异性更高，所以这里用 id 前缀压过去。 */
+    #adminBox .btn-quiet,#adminBox .btn-quiet:hover,#adminBox .btn-quiet:active,
+    .top-bar .btn-quiet,.top-bar .btn-quiet:hover,.top-bar .btn-quiet:active{
+      background:var(--surface-3);color:var(--ink-2);border-color:var(--line);
+    }
+    /* 页脚在深色下也**不套方框**（与上面浅色那条一致，改一处必须改两处）。 */
+    #beianFooter{background:transparent;border:0;box-shadow:none;border-radius:0;}
+  }
+
+  /* ------------------------------------------------------------
+     十六、无障碍：reduced-motion 下全部静态
+     ------------------------------------------------------------ */
+  @media(prefers-reduced-motion:reduce){
+    .rank-card,.card,.col.active{animation:none !important;opacity:1 !important;transform:none !important;}
+    *{transition-duration:.01ms !important;animation-duration:.01ms !important;}
+    button:active,.btn:active,.song-acts button:active,.tabs button:active{transform:none !important;}
+    .btn:hover,.btn-primary:hover{transform:none !important;}
+  }
+/* ==== 设计层 · 终点 ==== */

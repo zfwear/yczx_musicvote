@@ -81,14 +81,33 @@ export function isSecureRequest(request) {
 
 /**
  * 取客户端 IP。
- * cf-connecting-ip 由 Cloudflare 边缘写入并覆盖客户端伪造值，可以信任；
- * 其余头只在本地测试时作为回退。
+ *
+ * **顺序本身就是安全边界，不要随手调换。**
+ *
+ *   1. `cf-connecting-ip` —— 由 Cloudflare 边缘写入并**覆盖**客户端伪造值，可信。
+ *   2. `x-real-ip` —— 反代写入的**对端地址**（Nginx: `proxy_set_header X-Real-IP $remote_addr;`），
+ *      客户端无法往里追加。搬到自有服务器时**请务必让反代设这个头**。
+ *   3. `x-forwarded-for` 的**最后一项** —— ⚠️ 注意不是第一项。
+ *      常见配置 `$proxy_add_x_forwarded_for` 的语义是"**原样带上客户端给的 XFF**，
+ *      再把真实对端**追加到末尾**"。所以第一项是客户端自己填的、可以随便改，
+ *      末尾那项才是我们自己的反代亲眼看到的。
+ *      取第一项等于把限流的分桶键交给攻击者：换一个伪造的 XFF 就是一个新桶，
+ *      **每 IP 限流形同虚设**，而且不会有任何报错。
+ *   4. 都没有 → `unknown`。此时所有请求会落进同一个桶 ——
+ *      现象是"全校一起被限流"，所以反代必须透传上面任一个头。
  */
 export function clientIp(request) {
   const cf = request.headers.get('cf-connecting-ip');
-  if (cf) return cf.trim();
+  if (cf && cf.trim()) return cf.trim();
+
+  const real = request.headers.get('x-real-ip');
+  if (real && real.trim()) return real.trim();
+
   const xff = request.headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0].trim();
+  if (xff) {
+    const parts = xff.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
   return 'unknown';
 }
 

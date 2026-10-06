@@ -2,7 +2,7 @@ import { error, json } from '../../_lib/http.js';
 import { requireSession } from '../../_lib/auth.js';
 import { parseEnum } from '../../_lib/validate.js';
 import { getVoteCap, applyVoteCap, effectiveVotesExpr } from '../../_lib/settings.js';
-import { isMissingColumn } from '../../_lib/db.js';
+import { isMissingColumn, isMissingTable } from '../../_lib/db.js';
 
 /**
  * 榜单查询（学生端）—— 双榜单分离。
@@ -104,8 +104,14 @@ export async function onRequestGet(context) {
 
   // 正式榜：不含 votes。
   // 排序同样用有效票数 —— 否则"票数封顶"在正式榜上完全没有意义。
-  const { results } = await env.DB.prepare(
-    `SELECT s.id,
+  //
+  // 另外：**已经播过的排期歌曲从这里移出**（用户要求："对于上周已经播放过的
+  // 排期歌曲，从正式榜里面移出"）。语义按"那一周是否已经过完"判断：
+  //   · 本周的歌**不移**——它正在播，榜上还要标「已加入排期 · 本周」；
+  //   · 上周及更早的**移出**——那一轮已经放完，留在榜上只会越积越多。
+  // 依赖 012 的 weekly_playlist；**没跑那一版迁移时必须优雅退化**
+  // （退回没有这条排除的查询），否则整个排行页会 500。
+  const baseSql = `SELECT s.id,
             s.title,
             s.artist,
             s.status,
@@ -114,12 +120,38 @@ export async function onRequestGet(context) {
             CAST(c.weight AS INTEGER) AS category_weight
        FROM songs s
        JOIN categories c ON s.category_id = c.id
-      WHERE s.status = 'approved' ${notDebugClause}
-      ORDER BY CAST(c.weight AS INTEGER) DESC,
+      WHERE s.status = 'approved' ${notDebugClause}`;
+  const orderSql = `ORDER BY CAST(c.weight AS INTEGER) DESC,
                ${effectiveVotes} DESC,
                s.id ASC
-      LIMIT 50`
-  ).all();
+       LIMIT 50`;
+  const playedClause = ` AND s.id NOT IN (
+          SELECT CAST(song_id AS INTEGER) FROM weekly_playlist
+           WHERE song_id IS NOT NULL AND week_start < ?)`;
+
+  let results;
+  try {
+    ({ results } = await env.DB.prepare(`${baseSql}${playedClause} ${orderSql}`)
+      .bind(mondayOf(new Date().toISOString().slice(0, 10))).all());
+  } catch (err) {
+    if (!isMissingTable(err)) throw err;
+    // 012 还没执行：没有排期表，也就谈不上"播过的歌"，退回原查询
+    ({ results } = await env.DB.prepare(`${baseSql} ${orderSql}`).all());
+  }
 
   return json(results || []);
+}
+
+/**
+ * 某天所在那一周的周一（UTC），YYYY-MM-DD。
+ *
+ * 与 `functions/api/schedule.js` 里的同名函数口径**必须一致** ——
+ * 两边算出来的周一差一天，"上周的歌退出正式榜"就会提前或推迟一天生效。
+ * 都用 UTC 是为了不受运行时区影响（Worker 跑在什么时区不由我们决定）。
+ */
+function mondayOf(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dow = d.getUTCDay();               // 0 = 周日
+  d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+  return d.toISOString().slice(0, 10);
 }

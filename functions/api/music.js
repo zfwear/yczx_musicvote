@@ -2,7 +2,7 @@ import { error, json } from '../../_lib/http.js';
 import { requireSession, guardRate, rateLimitOnce, countBudget } from '../../_lib/auth.js';
 import { sanitizeText } from '../../_lib/validate.js';
 import { signTrackToken } from '../../_lib/tracktoken.js';
-import { neteaseOuterUrl, probeNeteasePlayable, keepPlayableNetease, trackPlayable as probeTrackPlayable } from '../../_lib/playable.js';
+import { neteaseOuterUrl, probeNeteasePlayable, keepPlayableCandidates, isPreviewOnlyTrack, trackPlayable as probeTrackPlayable } from '../../_lib/playable.js';
 
 /**
  * 音源中转代理（试听 / 搜索 / 可播性校验）。
@@ -678,6 +678,55 @@ function miguTextOf(bytes) {
 }
 
 /**
+ * 咪咕**时长**的短期记忆（contentId -> 秒）。
+ *
+ * ⚠️ 为什么需要它（2026-10-07 实测）：咪咕的**搜索**响应里根本没有时长字段 ——
+ *    实测首条候选的字段名是
+ *    `id,resourceType,contentId,copyrightId,name,highlightStr,singers,albums,tags,
+ *     lyricUrl,trcUrl,imgItems,movieNames,televisionNames,tones,mvList,relatedSongs,
+ *     toneControl,rateFormats,newRateFormats,songType,isInDAlbum,copyright,
+ *     digitalColumnId,mrcurl,songDescs,…` —— 没有 duration/length/songLength。
+ *    所以 `miguDurationOf(undefined)` → 0，候选行上时长是空的。
+ *
+ *    而**取链**响应里有：`data.song.duration = 259`（实测杨丞琳《雨爱》）。
+ *    取链本来就要发一次（验真 / 播放），所以把那次读到的时长记下来，
+ *    等搜索阶段探完前几条候选后**回填**即可 —— **不需要为时长多发任何请求**
+ *    （用户明确要求：搜索阶段不许给每条候选各发一次取链请求）。
+ */
+const MIGU_DURATION_TTL_MS = 30 * 60 * 1000;
+const MIGU_DURATION_MAX = 300;
+const miguDurationCache = new Map();     // contentId -> { seconds, at }
+
+function rememberMiguDuration(contentId, seconds) {
+  const value = Math.round(Number(seconds) || 0);
+  if (!contentId || value <= 0) return;
+  if (miguDurationCache.size >= MIGU_DURATION_MAX && !miguDurationCache.has(contentId)) {
+    // 先清过期的；还满就丢最旧的一批（Map 保持插入顺序）
+    const now = Date.now();
+    for (const [key, hit] of miguDurationCache) {
+      if (now - hit.at > MIGU_DURATION_TTL_MS) miguDurationCache.delete(key);
+    }
+    let drop = miguDurationCache.size - MIGU_DURATION_MAX + 1;
+    for (const key of miguDurationCache.keys()) {
+      if (drop-- <= 0) break;
+      miguDurationCache.delete(key);
+    }
+  }
+  miguDurationCache.set(String(contentId), { seconds: value, at: Date.now() });
+}
+
+/** 取回记下的咪咕时长（秒）；没有/过期返回 0。 */
+function miguDurationFor(contentId) {
+  const hit = miguDurationCache.get(String(contentId || ''));
+  if (!hit) return 0;
+  if (Date.now() - hit.at > MIGU_DURATION_TTL_MS) {
+    miguDurationCache.delete(String(contentId));
+    return 0;
+  }
+  return hit.seconds;
+}
+
+/**
  * 咪咕播放地址。
  * @returns {Promise<string|null>} 真实音频直链（已剥掉查询串、已升级 https）
  */
@@ -715,11 +764,34 @@ async function miguResolve(contentId) {
   const direct = data && typeof data.url === 'string' ? data.url : '';
   if (!/^https?:\/\//i.test(direct)) return null;
 
+  // 顺手把时长记下来（搜索阶段没有这个字段，见 miguDurationCache 的说明）。
+  // 实测形状：data.song.duration = 259（秒）。多了这一行**不增加任何请求**。
+  if (data.song && data.song.duration !== undefined) {
+    rememberMiguDuration(contentId, miguDurationOf(data.song.duration));
+  }
+
   // 剥查询串 + 升级 https：上游给的常是 http + 带鉴权查询串，
   // 查询串对音频本体没影响（VoiceHub 同样先剥再替换），而 http 在页面上会被
   // upgrade-insecure-requests 拦成混合内容。
   return direct.split('?')[0].replace(/^http:/i, 'https:');
 }
+
+/**
+ * 把取链阶段记下的时长**回填**到候选上（时长缺失的才填）。
+ *
+ * 只对传进来的这几条生效 —— 调用方只传"刚刚探过的那几条"，
+ * 所以这里既不会多发请求，也不会去编一个没量过的时长。
+ */
+function applyKnownMiguDurations(songs) {
+  return songs.map((song) => {
+    if (!(Number(song && song.duration) > 0)) {
+      const known = miguDurationFor(miguContentIdOf(song && song.id));
+      if (known > 0) return { ...song, duration: known };
+    }
+    return song;
+  });
+}
+
 
 async function metingSearch(base, keywords) {
   if (isGdStudio(base)) return gdstudioSearch(base, keywords);
@@ -992,18 +1064,84 @@ function mergeCandidates(settled, keywords, artist) {
         score: matchScore(song.name, keywords),
         clean: titleCleanliness(song.name),
         artistFit: artistFitScore(song.artist, artist),
+        // 片段惩罚要在"同名候选都收齐之后"才能算（要看同批最长时长），
+        // 所以先占位，排序前再统一填 —— 见下面那一段。
+        durationPenalty: false,
+        rank: { score: 0, clean: 0, artistFit: 0, durationPenalty: false },
       });
     }
+  }
+
+  /**
+   * 片段惩罚：同名候选里**明显偏短**的那些排到后面。
+   *
+   * 为什么必须放在"收齐之后"：判据是相对量（同批最长时长的一半），
+   * 边收边排会得到"谁先到谁当基准"的随机结果。
+   *
+   * 实测场景（`q=雨爱 杨丞琳`）：23s 的《雨爱》/李之谦·杨丞琳 与 260s 的原唱同名，
+   * 前者明显是片段/短版 —— 学生点开听到的"最像原唱的那条"其实只有 23 秒。
+   * 这里把它压到原唱与其他完整版本之后；时长缺失（0）的候选不参与判定。
+   */
+  const maxDurationByTitle = new Map();
+  for (const entry of pool) {
+    const key = normalizeTitleKey(entry.song && entry.song.name);
+    const value = Number(entry.song && entry.song.duration) || 0;
+    if (value > (maxDurationByTitle.get(key) || 0)) maxDurationByTitle.set(key, value);
+  }
+  for (const entry of pool) {
+    entry.durationPenalty = isFragmentCandidate(
+      entry.song,
+      maxDurationByTitle.get(normalizeTitleKey(entry.song && entry.song.name)) || 0
+    );
+    /**
+     * 惩罚要**叠加**，不能只比"是不是片段"这一个布尔值。
+     *
+     * 实测那个形状（`q=雨爱 杨丞琳`）：23 秒那条既是片段、又是多歌手串翻唱
+     * （artistFit 1.2），而另一条 234 秒的翻唱歌手对不上（artistFit 0）。
+     * 只比布尔值的话 1.2 > 0 —— 23 秒的片段照样排在前面，等于没修。
+     * 叠 2 分之后它落到 -0.8，让位给"歌手对不上但时长完整"的版本；
+     * 而真原唱（artistFit 2、同样 260 秒整曲）仍然稳在第 1。
+     */
+    entry.durationPenaltyScore = entry.durationPenalty && entry.artistFit < 2
+      ? entry.durationPenalty + 2
+      : (entry.durationPenalty ? 1 : 0);
+    entry.rank = {
+      score: entry.score,
+      clean: entry.clean,
+      artistFit: entry.artistFit,
+      durationPenalty: entry.durationPenalty,
+      durationPenaltyScore: entry.durationPenaltyScore,
+    };
   }
 
   pool.sort((a, b) => {
     if (b.clean !== a.clean) return b.clean - a.clean;    // 1. 标题干净度（原唱优先）
     if (b.score !== a.score) return b.score - a.score;    // 2. 与查询词的相似度
-    if (b.artistFit !== a.artistFit) return b.artistFit - a.artistFit;  // 3. 歌手吻合
-    return a.order - b.order;                             // 4. 源优先级
+    /**
+     * 3. **明显偏短的片段**先沉底。
+     *
+     * ⚠️ 顺序上必须在"歌手吻合度"**之前**，这是实测逼出来的：
+     *    23 秒那条《雨爱》/李之谦·杨丞琳 因为歌手串里带"杨丞琳"，artistFit 是 1.2；
+     *    而 234 秒的翻唱 artistFit 是 0 —— 先比歌手的话 1.2 > 0，
+     *    片段照样排在完整版本前面。学生点开听到的就是那 23 秒。
+     *    放在前面之后："是不是完整的一首歌"优先于"歌手串像不像"，
+     *    而真原唱本来就是完整整曲，不受影响。
+     */
+    if (a.durationPenaltyScore !== b.durationPenaltyScore) {
+      return a.durationPenaltyScore - b.durationPenaltyScore;
+    }
+    if (b.artistFit !== a.artistFit) return b.artistFit - a.artistFit;  // 4. 歌手吻合
+    return a.order - b.order;                             // 5. 源优先级
   });
 
-  return pool.slice(0, MAX_RESULTS).map((x) => x.song);
+  /**
+   * 把排序依据一并带回去（**新增字段**，不改任何既有字段的语义）。
+   *
+   * 为什么值得带：排序出问题时（"原唱怎么又被顶掉了"）最费时间的一步是
+   * 猜"它到底输在哪个键上"。带回来就不用猜了，也不用为了看一眼去改代码加日志。
+   * 前端不认这个字段，纯属附加信息。
+   */
+  return pool.slice(0, MAX_RESULTS).map((x) => ({ ...x.song, rank: x.rank }));
 }
 
 /**
@@ -1025,6 +1163,72 @@ function mergeCandidates(settled, keywords, artist) {
 const VERSION_MARK = /(live|现场|伴奏|instrumental|remix|混音|版\b|version|acoustic|不插电)/i;
 const COVER_MARK = /(dj|翻唱|女版|男版|童声|钢琴|吉他|古筝|纯音乐|清唱|和声|口琴|小提琴|慢摇|串烧|改编|片段|副歌|剪辑|抖音|快手|1\.1x|加速|慢速|升调|降调|cover|karaoke)/i;
 const BAD_MARK = /(鬼畜|恶搞|整活|土味|精神小伙)/i;
+
+/**
+ * 「串里不止一个歌手」的明显写法。
+ *
+ * ⚠️ 为什么要判这个（2026-10-07 实测踩到的坑，**用户最能真实感受到的一条**）：
+ *   搜「雨爱 杨丞琳」时，网易云那一路给回来的是《雨爱》/**李之谦 / 杨丞琳**，
+ *   **而且只有 23 秒**（实测 369,453 字节 / 128kbps）。旧实现里
+ *   `artistFitScore('李之谦 / 杨丞琳', '杨丞琳')` 走的是"包含即满分" → **2 分**，
+ *   和真原唱杨丞琳并列 —— 学生点开发现"不是原唱 / 只有 23 秒"。
+ *   现在这种多歌手串只给部分分，**原唱（artist 恰好等于查询歌手）优先**。
+ *
+ * 判据用**分隔符**而不是"里不里面还有字"：单歌手的名字里本来就可能有 `/`
+ *   之外的字符（`Beyond`、`G.E.M.邓紫棋`），所以只在明确的分隔符上切，
+ *   切出来还得两头都非空才算多歌手。`feat.` 是合作曲的明确标记，单独算一类。
+ */
+const ARTIST_SPLIT = /[\/、,，;；&]|\s+feat\.?\s+/i;
+const FEAT_MARK = /feat\.?\s+/i;
+
+function isMultiArtistString(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  if (FEAT_MARK.test(raw)) return true;
+  const parts = raw.split(ARTIST_SPLIT).map((p) => p.trim()).filter(Boolean);
+  return parts.length >= 2;
+}
+
+/** `A / B` 这类串摊平成名字数组（大小写与空白都归一化，便于比较）。 */
+function artistTokensOf(value) {
+  return String(value || '')
+    .replace(/feat\.?/gi, ' ')
+    .split(ARTIST_SPLIT)
+    .map((part) => part.trim().toLowerCase().replace(/\s+/g, ''))
+    .filter(Boolean);
+}
+
+/**
+ * 名字 `name` 有没有出现在 `text` 里（两边都已小写、去空白）。
+ * 要求"够长"（≥2 字）才认前缀式匹配，免得单字误配（`艾` 配 `艾热AIR`）。
+ */
+function tokenAppearsIn(name, text) {
+  if (!name || !text) return false;
+  if (text.includes(name)) return true;
+  if (name.length < 2) return false;
+  return text.includes(name.slice(0, 2));
+}
+
+/**
+ * 候选歌手的每个名字是不是都**出现在查询里**（"候选是查询的一部分 / 同一组人"）。
+ *
+ * 用途：判断"合作/合唱版"。候选「李之谦 / 杨丞琳」对查询「杨丞琳」时，
+ * 候选的两个名字并没有都在查询里（李之谦不在）→ 不是同一组人，要降级；
+ * 而候选「周杰伦 / 阿信」对查询「周杰伦 阿信」（学生手打的整串线索，
+ * `artistTokensOf` 只会把它当一个 token）时两边都在 → 同一组人。
+ *
+ * ⚠️ 这条**不能**单独用来判"是同一组人"（那正是原唱被顶掉的形状），
+ *    必须配合"候选至少两个名字"这个前提 —— 单歌手的候选
+ *    （查询「G.E.M.邓紫棋」、候选「G.E.M.邓紫棋」）走的是"就是这个人"那条满分分支。
+ */
+function candidateInsideQuery(candidateTokens, queryTokens, queryCompact) {
+  if (!candidateTokens.length || !queryTokens.length) return false;
+  return candidateTokens.every((name) => (
+    queryTokens.some((other) => other === name || other.includes(name) || name.includes(other))
+    || tokenAppearsIn(name, queryCompact)
+  ));
+}
+
 
 function titleCleanliness(name) {
   const raw = String(name || '');
@@ -1066,13 +1270,76 @@ function artistFitScore(candidateArtist, queryArtist) {
   if (!q) return 0;
   const c = String(candidateArtist || '').toLowerCase().replace(/\s+/g, '');
   if (!c) return 0;
+  // 归一化后完全相同 = 同一个人 / 同一组人 —— 必须先于下面的多歌手判定返回。
+  // 少这一行就会把「周杰伦 / 阿信」对「周杰伦 阿信」这种"同一组人、写法不同"降级。
   if (c === q) return 2;
+  /**
+   * ⚠️ 多歌手串的判定**必须用原始字符串**（不能用上面去过空白的 `c` / `q`）：
+   *    归一化会把分隔符一起吃掉（`李之谦 / 杨丞琳` → `李之谦杨丞琳`），
+   *    于是 `artistTokensOf` 切不出名字、降级整段静默失效
+   *    （第一次写就踩了，而且只有测试能发现）。
+   *
+   * 语义（2026-10-07 实测逼出来的四条）：
+   *   · 归一化后完全相同（「杨丞琳」/「杨丞琳」）                → 2
+   *   · 候选是**多歌手串**、且与查询**不是同一组人**            → 1.2
+   *     （实测：查询「杨丞琳」、候选「李之谦 / 杨丞琳」的 23 秒翻唱版）
+   *   · 候选是单歌手、查询串里包含它（「周杰倫」/「周杰伦」）    → 2（下面的子串分支）
+   *   · 其余按"字的覆盖率"给 1 或 0（简繁差异靠这一档救回来）
+   * 之所以要有 1.2 这一档：它高于"沾边"的 1、低于原唱的 2，
+   * 于是**原唱必然排在合作/合唱版前面**，而合作版仍排在完全不相干的候选之前。
+   */
+  const candidateTokens = artistTokensOf(candidateArtist);
+  const queryTokens = artistTokensOf(queryArtist);
+  if (candidateTokens.length >= 2) {
+    // 多歌手串走到这里只有两种结局：同一组人 → 满分；否则是合作/合唱版 → 1.2。
+    //
+    // ⚠️ **必须在这里就 return 2**，不能"通过判定后继续往下走"：
+    //    下面的子串判定与"字的覆盖率"都是给**单歌手**准备的近似
+    //    （`周杰倫` vs `周杰伦` 靠覆盖率救回来）。多歌手串一旦落到覆盖率那档，
+    //    互为同一组人但顺序不同的名字（`李之谦 / 杨丞琳` vs `杨丞琳 / 李之谦`）
+    //    会因为"每个字都在"算出覆盖率 1.0 · 但更常见的形状（`G.E.M.邓紫棋 / 艾热AIR`
+    //    vs `G.E.M.邓紫棋 艾热`）覆盖率只有 0.5 而掉到 1 分 —— 比翻唱还低。
+    //    这个坑踩了两次，症状都是"判定是对的、分数还是错的"。
+    return candidateInsideQuery(candidateTokens, queryTokens, q) ? 2 : 1.2;
+  }
+
   if (c.includes(q) || q.includes(c)) return 2;
 
   let hit = 0;
   for (const ch of q) if (c.includes(ch)) hit += 1;
   return hit / q.length >= 0.6 ? 1 : 0;
 }
+
+/**
+ * 「明显是片段」判定用的阈值：短于同批同名候选**最长时长的一半**才算片段。
+ *
+ * 为什么用"同批最长"而不是绝对秒数（30 / 60 秒那种）：整曲目录里本来就有
+ * 短歌（2 分钟的民谣、1 分半的儿歌），绝对阈值会把它们一起冤枉掉。
+ * 而"同名的另一条有 260 秒、这条只有 23 秒"是**同一批候选内部可比**的事实。
+ *
+ * 实测依据：`q=雨爱 杨丞琳` 里 23s（李之谦/杨丞琳）vs 260s（杨丞琳原唱）；
+ * 而 `q=雨爱` 里 94s 的 DJ 版并不触发（94 > 260/2），原唱也没被顶掉。
+ */
+const FRAGMENT_RATIO = 0.5;
+
+/** 归一化歌名（去空白 + 小写），用于"同名候选之间比时长"。 */
+function normalizeTitleKey(name) {
+  return String(name || '').toLowerCase().replace(/\s+/g, '');
+}
+
+/**
+ * 这一条是不是"明显比同名的其他版本短得多"的片段。
+ *
+ * 时长缺失（0）时**一律不判**：本机实测咪咕搜索响应里没有时长字段
+ * （见 miguDurationOf 的说明），它靠取链阶段的 `data.song.duration` 回填。
+ * 宁可少判一条，也不能拿"缺时长"当"短"——那会把整个咪咕源压到后面去。
+ */
+function isFragmentCandidate(song, maxDuration) {
+  const duration = Number(song && song.duration) || 0;
+  if (duration <= 0 || maxDuration <= 0) return false;
+  return duration < maxDuration * FRAGMENT_RATIO;
+}
+
 
 /**
  * 一个关键词要问哪些音源。
@@ -1441,7 +1708,7 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
     });
 
     // 4) 选结果：**合并所有源**（见 mergeCandidates 的说明），
-    //    再过一道"这一版能不能播"的过滤（见 keepPlayableNetease）。
+    //    再过一道"这一版能不能播"的过滤（见 keepPlayableCandidates）。
     //
     //    判据注入的是**和播放完全同一条链**（resolveAudioUrl）——
     //    咪咕走它自己的接口、mt- 走"网易云 -> 各中转源"，这正是"说能播就得真能播"的前提。
@@ -1455,8 +1722,12 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
     //      学生真正会点的就是前几条，40 条翻到第 30 条的情况极少。
     //      未探到的候选保持"没有标记"（= 允许试听），播放时那条链**照样会验真并逐路回退**，
     //      所以不会出现"标着能播却播不出来"。
+    //
+    //    ⚠️ 2026-10-07 二次修订：这道过滤**对所有前缀一致**（原来只认 mt-，
+    //      于是咪咕——现在排第一的源——的候选永远拿不到标记）。limit / concurrency /
+    //      deadlineMs 三个约束一个都没放宽，仍然是"最多 8 条、1800ms 到点就收"。
     const merged = mergeCandidates(settled, titleForMatch || keywords, artist);
-    const ranked = await keepPlayableNetease(merged, {
+    const ranked = await keepPlayableCandidates(merged, {
       resolve: async (trackId) => {
         try {
           return Boolean(await resolveAudioUrl(env, trackId));
@@ -1468,8 +1739,17 @@ async function searchOnce(env, keywords, artist, titleForMatch) {
       concurrency: 4,
       deadlineMs: 1800,   // 到点就用已探到的结论，剩下的当"不确定"
     });
-    cacheSet(cacheKey, ranked);
-    return ranked;
+
+    // 4b) 把探过的咪咕候选的**时长**补上。
+    //
+    //   ⚠️ 这里**一条网络请求都不多发**：咪咕搜索响应里没有时长字段，
+    //      而上面那一步的验真本来就要调 miguResolve（取链）——
+    //      那次响应里的 `data.song.duration`（实测 259）已经被记下来了，
+    //      这里只是把结果回填到候选上（见 miguDurationCache 的说明）。
+    //      只补"刚探过的那几条"，没量过的保持原样（宁可空着，也不编一个假数）。
+    const withDurations = applyKnownMiguDurations(ranked);
+    cacheSet(cacheKey, withDurations);
+    return withDurations;
   })();
 
   inflightSearch.set(cacheKey, run);
@@ -2095,7 +2375,12 @@ export async function onRequestGet(context) {
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(checkId)) return error('歌曲 id 不正确', 400);
 
     // 苹果给的是官方 previewUrl，必有音频；其它前缀来源无法判断 -> null（放行）
-    if (/^ap-/.test(checkId)) return json({ ok: true, playable: true });
+    //
+    // ⚠️ `complete: false` 与 `playable: true` **必须并存**：苹果这条能出音频
+    //    （playable 该是 true），但它只有 30 秒 —— 实测 1,024,937 字节 / 269kbps = 30.0s，
+    //    而候选上带的 duration 是整曲时长。把这两件事压成一个布尔值，
+    //    要么把片段当整曲，要么把苹果标成"无音频"（学生就看不到原唱目录了）。
+    if (isPreviewOnlyTrack(checkId)) return json({ ok: true, playable: true, complete: false });
 
     // 咪咕与 mt- 都交给 trackPlayable —— 它内部按前缀分派：
     // mg- 问咪咕自己的接口，mt- 走"网易云 -> 中转源"那条链。

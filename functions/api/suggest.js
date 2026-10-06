@@ -1,7 +1,8 @@
-import { readJson, error, json } from '../../_lib/http.js';
+import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import { requireSession, requireStaff, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, sanitizeText } from '../../_lib/validate.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
+import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 
 /**
  * 歌曲建议。
@@ -73,6 +74,13 @@ export async function onRequestPost(context) {
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
+
+  // 人机校验（reCAPTCHA v3，2026-10-07 补）。没配密钥时直接放行；详见 _lib/recaptcha.js。
+  // 只加在**学生**这条 POST 上：PUT（管理员标记已处理）与 GET 本来就是 requireStaff，
+  // 管理员已经过一整轮登录鉴权，再让他们每次操作等一次 Google 脚本没有意义。
+  // 位置：限流之后、查库与 INSERT 之前 —— 被拒的建议一行都不会落库。
+  const human = await verifyRecaptcha(env, data.recaptcha_token, { ip: clientIp(request) });
+  if (!human.ok) return error(human.error, 403);
 
   const songId = parsePositiveInt(data.song_id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理员注册</title>
+<link rel="stylesheet" href="assets/css/register.css">
+</head>
+<body>
+<div class="login-box">
+  <h2 style="text-align:center;color:#0f172a;margin-top:0;">管理员注册</h2>
+  <p class="sub">请向高级管理员索取「动态口令」，填写后即可成为普通管理员</p>
+  <label class="field-label" for="username">登录账号</label>
+  <input id="username" placeholder="中文/字母/数字，2-24 位" value="">
+  <label class="field-label" for="password">登录密码</label>
+  <input id="password" type="password" placeholder="至少 8 位">
+  <label class="field-label" for="password2">再输一次密码</label>
+  <input id="password2" type="password" placeholder="两次要一致">
+  <label class="field-label" for="inviteCode">动态口令</label>
+  <input id="inviteCode" placeholder="如 ABCD-EFGH-JKLM">
+  <button id="regBtn" onclick="doRegister()">注册</button>
+  <p id="regMsg" class="msg"></p>
+  <p class="sub" style="margin-bottom:0;">已经有账号了？<a href="/admin.html" style="color:var(--brand);text-decoration:none;">去登录</a></p>
+</div>
+
+
+
+
+
+
+
+<div id="beianFooter" style="max-width:520px;margin:0 auto;padding:0 16px 30px;text-align:center;font-size:12px;line-height:2.1;color:var(--ink-3);">
+  <div>© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
+  <div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"
+       style="color:var(--ink-3);text-decoration:none;">苏ICP备2026011040号</a>
+    <span style="color:var(--ink-4);">|</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"
+       style="color:var(--ink-3);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+      <img src="/assets/gongan-badge.png" alt="" width="14" height="15"
+           style="flex:0 0 auto;vertical-align:-2px;display:block;">
+      <span id="beianGonganText">苏公网安备32090302000745号</span>
+    </a>
+  </div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.1</div>
+</div>
+<script src="assets/js/register-1.js"></script>
+<script src="assets/js/register-2.js"></script>
+</body>
+</html>

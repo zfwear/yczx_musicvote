@@ -1,0 +1,40 @@
+# ============================================================
+#  全站安全响应头
+#
+#  ⚠️ 重要限制：_headers 只作用于 Cloudflare Pages 的**静态资源**，
+#     不作用于 Functions 的响应。因此 /api/* 返回的 JSON 里的
+#     nosniff / no-store 是由 _lib/http.js 自己加的，不是靠这里。
+# ============================================================
+
+/*
+  # 关于 script-src：
+  # 2026-10-08 前端物理分离之后，页面里的内联 <script> 与 <style> 都已经搬到
+  # public/assets/js/ 与 public/assets/css/ 外链文件里了。但 **onclick="…" 这类
+  # 行内事件属性仍然保留**（测试与守卫都依赖它们），而行内事件属性同样受
+  # script-src 'unsafe-inline' 管辖 —— 所以这一项暂时还不能去掉，
+  # 去掉会让所有按钮失效。等哪天把 onclick 也改成 addEventListener，
+  # 才可以把 script-src 收紧为 'self'。
+  # style-src 的 'unsafe-inline' 同理：页面里还有 style="…" 行内样式属性。
+  #
+  # 这意味着：针对 XSS，**主要防线仍是代码里的 escapeHtml 转义**
+  # （见 public/assets/js/ 下各页脚本，以及后端 _lib/validate.js 的入库收敛）；
+  # CSP 在这里只能作为兜底，挡住"外链注入"这一类攻击，
+  # 挡不住"行内属性注入"。
+  #
+  # 关于 recaptcha.net：
+  #   人机校验要用 Google reCAPTCHA，必须放行它的脚本域名、它注入的徽标 iframe
+  #   以及后续的校验请求。这里放行的是 **www.recaptcha.net**（Google 官方为
+  #   大陆等地区提供的备用域名）；www.google.com 在大陆不可达，放行它没有意义。
+  #   若改用自建/其它域名，记得同步改这里与 RECAPTCHA_BASE。
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline' https://www.recaptcha.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.recaptcha.net; media-src 'self' blob:; connect-src 'self' https://www.recaptcha.net; font-src 'self'; frame-src https://www.recaptcha.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  X-Permitted-Cross-Domain-Policies: none
+
+# 图片体积大且不常改，给较长缓存；改内容后建议改文件名。
+/assets/*.png
+  Cache-Control: public, max-age=604800
