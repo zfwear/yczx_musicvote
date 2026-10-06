@@ -61,6 +61,47 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const LOOP_MARKER = '__dsh_host';
 const LOOP_MARKER_VALUE = 'ok';
 
+/**
+ * "这台浏览器已经通过正确域名进来过"的 Cookie。
+ *
+ * 为什么光有 URL 标记还不够（2026-10-08 实测踩到）：标记只跟着**页面导航**走。
+ * 页面打开之后前端会去请求 `/api/config`、`/api/me` —— 那些是 fetch，
+ * **不带页面 URL 上的参数**，于是又被判成"域名不认识"，拿到 403。
+ * 实测现象就是：页面正常显示、但页面上多出一行红字
+ * 「本站只允许通过 vote.yzstu.top 访问（本次请求看到的域名：yczx-musicvote.pages.dev）」。
+ *
+ * 所以标记放行时要**顺手把状态记在浏览器上**，让后续的 /api/* 也能过。
+ *
+ * 为什么用 Cookie 而不是别的：
+ *   · Cookie 的作用域是**浏览器视角的域名**。跳转目标是 `vote.yzstu.top`，
+ *     所以这个 Cookie 属于 `vote.yzstu.top`，**不会发给 `*.pages.dev`** ——
+ *     "直接访问源站域名"依然被挡住，需求没有被削弱。
+ *   · 不用 Referer：我们自己发的 `_headers` 里有 `Referrer-Policy: no-referrer`，
+ *     浏览器根本不会带 Referer，这条路走不通。
+ */
+const HOST_OK_COOKIE = 'dsh_host_ok';
+
+/** 浏览器是否已经带着"来过正确域名"的 Cookie。 */
+function hasHostOkCookie(request) {
+  const raw = request.headers.get('cookie') || '';
+  return String(raw).split(';').some((p) => p.trim() === `${HOST_OK_COOKIE}=1`);
+}
+
+/**
+ * 放行的同时，往响应上挂一个"来过正确域名"的 Cookie。
+ *
+ * 只在**标记放行**这一条路上挂：那一刻浏览器请求的域名（也就是 Cookie 的作用域）
+ * 正是我们的跳转目标 `vote.yzstu.top`。而"直接访问源站域名"那条路只会 302，
+ * 永远不会在源站域名上挂到这个 Cookie —— 所以那条路依旧被挡。
+ */
+function withHostOkCookie(response, request) {
+  if (hasHostOkCookie(request)) return response;   // 已经有了，不用重复挂
+  const out = new Response(response.body, response);
+  out.headers.append('Set-Cookie',
+    `${HOST_OK_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`);
+  return out;
+}
+
 
 /** 去掉端口号，统一小写。`vote.yzstu.top:443` / `VOTE.YZSTU.TOP` 都要能匹配。 */
 function normalizeHost(raw) {
@@ -173,7 +214,12 @@ export async function onRequest(context) {
   let marked = false;
   try { marked = new URL(request.url).searchParams.get(LOOP_MARKER) === LOOP_MARKER_VALUE; }
   catch { /* 拿不到 URL 就当没标记 */ }
-  if (marked) return next();
+  if (marked) return withHostOkCookie(await next(), request);
+
+  // 已经带着"来过正确域名"的 Cookie：放行。
+  // 这条是为**页面里后续发出的 fetch**准备的 —— 标记只挂在页面 URL 上，
+  // /api/* 请求不带它，只能靠 Cookie 认出来。
+  if (hasHostOkCookie(request)) return next();
 
   if (!isNavigation(request)) {
     // 诊断信息：把**看到的主机名**写进错误里。这个功能第一次上线就让整站打不开，
