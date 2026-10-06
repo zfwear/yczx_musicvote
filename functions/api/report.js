@@ -1,7 +1,8 @@
-import { readJson, error, json } from '../../_lib/http.js';
+import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint, sanitizeText } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
+import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 
 /**
  * 学生举报待审核歌曲。
@@ -43,6 +44,12 @@ export async function onRequestPost(context) {
     message: '操作过于频繁，请稍后再试',
   });
   if (flood) return flood;
+
+  // 人机校验（reCAPTCHA v3，2026-10-07 补）。没配密钥时直接放行；详见 _lib/recaptcha.js。
+  // 位置：限流之后、占位与置位之前 —— 被拒的举报不会写 report_logs，
+  // 也不会把 is_reported 顶起来（与上面的游客拦截同一个道理）。
+  const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip: clientIp(request) });
+  if (!human.ok) return error(human.error, 403);
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

@@ -53,6 +53,7 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 | `POW_ENABLED` | 设成 `1` 才启用浏览器端 PoW（防刷票的第二道） | **默认关闭**，生产留空即可 |
 | `POW_DIFFICULTY` | 哈希开头要有几个十六进制 `0`，只接受 `3`~`6` | 默认 `3`；其它值（含 `99`）一律回落到 `3`。**不要没试过就设 4 以上**：难度 4 在桌面上就要 2.2 秒，手机慢 3~10 倍 |
 | `POW_SECRET` | 谜题签名密钥 | 退回用 `AUTH_PEPPER`；两个都没有则**整个 PoW 自动关闭** |
+| `POW_EMERGENCY_OFF` | 设成 `1` 时**紧急停用** PoW（不必删密钥、不必改 `POW_ENABLED`） | 默认不配。上线后出问题时改这个再部署，几秒内恢复服务 |
 | `ICP_BEIAN` / `GONGAN_BEIAN` / `COPYRIGHT_HOLDER` | 备案号与版权主体 | 页面里已写死真实值，配了就以环境变量为准 |
 | `MUSIC_PROVIDER` | `auto`（默认）/ `meting` / `apple` | 默认 `auto`：**咪咕（第一位）→ qijieya 中转 → 苹果试听（hk/tw/us）→ 网易云官方**，与 `buildSources()` 一致。设 `apple` 只留苹果源、`meting` 关掉苹果与咪咕 |
 | `MUSIC_API_BASE` | 自建 Meting 地址（**替换**内置默认源，不是追加） | 用内置的 `api.qijieya.cn/meting/`（实测唯一还活着的中转）。两台 GD Studio 基址已因实测不可用移出，要用就指过来 |
@@ -84,6 +85,28 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 `RECAPTCHA_SECRET` 只在服务端读取。CSP 里已放行 `recaptcha.net` 的脚本、
 徽标 iframe 与校验请求（见 `_headers`）。
 
+**校验覆盖哪些接口**（2026-10-07 扩面）：
+
+| 接口 | 校验 | 为什么 |
+|---|---|---|
+| `/api/vote`（点歌） | 是 | 学生写操作，防脚本刷投稿 |
+| `/api/upvote`（投票） | 是 | 同上 |
+| `/api/login`（班级口令登录） | 是 | **唯一不登录就能反复调用、且直接对着口令的入口**，撞库成本最低 |
+| `/api/report`（举报） | 是 | 学生写操作 |
+| `/api/suggest`（提建议，学生那条 POST） | 是 | 学生写操作 |
+| `/api/suggest` 的 PUT、`/api/admin-*` 全部 | 否 | 本来就是 `requireStaff`；管理员已经过一整轮登录鉴权，再让他们每次操作等一次 Google 脚本没有意义 |
+
+两条实现约束（有测试与变异测试守着）：
+
+1. **校验排在数据库访问之前。** 顺序错了不会报错，只会让"本该被拒的请求"
+   先留下一行数据 —— 事后极难发现。所以逐文件断言这个顺序，并用变异测试
+   （`_harness\mutate-recaptcha-order.mjs`）证明把它挪到写库之后**真的会变红**。
+2. **取令牌必须兜超时。** 脚本加载那段本来就有 6 秒超时，但 `grecaptcha.ready`
+   \+ `execute` 那段**没有** —— 而实测发现：**站点密钥无效时 `execute` 既不
+   resolve 也不 reject，就那么卡着**。少了这道闸，点提交 / 登录会永远停在
+   "正在校验…"，比"拿不到令牌"糟糕得多（后者至少还能按开关放行）。
+   四个页面的 `recaptchaToken()` 现在都带 5 秒上限。
+
 #### 浏览器端 PoW（工作量证明，防刷票，**默认关闭**）
 
 reCAPTCHA 在大陆网络下经常加载不出来（见上），而它的策略又是"加载不出来就放行"，
@@ -101,9 +124,16 @@ reCAPTCHA 在大陆网络下经常加载不出来（见上），而它的策略�
 | 情况 | 行为 |
 |---|---|
 | 没配 `POW_ENABLED=1`，或没有任何密钥 | 功能关闭：`/api/pow` 回 `enabled:false`，前端跳过，后端直接放行 |
+| 配了 `POW_EMERGENCY_OFF=1` | **立即停用**（行为与"没启用"完全一致），但 `/api/config` 的 `pow.emergencyOff` 会是 `true` |
 | 谜题被改过（难度、谜题本体、过期时间） | **拒绝**：这些字段都在 HMAC 签名里，客户端挑不了简单难度 |
 | 谜题过期（默认 **300 秒**）或 action 对不上 | **拒绝** |
 | 算不出 / 拿不到谜题（超过 10 秒） | 前端提交 `pow: null`，后端**拒绝** —— 功能开着时它是硬闸门 |
+
+> **排查"`POW_ENABLED=1` 却不生效"看 `/api/config` 的 `pow` 段**：只看 `enabled` 的话，
+> 三种情况（没开 / 被紧急关了 / 没配密钥）长得一模一样。`emergencyOff` 与
+> `secretConfigured` 这两个字段就是为这一眼准备的：
+> `{enabled:false, emergencyOff:false, secretConfigured:false}` = 没开或没配密钥；
+> `{enabled:false, emergencyOff:true, secretConfigured:true}` = 曾经开过、现在被拉闸了。
 
 > **难度为什么是 3 而不是 4**：本机（桌面）难度 4 就要 2.2 秒，而手机普遍慢 3~10 倍，
 > 旧机型要 10~20 秒 —— 学生会以为卡死。难度 3 只要约 4096 次尝试，几乎无感。

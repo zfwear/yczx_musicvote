@@ -935,7 +935,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.1</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1219,8 +1219,18 @@ async function recaptchaToken(action){
         setTimeout(() => reject(new Error('recaptcha timeout')), 6000);
       });
     }
-    await new Promise((resolve) => window.grecaptcha.ready(resolve));
-    return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+    // 注意：ready + execute 这一段**也必须兜超时**，理由和上面不同：
+    // 实测发现，**站点密钥无效时 execute 既不 resolve 也不 reject**，就那么卡着。
+    // 少了这道闸，点提交 / 登录会永远停在"正在校验…" —— 那比"拿不到令牌"糟糕得多
+    // （拿不到令牌至少后端会按 RECAPTCHA_STRICT 决定放行还是拒绝，默认放行）。
+    return await Promise.race([
+      (async () => {
+        await new Promise((resolve) => window.grecaptcha.ready(resolve));
+        return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+      })(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('recaptcha token timeout')), 5000)),
+    ]) || '';
   } catch(e) {
     // 拿不到 token：交给后端决定放行还是拒绝
     return '';

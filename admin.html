@@ -1058,7 +1058,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.1</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1350,8 +1350,18 @@ async function recaptchaToken(action){
         setTimeout(() => reject(new Error('recaptcha timeout')), 6000);
       });
     }
-    await new Promise((resolve) => window.grecaptcha.ready(resolve));
-    return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+    // 注意：ready + execute 这一段**也必须兜超时**，理由和上面不同：
+    // 实测发现，**站点密钥无效时 execute 既不 resolve 也不 reject**，就那么卡着。
+    // 少了这道闸，点提交 / 登录会永远停在"正在校验…" —— 那比"拿不到令牌"糟糕得多
+    // （拿不到令牌至少后端会按 RECAPTCHA_STRICT 决定放行还是拒绝，默认放行）。
+    return await Promise.race([
+      (async () => {
+        await new Promise((resolve) => window.grecaptcha.ready(resolve));
+        return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+      })(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('recaptcha token timeout')), 5000)),
+    ]) || '';
   } catch(e) {
     // 拿不到 token：交给后端决定放行还是拒绝
     return '';
@@ -2043,6 +2053,11 @@ async function loadSettings(seq, quiet){
     settingsCache.security = data.security || {};
     settingsCache.vote = data.vote || { cap: 0, capConfigured: false, totalMembers: 0 };
     settingsCache.report = data.report || { threshold: 3, defaultThreshold: 3 };
+    // 「暂停接收投稿」的开关状态。**必须在这里赋值**：renderSettings 会把
+    // settingsCache 重建成一个白名单形状，没被写进来的字段会被丢掉 ——
+    // 漏了这一个的后果就是"点了暂停，当前状态还是显示正常接收投稿"
+    // （见 renderSettings 里同样要补的那一行，两处是一对）。
+    settingsCache.submit = data.submit || { paused: false };
     if(data.security && data.security.role){ currentRole = data.security.role; }
 
     // 公告：所有管理员都能看和发
@@ -2109,6 +2124,10 @@ function renderSettings(){
   const box = document.getElementById('listBox');
 
   // 先把缓存补全成完整形状：任何一个字段缺失都不该让整个设置页崩掉。
+  //
+  // 但这也是一个**白名单**：只有列在这里的字段能活过渲染，其余在赋值那一刻就被丢掉。
+  // 所以每加一个"卡片读 settingsCache.某字段"的设置项，必须同时在这里登记 ——
+  // 「暂停接收投稿」当初就漏登记，症状是点完按钮状态文字不切换（save 其实成功了）。
   const cache = settingsCache || {};
   settingsCache = {
     classes: Array.isArray(cache.classes) ? cache.classes : [],
@@ -2117,6 +2136,7 @@ function renderSettings(){
     security: cache.security || {},
     vote: cache.vote || {},
     report: cache.report || {},
+    submit: cache.submit || {},
     announcements: Array.isArray(cache.announcements) ? cache.announcements : [],
     invites: Array.isArray(cache.invites) ? cache.invites : [],
     admins: Array.isArray(cache.admins) ? cache.admins : [],

@@ -1,6 +1,6 @@
 import { json } from '../../_lib/http.js';
 import { recaptchaEnabled, recaptchaBase } from '../../_lib/recaptcha.js';
-import { powEnabled, powDifficulty } from '../../_lib/pow.js';
+import { powEnabled, powDifficulty, powSecret } from '../../_lib/pow.js';
 import { isSubmissionsPaused } from '../../_lib/settings.js';
 
 /**
@@ -26,10 +26,18 @@ export async function onRequestGet(context) {
      * 只下发"开没开"和"难度"——难度本来就会随谜题一起给前端，
      * 不是秘密；密钥（POW_SECRET / AUTH_PEPPER）永远不会出现在这里。
      * 前端看到 enabled:false 就跳过取谜题与计算，一切照旧。
+     *
+     * 另外两个字段是给**排查的人**看的（不是给前端逻辑用的）：
+     *   · emergencyOff     —— 是不是被 POW_EMERGENCY_OFF=1 关掉了；
+     *   · secretConfigured —— 有没有配 POW_SECRET 或 AUTH_PEPPER。
+     * 它们一起，能让 /api/config 一眼看出"POW_ENABLED=1 却不生效"的原因：
+     * 只看 enabled 的话，三种情况（没开 / 紧急关了 / 没配密钥）长得一模一样。
      */
     pow: {
       enabled: powEnabled(env),
       difficulty: powDifficulty(env),
+      emergencyOff: String((env && env.POW_EMERGENCY_OFF) || '').trim() === '1',
+      secretConfigured: powSecret(env).length > 0,
     },
 
     // 备案号与版权主体：由环境变量下发，页面上先放写死的值，取到就替换 ——

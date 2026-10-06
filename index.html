@@ -1128,7 +1128,7 @@
       <span id="beianGonganText">苏公网安备32090302000745号</span>
     </a>
   </div>
-  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.0</div>
+  <div id="siteVersion" style="margin-top:4px;font-size:11px;color:var(--ink-4);letter-spacing:.02em;">版本 1.1.1</div>
 </div>
 <script>
 /* 备案号与版权主体若在环境变量里配了（ICP_BEIAN / GONGAN_BEIAN / COPYRIGHT_HOLDER），
@@ -1147,7 +1147,8 @@
     // 取不到时保持隐藏 —— 弱网下不该让人看到一个假的"停收"横幅。
     const notice = document.getElementById('pausedNotice');
     if(notice && cfg.submit && cfg.submit.paused === true){
-      notice.textContent = '广播站现在暂停接收投稿：仍然可以看排行、看排期，但暂时不能提交点歌。';
+      // 与点歌页保持同一句话（2026-10-07 用户要求只留结论）
+      notice.textContent = '广播站现在暂停接收投稿。';
       notice.hidden = false;
     }
 
@@ -1432,8 +1433,18 @@ async function recaptchaToken(action){
         setTimeout(() => reject(new Error('recaptcha timeout')), 6000);
       });
     }
-    await new Promise((resolve) => window.grecaptcha.ready(resolve));
-    return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+    // 注意：ready + execute 这一段**也必须兜超时**，理由和上面不同：
+    // 实测发现，**站点密钥无效时 execute 既不 resolve 也不 reject**，就那么卡着。
+    // 少了这道闸，点提交 / 登录会永远停在"正在校验…" —— 那比"拿不到令牌"糟糕得多
+    // （拿不到令牌至少后端会按 RECAPTCHA_STRICT 决定放行还是拒绝，默认放行）。
+    return await Promise.race([
+      (async () => {
+        await new Promise((resolve) => window.grecaptcha.ready(resolve));
+        return await window.grecaptcha.execute(cfg.siteKey, { action: action || 'submit' });
+      })(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('recaptcha token timeout')), 5000)),
+    ]) || '';
   } catch(e) {
     // 拿不到 token：交给后端决定放行还是拒绝
     return '';
@@ -1752,7 +1763,10 @@ async function checkPw(){
     // 口令只在这一个请求里出现；服务端签发 HttpOnly 会话 Cookie，
     // 后续所有请求都不再携带口令。旧版把口令塞进 sessionStorage
     // 并反复拼进 URL，一旦有 XSS 就会被直接读走。
-    const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
+    // 人机校验令牌（reCAPTCHA v3）：拿不到就是空串，后端默认放行。
+    // 登录是所有功能的入口，不能因为 Google 不可达就把全校挡在外面。
+    const rcToken = await recaptchaToken('login');
+    const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw, recaptcha_token: rcToken})});
     const d = await r.json();
     if(r.ok){
       document.getElementById('pw').value = '';
@@ -2230,10 +2244,12 @@ async function suggestFromButton(button){
   if(!content){ uiAlert('建议内容不能为空'); return; }
 
   try {
+    // 人机校验令牌（reCAPTCHA v3，无感）。没启用时是空串。
+    const rcToken = await recaptchaToken('suggest');
     const r = await fetch('/api/suggest', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({song_id: songId, content: content})
+      body: JSON.stringify({song_id: songId, content: content, recaptcha_token: rcToken})
     });
     const d = await r.json().catch(() => ({}));
     if(r.ok){ uiToast(d.message || '建议已提交', 'ok'); }
@@ -2523,10 +2539,12 @@ async function reportFromButton(button){
   if(!await uiConfirm('确认举报这首歌吗？\n\n同一首歌被多个班级举报后，才会出现在管理员的举报收件箱里。')) return;
 
   try {
+    // 人机校验令牌（reCAPTCHA v3，无感）。没启用时是空串。
+    const rcToken = await recaptchaToken('report');
     const r = await fetch('/api/report', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id: id, reason: reason.trim()})
+      body: JSON.stringify({id: id, reason: reason.trim(), recaptcha_token: rcToken})
     });
     const d = await r.json();
     if(r.ok){

@@ -7,6 +7,7 @@ import {
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
+import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 
 /**
  * 班级口令登录。
@@ -55,6 +56,20 @@ export async function onRequestPost(context) {
 
   const ipFlood = await rateLimit(env, `class-login-ip:${ip}`, 40, 900);
   if (!ipFlood.allowed) return error('该网络登录尝试过于频繁，请稍后再试', 429);
+
+  // ---- 人机校验（reCAPTCHA v3，2026-10-07 补） ----
+  //
+  // 为什么登录也要加：这是**唯一一个不登录就能反复调用、且直接对着口令**的入口，
+  // 撞库成本最低。位置刻意放在两道限流**之后**、任何数据库查询**之前**：
+  //   · 限流是本地计数，便宜；人机校验要打一次 Google，是网络开销 ——
+  //     让限流先挡掉明显的洪水更划算；
+  //   · 但必须排在查 classes 表之前，被拒的请求一行都不碰数据库。
+  //
+  // 默认 RECAPTCHA_STRICT=0：拿不到令牌（校园网挡了 Google、或密钥配错）时**放行**。
+  // 也就是说这一条**不会**因为 Google 不可达就把全校挡在登录外面 ——
+  // 这一点对登录尤其重要，它是所有功能的入口。
+  const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip });
+  if (!human.ok) return error(human.error, 403);
 
   const lookup = await classPasswordLookup(env, secret.value);
 

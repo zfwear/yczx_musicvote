@@ -14,6 +14,8 @@
  *   POW_ENABLED    只有恰好等于 '1' 才启用（与 DEBUG_LOGIN 同一风格），默认关闭
  *   POW_DIFFICULTY 要求哈希开头的十六进制 0 的个数，默认 3；只接受 3~6 的整数
  *   POW_SECRET     签名密钥；没配就退回 AUTH_PEPPER；两个都没有 -> 整个功能自动关闭
+ *   POW_EMERGENCY_OFF 紧急关闭：设成 '1' 时整个功能立刻停用（不必删密钥），
+ *                     用于线上出问题时几秒内恢复服务。默认不配。
  *
  * 为什么没有密钥就宁可不启用：
  *   谜题必须由服务端签名，否则客户端可以自己造一个"难度 0"的谜题，
@@ -78,17 +80,31 @@ function readEnv(env, name) {
   return String((env && env[name]) || '').trim();
 }
 
-/** 签名密钥：优先 POW_SECRET，其次 AUTH_PEPPER；都没有时返回空串。 */
-function powSecret(env) {
+/**
+ * 签名密钥：优先 POW_SECRET，其次 AUTH_PEPPER；都没有时返回空串。
+ *
+ * 导出是为了让 config.js 能判断"密钥到底配了没" —— 那是运维排查
+ * "POW_ENABLED=1 却不生效"时最需要的一条信息。
+ */
+export function powSecret(env) {
   return readEnv(env, 'POW_SECRET') || readEnv(env, 'AUTH_PEPPER');
 }
 
 /**
  * 是否启用 PoW。
- * 必须同时满足：POW_ENABLED 恰好为 '1'，且能拿到密钥。
+ * 必须同时满足：
+ *   1. POW_ENABLED 恰好为 '1'
+ *   2. 未被 POW_EMERGENCY_OFF=1 紧急关闭
+ *   3. 能拿到密钥（POW_SECRET 或 AUTH_PEPPER 至少配一个）
  */
 export function powEnabled(env) {
   if (readEnv(env, 'POW_ENABLED') !== '1') return false;
+  // 紧急开关：设成 '1' 时整个功能立刻停用，返回 false —— 语义与"从没启用"一致。
+  // 用途：上线后发现大面积"算不出来"、上游抖动、或某个机型集中报错，
+  //      运维改一个变量再部署就能几秒内恢复服务，不必动 POW_ENABLED 或删密钥。
+  // 为什么不直接改 POW_ENABLED=0：那会丢掉"曾经开过"这件事，
+  //      事后排查时无法区分"从没部署过"与"上线后紧急关掉了"。
+  if (readEnv(env, 'POW_EMERGENCY_OFF') === '1') return false;
   return powSecret(env).length > 0;
 }
 
