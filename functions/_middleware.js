@@ -40,6 +40,28 @@ const DEFAULT_ALLOWED = ['vote.yzstu.top'];
 /** 本机开发地址，永远放行 —— 否则本地起 wrangler 就全被挡了。 */
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+/**
+ * "我已经为这个请求跳过一次了"的标记（2026-10-08 加的，用于**彻底杜绝重定向死循环**）。
+ *
+ * 为什么必须有它：实测发生过 `ERR_TOO_MANY_REDIRECTS`，站点**整个打不开**。
+ * 链路是：浏览器 → `vote.yzstu.top` → **阿里云 ESA**（站点前面确实有一层，
+ * 响应头里的 `server: ESA` / `eagleid` / `via: ens-cache…` 是它的标志）
+ * → 回源到 Cloudflare Pages 时**把 Host 改成了源站主机名** → 中间件看到的主机
+ * 既不是 `vote.yzstu.top` 也不在白名单里 → 302 跳到 `vote.yzstu.top`
+ * → 又回到 ESA → 又看到源站主机名 → **永远跳不完**。
+ *
+ * 关键在于：**源站无法分辨"经 ESA 来的正常用户"和"直接访问源站的人"**，
+ * 所以只要跳转目标本身也可能被改写，任何基于"看到的主机名"的判断都可能成环。
+ * 标记则不受影响 —— 它跟着**跳转目标 URL** 走，不依赖源站看到什么。
+ *
+ * 作用范围刻意收窄：只在"看到的主机名看着像源站主机（*.pages.dev）"时才加标记，
+ * 因为那才是**无法分辨**的情况。正常配置下（ESA 回源 Host 正确）根本不会跳转，
+ * 地址栏里也就不会出现这个参数。
+ */
+const LOOP_MARKER = '__dsh_host';
+const LOOP_MARKER_VALUE = 'ok';
+
+
 /** 去掉端口号，统一小写。`vote.yzstu.top:443` / `VOTE.YZSTU.TOP` 都要能匹配。 */
 function normalizeHost(raw) {
   let host = String(raw == null ? '' : raw).trim().toLowerCase();
@@ -92,32 +114,83 @@ function isNavigation(request) {
 export async function onRequest(context) {
   const { request, env, next } = context;
 
-  let host = '';
-  try {
-    host = normalizeHost(new URL(request.url).hostname);
-  } catch { /* 拿不到就当空 */ }
-  if (!host) host = normalizeHost(request.headers.get('host'));
+  /**
+   * 这个请求"可能是哪个域名"。**会把所有线索都收集起来**，而不是只信一个。
+   *
+   * 为什么要收集多个：实测发现站点前面有一层阿里云 ESA，它回源时会把 Host
+   * 改写成源站主机名。此时"源站看到的主机名"根本反映不了用户实际访问的是谁，
+   * 而 `X-Forwarded-Host` / `X-Original-Host` 这类头往往还留着原始域名。
+   */
+  const candidates = [];
+  const pushHost = (v) => {
+    const h = normalizeHost(v);
+    if (h && !candidates.includes(h)) candidates.push(h);
+  };
+  try { pushHost(new URL(request.url).hostname); } catch { /* 拿不到就算了 */ }
+  pushHost(request.headers.get('host'));
 
-  // 拿不到 Host：宁可放行也不要把正常流量挡死（这种请求本来也进不来）
-  if (!host) return next();
+  /**
+   * 代理/网关留下的"原始域名"线索。
+   *
+   * ⚠️ 这类头**请求方可以自己伪造**。采信它等于允许"自己声明自己是谁"。
+   * 之所以还是采信：站点实测就在 ESA 后面，而 ESA 把 Host 改写成了源站主机名 ——
+   * 不采信这些头的话，源站**没有任何办法**分辨"经网关来的正常用户"和
+   * "直接访问源站的人"，只能二选一：要么整站跳死，要么整站放行。
+   * 这个门槛要防的是"学生走错门"，不是"有人蓄意伪造请求头"，
+   * 所以做了这个取舍。真要硬挡，应该在 ESA 那一层按真实 Host 拦（它看得见）。
+   */
+  const forwarded = [];
+  for (const name of ['x-forwarded-host', 'x-original-host', 'x-real-host']) {
+    const raw = request.headers.get(name);
+    if (!raw) continue;
+    // 可能是逗号分隔的链，取**最后一个**（离源站最近的那一跳写的）
+    const parts = String(raw).split(',');
+    const last = normalizeHost(parts[parts.length - 1]);
+    if (last && !forwarded.includes(last)) forwarded.push(last);
+  }
 
-  if (LOCAL_HOSTS.has(host)) return next();
-  if (String((env && env.ALLOW_PREVIEWS) || '').trim() === '1' && isPreviewHost(host)) return next();
+  // 拿不到任何主机线索：宁可放行也不要把正常流量挡死（这种请求本来也进不来）
+  if (!candidates.length && !forwarded.length) return next();
+
+  const all = [...candidates, ...forwarded];
+  if (all.some((h) => LOCAL_HOSTS.has(h))) return next();
+  if (String((env && env.ALLOW_PREVIEWS) || '').trim() === '1'
+      && all.some((h) => isPreviewHost(h))) return next();
 
   const allowed = allowedHosts(env);
-  if (allowed === null) return next();                       // ALLOWED_HOSTS=*
-  if (allowed.includes(host)) return next();
+  if (allowed === null) return next();                        // ALLOWED_HOSTS=*：应急开关
+  if (allowed.includes(candidates[0])) return next();          // 直接匹配：最可信
+  if (forwarded.some((h) => allowed.includes(h))) return next(); // 网关改写 Host，但原始域名是对的
 
   const target = canonicalHost(env, allowed);
 
+  // 目标域名自己都不在白名单里：跳过去只会被再跳一次 → **必然死循环**。
+  // 这种情况下宁可放行 —— 把整站跳死比"少拦一个域名"严重得多。
+  if (!allowed.includes(target)) return next();
+
+  // 这次请求是不是"被我们自己跳过一次了"。
+  // 是的话**必须放行**，否则就是那个把整站跳死的循环（见 LOOP_MARKER 的说明）。
+  let marked = false;
+  try { marked = new URL(request.url).searchParams.get(LOOP_MARKER) === LOOP_MARKER_VALUE; }
+  catch { /* 拿不到 URL 就当没标记 */ }
+  if (marked) return next();
+
   if (!isNavigation(request)) {
-    return error(`本站只允许通过 ${target} 访问`, 403);
+    // 诊断信息：把**看到的主机名**写进错误里。这个功能第一次上线就让整站打不开，
+    // 而原因（"源站到底看到的是哪个主机名"）从外部完全看不出来 ——
+    // 所以宁可写进响应，下次一眼就能定位。这里没有敏感信息。
+    const seen = all.length ? all.join(' / ') : '(空)';
+    return error(`本站只允许通过 ${target} 访问（本次请求看到的域名：${seen}）`, 403);
   }
 
-  // 保留路径与查询串，跳到正确域名
+  // 保留路径与查询串，跳到正确域名。
+  // **只有"看到的主机名像源站主机（*.pages.dev）"时才带标记** ——
+  // 那正是源站无法分辨、可能成环的情况。正常配置下不会走到这里，
+  // 地址栏里也就不会多出任何参数。
   let url;
   try {
     const src = new URL(request.url);
+    if (candidates.some(isPreviewHost)) src.searchParams.set(LOOP_MARKER, LOOP_MARKER_VALUE);
     url = `https://${target}${src.pathname}${src.search}`;
   } catch {
     url = `https://${target}/`;

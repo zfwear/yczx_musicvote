@@ -16,12 +16,44 @@ import { json } from '../../_lib/http.js';
  * 如果你用外部监控探活，要么让监控带正确的 Host，要么把监控的域名加进
  * `ALLOWED_HOSTS`。
  */
-export async function onRequestGet() {
+export async function onRequestGet(context) {
+  const request = context && context.request;
+
+  /**
+   * 把"源站这次看到的域名"一并报出来（2026-10-08 加的）。
+   *
+   * 为什么值得占一行：那次整站打不开（ERR_TOO_MANY_REDIRECTS），根因是
+   * 站点前面有一层网关（阿里云 ESA）回源时**把 Host 改写成了源站主机名**，
+   * 于是中间件认不出 `vote.yzstu.top`、一直往正确域名上跳，跳到死循环。
+   * 而"源站到底看到了什么主机名"**从外部完全看不出来** —— 那次是靠
+   * 逐个头去猜才定位的。把它放进健康检查，以后一条 curl 就能看见。
+   *
+   * 这几个值都不是敏感信息（就是请求自己带的域名），公开没有风险。
+   */
+  const seen = [];
+  const push = (v) => {
+    const h = String(v == null ? '' : v).trim().toLowerCase();
+    if (h && !seen.includes(h)) seen.push(h);
+  };
+  try { push(new URL(request.url).hostname); } catch { /* 拿不到就算了 */ }
+  if (request) {
+    push(request.headers.get('host'));
+    for (const name of ['x-forwarded-host', 'x-original-host', 'x-real-host']) {
+      const raw = request.headers.get(name);
+      if (raw) {
+        const parts = String(raw).split(',');
+        push(parts[parts.length - 1]);
+      }
+    }
+  }
+
   return json({
     ok: true,
     // 前端与运维靠这个字段确认"部署的到底是哪一版"（页脚也显示同一个号）
     version: '1.1.1',
     // 给监控一个"服务在动"的信号；不含任何配置或数据
     time: new Date().toISOString(),
+    // 诊断用：源站实际看到的主机名（含网关留下的转发头）
+    seenHost: seen,
   });
 }
