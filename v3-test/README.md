@@ -42,5 +42,14 @@ proxies only this hostname to that loopback service.
   server siteverify round-trip, score, hostname, action, verdict and reason.
 - Failure-injection controls are clearly marked local simulations. They do not
   fabricate Google verdicts or scores.
-- Results remain in browser memory unless explicitly exported as JSON or CSV.
+- Results remain on the server and can also be exported as JSON or CSV.
 - The endpoint is limited to 30 requests per client IP per minute.
+- Each test is appended to `/var/lib/yczx-v3-test/runs.jsonl`; the page loads the
+  latest 100 records from this shared server-side store. No token or raw IP is
+  stored. Device label, user agent, platform, locale, timezone, screen size,
+  difficulty and timing data are stored to compare devices and environments.
+- The test page is intentionally public so it can be opened on different
+  devices. Device metadata is visible to anyone who can access the test page;
+  use a non-identifying label and do not enter personal information.
+- PoW difficulty can be varied from 1 to 6 per test. The chosen level is included
+  in the HMAC-signed challenge and is verified server-side.

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -17,6 +17,7 @@ const minScore = Number.isFinite(configuredMinScore) && configuredMinScore >= 0 
 const powDifficulty = clampInt(process.env.POW_DIFFICULTY, 3, 1, 6);
 const powTtl = 300;
 const powSecret = process.env.POW_SECRET || '';
+const recordsPath = process.env.RECORDS_PATH || '/var/lib/yczx-v3-test/runs.jsonl';
 const maxBodyBytes = 32 * 1024;
 const rate = new Map();
 
@@ -67,12 +68,12 @@ function sign(message) {
   return createHmac('sha256', powSecret).update(message).digest('hex');
 }
 
-function issueChallenge(action) {
+function issueChallenge(action, difficulty) {
   const exp = Math.floor(Date.now() / 1000) + powTtl;
   const challenge = randomBytes(16).toString('base64url');
-  const signed = `pow|${action}|${powDifficulty}|${exp}|${challenge}`;
+  const signed = `pow|${action}|${difficulty}|${exp}|${challenge}`;
   const sig = sign(signed);
-  return { challenge: ['v1', action, powDifficulty, exp, challenge, sig].join('.'), difficulty: powDifficulty, expiresIn: powTtl };
+  return { challenge: ['v1', action, difficulty, exp, challenge, sig].join('.'), difficulty, expiresIn: powTtl };
 }
 
 function leadingZeroNibbles(hex) {
@@ -90,7 +91,27 @@ function safeErrorCodes(value) {
   return value.filter((item) => typeof item === 'string' && /^[a-z_]+$/.test(item));
 }
 
-function verifyPow(proof, expectedAction) {
+function cleanLabel(value, maxLength = 80) {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) : '';
+}
+
+async function storeRun(record) {
+  await mkdir(dirname(recordsPath), { recursive: true, mode: 0o700 });
+  await appendFile(recordsPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+}
+
+async function listRuns(url) {
+  let text = '';
+  try { text = await readFile(recordsPath, 'utf8'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const all = text.split('\n').filter(Boolean).flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  });
+  const limit = clampInt(url.searchParams.get('limit'), 100, 1, 500);
+  return all.slice(-limit).reverse();
+}
+
+function verifyPow(proof, expectedAction, requestedDifficulty) {
   const reject = (reason) => ({ ok: false, reason });
   if (!powSecret) return { ok: true, skipped: true, reason: 'pow_not_configured' };
   if (!proof || typeof proof.challenge !== 'string' || typeof proof.nonce !== 'string') return reject('proof_missing');
@@ -100,15 +121,16 @@ function verifyPow(proof, expectedAction) {
   const [version, action, difficultyText, expText, challenge, sig] = parts;
   if (version !== 'v1') return reject('challenge_version');
   if (action !== expectedAction) return reject('action_mismatch');
-  if (!/^\d+$/.test(difficultyText) || Number(difficultyText) !== powDifficulty) return reject('difficulty_mismatch');
+  const difficulty = clampInt(requestedDifficulty, powDifficulty, 1, 6);
+  if (!/^\d+$/.test(difficultyText) || Number(difficultyText) !== difficulty) return reject('difficulty_mismatch');
   if (!/^\d+$/.test(expText) || Math.floor(Date.now() / 1000) > Number(expText)) return reject('challenge_expired');
   const expectedSig = sign(`pow|${action}|${difficultyText}|${expText}|${challenge}`);
   const a = Buffer.from(sig, 'hex');
   const b = Buffer.from(expectedSig, 'hex');
   if (a.length !== b.length || !timingSafeEqual(a, b)) return reject('signature_invalid');
   const hash = createHash('sha256').update(`${challenge}:${proof.nonce}`).digest('hex');
-  if (leadingZeroNibbles(hash) < powDifficulty) return reject('insufficient_work');
-  return { ok: true, action, difficulty: powDifficulty, hashPrefix: hash.slice(0, 16) };
+  if (leadingZeroNibbles(hash) < difficulty) return reject('insufficient_work');
+  return { ok: true, action, difficulty, hashPrefix: hash.slice(0, 16) };
 }
 
 async function verifyRecaptcha(token, { remoteIp, expectedAction }) {
@@ -165,11 +187,16 @@ async function handle(req, res) {
       serverTime: new Date().toISOString(),
     });
   }
+  if (req.method === 'GET' && url.pathname === '/api/runs') {
+    try { return sendJson(res, 200, { ok: true, runs: await listRuns(url) }); }
+    catch { return sendJson(res, 500, { ok: false, error: '无法读取服务器测试记录' }); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/pow/challenge') {
     if (rateLimited(clientIp(req))) return sendJson(res, 429, { ok: false, error: 'Too many test requests (30/min)' });
     const action = ['vote', 'upvote', 'diagnostic'].includes(url.searchParams.get('action')) ? url.searchParams.get('action') : 'diagnostic';
+    const difficulty = clampInt(url.searchParams.get('difficulty'), powDifficulty, 1, 6);
     if (!powSecret) return sendJson(res, 200, { ok: true, enabled: false, action, reason: 'pow_not_configured' });
-    return sendJson(res, 200, { ok: true, enabled: true, action, ...issueChallenge(action) });
+    return sendJson(res, 200, { ok: true, enabled: true, action, ...issueChallenge(action, difficulty) });
   }
   if (req.method === 'POST' && url.pathname === '/api/test') {
     if (rateLimited(clientIp(req))) return sendJson(res, 429, { ok: false, error: 'Too many test requests (30/min)' });
@@ -178,20 +205,46 @@ async function handle(req, res) {
       const expectedAction = typeof body.action === 'string' ? body.action.slice(0, 80) : 'diagnostic';
       const recaptchaPromise = verifyRecaptcha(body.token, { remoteIp: clientIp(req), expectedAction });
       const powStarted = performance.now();
+      const difficulty = clampInt(body.difficulty, powDifficulty, 1, 6);
       const pow = body.checkPow === false
         ? { ok: true, skipped: true, reason: 'not_requested' }
-        : verifyPow(body.proof, expectedAction);
+        : verifyPow(body.proof, expectedAction, difficulty);
       const powMs = Number((performance.now() - powStarted).toFixed(3));
       const recaptcha = await recaptchaPromise;
       const ok = recaptcha.ok && pow.ok;
-      return sendJson(res, 200, {
+      const result = {
         ok,
         verdict: ok ? 'pass' : 'reject',
         recaptcha,
         pow: { ...pow, verifyMs: powMs, enabled: Boolean(powSecret) },
         totalMs: Number((recaptcha.serviceMs == null ? powMs : recaptcha.serviceMs + powMs).toFixed(2)),
         serverTime: new Date().toISOString(),
-      });
+      };
+      const record = {
+        id: randomBytes(12).toString('hex'),
+        createdAt: result.serverTime,
+        label: cleanLabel(body.label, 80),
+        client: {
+          userAgent: cleanLabel(req.headers['user-agent'], 240),
+          platform: cleanLabel(body.client?.platform, 80),
+          language: cleanLabel(body.client?.language, 35),
+          timezone: cleanLabel(body.client?.timezone, 80),
+          screen: cleanLabel(body.client?.screen, 30),
+          deviceId: cleanLabel(body.client?.deviceId, 64),
+        },
+        action: expectedAction,
+        requestedDifficulty: difficulty,
+        checkPow: body.checkPow !== false,
+        tokenMs: Number.isFinite(body.client?.tokenMs) ? Math.max(0, Math.min(body.client.tokenMs, 600_000)) : null,
+        powClientMs: Number.isFinite(body.client?.powMs) ? Math.max(0, Math.min(body.client.powMs, 600_000)) : null,
+        powAttempts: Number.isInteger(body.client?.powAttempts) ? Math.max(0, Math.min(body.client.powAttempts, 100_000_000)) : null,
+        clientRequestMs: Number.isFinite(body.client?.requestMs) ? Math.max(0, Math.min(body.client.requestMs, 600_000)) : null,
+        simulated: body.simulated === true,
+        ...result,
+      };
+      try { await storeRun(record); }
+      catch { return sendJson(res, 507, { ok: false, error: '验证已完成，但服务器无法保存本轮记录' }); }
+      return sendJson(res, 200, { ...result, recordId: record.id });
     } catch (error) {
       return sendJson(res, error.status || 400, { ok: false, error: error.message });
     }
