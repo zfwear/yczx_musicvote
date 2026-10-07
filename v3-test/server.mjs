@@ -51,6 +51,9 @@ function clientIp(req) {
 
 function rateLimited(ip) {
   const now = Date.now();
+  if (rate.size > 5000) {
+    for (const [key, value] of rate) if (now - value.start > 60_000) rate.delete(key);
+  }
   const entry = rate.get(ip);
   if (!entry || now - entry.start > 60_000) {
     rate.set(ip, { start: now, count: 1 });
@@ -150,12 +153,14 @@ async function handle(req, res) {
     try {
       const html = await readFile(join(root, 'index.html'));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.recaptcha.net https://www.gstatic.cn; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.recaptcha.net https://www.gstatic.cn; img-src 'self' data: https://www.recaptcha.net; frame-src https://www.recaptcha.net; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" });
-      return res.end(html.toString().replaceAll('__RECAPTCHA_SITE_KEY__', siteKey));
+      return res.end(html.toString()
+        .replaceAll('__RECAPTCHA_SITE_KEY__', siteKey)
+        .replaceAll('__RECAPTCHA_BASE__', recaptchaBase));
     } catch { return sendJson(res, 500, { ok: false, error: 'Test page not found' }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/config') {
     return sendJson(res, 200, {
-      recaptcha: { configured: Boolean(siteKey && secret), siteKey: siteKey || null, base: recaptchaBase, allowedHosts, minScore },
+      recaptcha: { configured: Boolean(siteKey && secret), base: recaptchaBase, allowedHosts, minScore },
       pow: { configured: Boolean(powSecret), enabled: Boolean(powSecret), difficulty: powDifficulty, ttl: powTtl },
       serverTime: new Date().toISOString(),
     });

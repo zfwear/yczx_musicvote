@@ -5,23 +5,25 @@ It does not use the vote database or accept application writes.
 
 ## Runtime configuration
 
-Create `/etc/yczx-v3-test.env` outside the repository and restrict it to root:
+The service loads `/etc/yczx-musicvote2/recaptcha.env` first, reusing the site's
+existing `RECAPTCHA_SITE_KEY`, `RECAPTCHA_SECRET`, and `RECAPTCHA_BASE` without
+copying or printing their values. `/etc/yczx-v3-test.env` is loaded second for
+test-specific overrides and must be restricted to root:
 
 ```ini
 HOST=127.0.0.1
 PORT=18790
-RECAPTCHA_SITE_KEY=<diagnostic-site-key>
-RECAPTCHA_SECRET=<diagnostic-secret-key>
 RECAPTCHA_ALLOWED_HOSTS=v3.nas.popotree.top
-RECAPTCHA_BASE=https://www.recaptcha.net
 RECAPTCHA_MIN_SCORE=0.5
 POW_SECRET=<independent-random-secret>
 POW_DIFFICULTY=3
 ```
 
-Register `v3.nas.popotree.top` as a separate reCAPTCHA v3 site. Do not reuse the
-production secret. `POW_SECRET` should be independently generated, at least 32
-random bytes, and must not be committed. Without it, PoW is shown as unconfigured.
+The shared reCAPTCHA key must also permit `v3.nas.popotree.top` in its Google
+reCAPTCHA domain settings. The server independently checks the returned hostname
+against `RECAPTCHA_ALLOWED_HOSTS`. `POW_SECRET` is independent from the vote
+service, at least 32 random bytes, and must not be committed. Without it, PoW is
+shown as unconfigured.
 
 ## Service
 
@@ -33,6 +35,9 @@ proxies only this hostname to that loopback service.
 
 - Real runs call Google `siteverify`; the token is never returned to the browser
   after verification and is not logged or persisted.
+- The shared Site Key is public by design and is injected into the page; the
+  Secret Key is only loaded by the server process from the protected env file.
+- The config API returns configuration status but never returns either key.
 - The panel displays client token acquisition and PoW solve time, nonce attempts,
   server siteverify round-trip, score, hostname, action, verdict and reason.
 - Failure-injection controls are clearly marked local simulations. They do not
