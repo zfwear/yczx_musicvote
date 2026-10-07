@@ -49,12 +49,18 @@ export async function onRequestPost(context) {
 
   // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
   const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip });
-  if (!human.ok) return error(human.error, 403);
+  if (!human.ok) {
+    console.warn('[recaptcha] endpoint=upvote rejected reason=' + String(human.reason || 'verification'));
+    return error(human.error, 403);
+  }
 
   // 浏览器端 PoW（第二道，默认关闭）。位置：reCAPTCHA 之后、占位与计票之前。
   // 注意请求体变量名是 parsed.value（这个文件里没有 data 这个变量）。
   const pow = await verifyPow(env, parsed.value.pow, { action: 'upvote' });
-  if (!pow.ok) return error(pow.error, 403);
+  if (!pow.ok) {
+    console.warn('[pow] endpoint=upvote rejected');
+    return error(pow.error, 403);
+  }
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

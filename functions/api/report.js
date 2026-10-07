@@ -59,7 +59,10 @@ export async function onRequestPost(context) {
   // 位置：限流之后、占位与置位之前 —— 被拒的举报不会写 report_logs，
   // 也不会把 is_reported 顶起来（与上面的游客拦截同一个道理）。
   const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip: clientIp(request) });
-  if (!human.ok) return error(human.error, 403);
+  if (!human.ok) {
+    console.warn('[recaptcha] endpoint=report rejected reason=' + String(human.reason || 'verification'));
+    return error(human.error, 403);
+  }
 
   const songId = parsePositiveInt(parsed.value.id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

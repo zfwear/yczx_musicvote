@@ -72,7 +72,7 @@ const MAX_PROOF_LENGTH = 400;
 const MAX_NONCE_LENGTH = 128;
 
 /** 拒绝时的统一文案：不告诉对方到底哪一步没过。 */
-const REFUSE = { ok: false, error: '人机校验未通过，请刷新页面重试' };
+const REFUSE = { ok: false, error: '防刷校验未通过，请刷新页面重试' };
 
 const encoder = new TextEncoder();
 

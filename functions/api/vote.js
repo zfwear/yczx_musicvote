@@ -89,12 +89,18 @@ export async function onRequestPost(context) {
 
   // 人机校验（reCAPTCHA v3）。没配密钥时直接放行；详见 _lib/recaptcha.js。
   const human = await verifyRecaptcha(env, data.recaptcha_token, { ip });
-  if (!human.ok) return error(human.error, 403);
+  if (!human.ok) {
+    console.warn('[recaptcha] endpoint=vote rejected reason=' + String(human.reason || 'verification'));
+    return error(human.error, 403);
+  }
 
   // 浏览器端 PoW（第二道，默认关闭）。位置：reCAPTCHA 之后、任何写入之前。
   // 功能没开时 verifyPow 返回 skipped 直接放行，所以这里不需要再判断开关。
   const pow = await verifyPow(env, data.pow, { action: 'vote' });
-  if (!pow.ok) return error(pow.error, 403);
+  if (!pow.ok) {
+    console.warn('[pow] endpoint=vote rejected');
+    return error(pow.error, 403);
+  }
 
   const fingerprint = parseFingerprint(data.fingerprint);
   if (!fingerprint.ok) return error(fingerprint.error, 400);

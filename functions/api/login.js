@@ -89,7 +89,10 @@ export async function onRequestPost(context) {
   // 也就是说这一条**不会**因为 Google 不可达就把全校挡在登录外面 ——
   // 这一点对登录尤其重要，它是所有功能的入口。
   const human = await verifyRecaptcha(env, parsed.value.recaptcha_token, { ip });
-  if (!human.ok) return error(human.error, 403);
+  if (!human.ok) {
+    console.warn('[recaptcha] endpoint=login rejected reason=' + String(human.reason || 'verification'));
+    return error(human.error, 403);
+  }
 
   const lookup = await classPasswordLookup(env, secret.value);
 

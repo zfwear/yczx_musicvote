@@ -80,7 +80,10 @@ export async function onRequestPost(context) {
   // 管理员已经过一整轮登录鉴权，再让他们每次操作等一次 Google 脚本没有意义。
   // 位置：限流之后、查库与 INSERT 之前 —— 被拒的建议一行都不会落库。
   const human = await verifyRecaptcha(env, data.recaptcha_token, { ip: clientIp(request) });
-  if (!human.ok) return error(human.error, 403);
+  if (!human.ok) {
+    console.warn('[recaptcha] endpoint=suggest rejected reason=' + String(human.reason || 'verification'));
+    return error(human.error, 403);
+  }
 
   const songId = parsePositiveInt(data.song_id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

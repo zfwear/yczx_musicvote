@@ -130,8 +130,9 @@ export async function verifyRecaptcha(env, token, { ip } = {}) {
 
   if (!value) {
     // 前端没拿到 token —— 多半是脚本被网络挡住了。
+    console.warn('[recaptcha] token_missing strict=' + strict);
     return strict
-      ? { ok: false, error: '人机校验未通过（未取到校验令牌），请刷新页面重试' }
+      ? { ok: false, reason: 'token_missing', error: '人机校验未通过（未取到校验令牌），请刷新页面重试' }
       : { ok: true, skipped: true };
   }
 
@@ -148,18 +149,24 @@ export async function verifyRecaptcha(env, token, { ip } = {}) {
     const data = await res.json();
 
     if (!data || data.success !== true) {
-      return { ok: false, error: '人机校验未通过，请刷新页面后重试' };
+      const codes = Array.isArray(data && data['error-codes'])
+        ? data['error-codes'].filter((code) => /^[a-z_]+$/.test(code)).join(',')
+        : 'invalid_response';
+      console.warn('[recaptcha] rejected codes=' + codes);
+      return { ok: false, reason: codes || 'rejected', error: '人机校验未通过，请刷新页面后重试' };
     }
 
     // v3 会给出 0~1 的分数，越低越像机器人
     const min = Number((env && env.RECAPTCHA_MIN_SCORE) || 0.5);
     if (typeof data.score === 'number' && Number.isFinite(min) && data.score < min) {
-      return { ok: false, error: '人机校验分数过低，请稍后再试' };
+      console.warn('[recaptcha] rejected reason=low_score score=' + data.score);
+      return { ok: false, reason: 'low_score', error: '人机校验分数过低，请稍后再试' };
     }
 
     // 域名校验（因为控制台里那个开关已经被关掉了，这里必须自己来）。
     const allowed = recaptchaAllowedHosts(env);
     if (!isAllowedTokenHost(data.hostname, allowed)) {
+      console.warn('[recaptcha] rejected reason=hostname host=' + String(data.hostname || 'missing'));
       // 拿不到 hostname 时也走这条：**宁可拒绝**。
       // 理由：这是"别人拿我们公开的站点密钥去自己网站上签发令牌"的唯一防线，
       // 而实测（probe-recaptcha-origin-off.mjs）证明 siteverify 一定会返回 hostname。
@@ -174,6 +181,7 @@ export async function verifyRecaptcha(env, token, { ip } = {}) {
 
     return { ok: true, score: typeof data.score === 'number' ? data.score : null };
   } catch (err) {
+    console.warn('[recaptcha] verification_unavailable error=' + String((err && err.name) || 'Error'));
     // 校验服务不可达：可用性优先
     return { ok: true, skipped: true, error: String((err && err.message) || err) };
   }

@@ -11,6 +11,9 @@ import { isSubmissionsPaused } from '../../_lib/settings.js';
  */
 export async function onRequestGet(context) {
   const { env } = context;
+  const categories = await env.DB.prepare(
+    'SELECT id, name FROM categories ORDER BY weight DESC, id ASC'
+  ).all().catch(() => ({ results: [] }));
 
   return json({
     recaptcha: {
@@ -61,5 +64,6 @@ export async function onRequestGet(context) {
     submit: {
       paused: await isSubmissionsPaused(env),
     },
+    categories: categories.results || [],
   });
 }
