@@ -2,12 +2,28 @@
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api = async (url, options={}) => { const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}); let d={}; try{d=await r.json();}catch{} if(!r.ok) throw new Error(d.error||'请求失败'); return d; };
+const api = async (url, options={}) => { const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}); let d={}; try{d=await r.json();}catch{} if(r.status===401){if(!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(confirm('登录已过期，需要重新登录。\n按「确定」回到登录页，按「取消」留在本页。')){try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||'请求失败'); return d; };
 const toast = (text) => { const n=document.createElement('div'); n.className='toast'; n.textContent=text; document.body.append(n); setTimeout(()=>n.remove(),2600); };
+/* 弹窗公告用的对话框：复用 app.css 的 .glass-dialog（zip 自己的样式）。
+   用 <dialog> 而不是原生 alert —— 不阻塞渲染、手机上不会丑，而且能 await 成串行。 */
+function announceDialog(title, content){
+  return new Promise((resolve)=>{
+    const d=document.createElement('dialog');
+    d.className='glass-dialog notice-dialog';
+    const h=document.createElement('h2'); h.textContent=title||'公告';
+    const p=document.createElement('p'); p.className='notice-body'; p.textContent=content||'';
+    const b=document.createElement('button'); b.type='button'; b.className='btn primary'; b.textContent='知道了';
+    b.onclick=()=>d.close();
+    d.append(h,p,b);
+    d.addEventListener('close',()=>{d.remove();resolve();});
+    document.body.append(d);
+    if(typeof d.showModal==='function') d.showModal(); else d.setAttribute('open','');
+  });
+}{try{const n=sessionStorage.getItem('loginNotice');if(n){sessionStorage.removeItem('loginNotice');setTimeout(()=>toast(n),260);}}catch{}}
 const reveal = (els) => { if(window.gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) gsap.fromTo(els,{opacity:0,y:14},{opacity:1,y:0,stagger:.05,duration:.5,ease:'power3.out',clearProps:'transform'}); };
 const verificationLines = ['正在借你的 CPU 烤小饼干喵～','正在偷偷啃一口你的处理器，嗷呜——真香喵！','算力香香的，本喵正在大口嚼碎谜题喵～','借用一点点算力当零食，嚼完马上放行喵！','正在用你的手机算力搓小鱼干喵～','正在你的芯片里踩奶，稍等一下下喵～','悄悄薅一撮你的算力羊毛，立刻就好喵！','CPU 正在飞速运转，本喵正在呼呼帮你吹凉散热喵～','嚼嚼嚼……正在消化这个复杂的数学谜题喵！','正在向你的设备征收一点点猫猫通行费喵～','嗅嗅……本喵正在闻闻你是不是机器小偷喵～','侦探喵出动！正在用放大镜看你是不是人类喵～','机器人走开！本喵正在设立安全猫爪结界喵！','正在检查你的“纯正两脚兽”身份认证喵～','正在启动猫眼雷达，全方位扫描可疑脚本喵～','嘟嘟嘟！正在拦截偷渡的网络小机器人喵～','本喵正在扒拉你的数据包，看有没有藏坏心思喵！','正在给你盖一枚特批的“善良人类”肉垫印章喵～','超凶警告！本喵正在认真站岗查房喵～','警报解除中……本喵正在确认你的通行安全等级喵～','正在让你的电脑帮本喵做一道很难的高数题喵～','谜题正在解开中，猫猫头都要想秃了喵！','魔法阵启动中……嗡嗡嗡——正在注入猫猫灵力喵！','你的设备正在拼命转圈圈解题，本喵给它加个油喵～','正在做一道算不清楚的猫罐头数学题，再等三秒喵！','正在向喵星总服务器发送解谜报告喵～','哔哔哔——你的 CPU 正在奋力出汗，马上搞定喵！','谜题马上攻克！本喵先伸个懒腰准备发通行证喵～','算力拼图最后一块拼接中，不要眨眼喵～','验证通过倒计时中，准备好迎接本喵的热情招待了吗喵～'];
 let verificationCount=0,verificationTimer,verificationNode,lastVerificationIndex=-1;
-function beginVerification(){if(!verificationNode){verificationNode=document.createElement('div');verificationNode.className='verification-note';verificationNode.setAttribute('role','status');verificationNode.setAttribute('aria-live','polite');verificationNode.innerHTML='<span class="verification-paw" aria-hidden="true">🐾</span><span data-verification-line></span>';document.body.append(verificationNode);}verificationCount++;if(verificationTimer)return;const rotate=()=>{let i;do{i=Math.floor(Math.random()*verificationLines.length);}while(i===lastVerificationIndex);lastVerificationIndex=i;verificationNode.querySelector('[data-verification-line]').textContent=verificationLines[i];};rotate();verificationNode.hidden=false;verificationTimer=setInterval(rotate,2200);}
+function beginVerification(){if(!verificationNode){verificationNode=document.createElement('div');verificationNode.className='verification-note';verificationNode.setAttribute('role','status');verificationNode.setAttribute('aria-live','polite');verificationNode.innerHTML='<span class="verification-paw" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="40 14"/></svg></span><span data-verification-line></span>';document.body.append(verificationNode);}verificationCount++;if(verificationTimer)return;const rotate=()=>{let i;do{i=Math.floor(Math.random()*verificationLines.length);}while(i===lastVerificationIndex);lastVerificationIndex=i;verificationNode.querySelector('[data-verification-line]').textContent=verificationLines[i];};rotate();verificationNode.hidden=false;verificationTimer=setInterval(rotate,2200);}
 function endVerification(){verificationCount=Math.max(0,verificationCount-1);if(verificationCount||!verificationNode)return;clearInterval(verificationTimer);verificationTimer=undefined;verificationNode.hidden=true;}
 async function withVerification(task){beginVerification();try{return await task();}finally{endVerification();}}
 let cachedFingerprint;
@@ -27,7 +43,7 @@ function nav(name){const guest=document.body.classList.contains('guest-mode');re
 async function home(){
   const root=$('#app');const me=await session();if(!me){$('#gateView').hidden=false;await loadGateAnnouncements();bootGate();return;}root.hidden=false;$('#gateView').remove();document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav();$('[data-logout]').onclick=logout;$('#identity').textContent=me.className||'已登录';if(me.isGuest){$('#guest').hidden=false;}
   const cfg=await api('/api/config').catch(()=>({}));if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
-  const ads=await api('/api/announcements').catch(()=>({announcements:[],popups:[]}));$('#announcements').innerHTML=(ads.announcements||[]).map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('');for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;alert(`${a.title}\n\n${a.content}`);sessionStorage.setItem('popup_'+a.id,'1');}await loadRanks();reveal($$('.panel,.hero,.announcement'));
+  const ads=await api('/api/announcements').catch(()=>({announcements:[],popups:[]}));$('#announcements').innerHTML=(ads.announcements||[]).map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('');for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await loadRanks();reveal($$('.panel,.hero,.announcement'));
 }
 async function loadGateAnnouncements(){try{const d=await api('/api/announcements?scope=gate');$('#gateAnnouncements').innerHTML=(d.announcements||[]).map(a=>`<article class="announcement"><b>${esc(a.title)}</b><p>${esc(a.content)}</p></article>`).join('');}catch{}}
 async function loadRanks(){for(const status of ['pending','approved']){const box=$(`#${status}List`);try{const d=await api(`/api/rank?status=${status}`);const rows=Array.isArray(d)?d:[];box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${document.body.classList.contains('guest-mode')?'disabled title="游客模式只能查看排行，不能投票"':''}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${document.body.classList.contains('guest-mode')?'disabled':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
@@ -66,3 +82,24 @@ async function adminInvites(){const box=$('#adminRows');try{const d=await api('/
 async function register(){const f=$('#registerForm'),m=$('#registerMessage');f.addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin-register',{method:'POST',body:JSON.stringify({username:$('#registerName').value,password:$('#registerPassword').value,password2:$('#registerPassword2').value,invite_code:$('#invite').value})});m.textContent='注册成功，请前往登录。';}catch(err){m.textContent=err.message;}});}
 if(!document.querySelector('.recaptcha-disclosure')){const note=document.createElement('p');note.className='recaptcha-disclosure';note.innerHTML='本网站使用 Google reCAPTCHA 保护服务，适用 Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">隐私权政策</a>与<a href="https://policies.google.com/terms" target="_blank" rel="noreferrer">服务条款</a>。';document.querySelector('.shell')?.append(note);}
 const path=location.pathname; if(path==='/')home(); else if(path.endsWith('vote.html'))votePage(); else if(path.endsWith('schedule.html'))schedule(); else if(path.endsWith('admin.html'))admin(); else if(path.endsWith('register.html'))register();else if(path.endsWith('suggest.html'))suggestionsPage();
+;
+
+/* 投稿须知与免责声明原文（2026-10-08 从旧前端补回；页面上的可见内容与此同源）*/
+const RULES = [
+  '中午放学播放 3 首含歌词的音乐，下午上学播放 3 首纯音乐。',
+  '不出现含有日语或韩语的歌曲，尽量避免小语种歌曲；英语歌曲可以投稿，但播放比例较小。',
+  '歌词积极向上，减少情爱类型；不出现政治敏感、脏话等违规内容；不出现有特殊含义的歌曲（如校歌、国歌）。',
+  '歌手无违法犯罪行为。',
+  '不出现 rap，以及底噪、低音、高音过大的歌曲；音游、二次元相关歌曲请尽量少投稿。',
+  '投稿的歌曲将交由广播站老师和分管校长审核，审核通过后会安排在相应时间播放。学校审核较严格，如未通过请谅解。',
+  '参与投稿即表明“我已阅读投稿须知并知晓该歌曲可能无法播出”，审核不通过的歌曲将被驳回。',
+  '本系统仅提供音乐搜索与播放管理功能，不存储任何音乐文件。所有音乐内容均来自第三方音乐平台，版权归原平台及版权方所有。投稿时请遵守相关音乐平台的服务条款、尊重音乐作品版权；我们鼓励支持正版音乐，在官方平台购买和收听喜爱的作品。',
+  '最终解释权归盐中之声广播站所有。',
+];
+const DISCLAIMER = [
+  '本页面由江苏省盐城中学盐中之声广播站学生社团自主搭建与维护，是校内投稿工具，非学校官方信息发布渠道，与学校教务、宣传等部门的正式信息无关。',
+  '页面展示的歌曲信息与试听音频均来自第三方公开音乐服务，本站不存储、不提供任何音频文件下载，相关著作权归各自权利人所有。试听内容仅用于投稿前确认版本，请勿下载、二次传播或用于商业用途；若权利人认为内容不当，请联系广播站，我们将及时处理。',
+  '因第三方服务调整导致的试听失败、音质差异或内容变更，本站不承担责任。',
+  '为防范刷票，页面会采集设备特征生成匿名指纹，仅用于限制重复投稿与投票，不用于识别个人身份，也不与任何第三方共享。',
+  '请勿利用本页面从事刷票、恶意投稿或其他干扰正常校园广播秩序的行为。',
+];
