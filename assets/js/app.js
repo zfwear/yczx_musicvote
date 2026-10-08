@@ -1,4 +1,5 @@
 /* New Vote2 client: a small, dependency-free UI layer over the existing API. */
+window.__appJsLoaded = true;
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 

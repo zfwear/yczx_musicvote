@@ -4,6 +4,32 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 
 本包是**整体替换版**：把仓库里的文件全部覆盖即可，不需要挑文件。
 
+---
+
+## v3.2.0 现状速览（2026-10-09，先读这一段）
+
+**界面：Radio Light**（极简冷调、全实色分层、按钮/导航/弹窗约 70% 毛玻璃；
+无渐变、无紫色、无 emoji）。**结构：页面在仓库根**（无 `public/`）：
+
+```
+landing.html   发布页（站点门面：右下角「进入」）
+login.html     登录页（班级口令 / 游客浏览）—— 登录成功直达主页面
+index.html     主页面（待审核榜 + 正式曲库 + 公告 + 两个折叠面板 + 页脚）
+vote.html      投稿    schedule.html 每周排期    suggest.html 版本建议
+admin.html     管理后台    register.html 管理员注册
+assets/css/app.css   全部样式（唯一设计源文件）
+assets/js/app.js     全部交互（导航 / 站内对话框 / 登录流程 / 上传完整性守卫）
+functions/api/schedule.js    排期接口（缺 012 迁移时优雅降级）
+functions/api/admin-login.js 管理员登录（示例口令被拒时给出修复 SQL）
+start-preview.cmd   本地预览：双击启动本地服务器并打开浏览器
+```
+
+- 页脚显示 `版本 3.2.0`；页面与脚本版本不一致时页面顶部会给出提示（防"只传了一半"）。
+- 全站零浏览器原生弹窗（alert/confirm/prompt 均已替换为站内对话框）。
+- 本地预览方式与测试口令见交付包 `D:\zfff\UI重写\README.md`。
+
+---
+
 > 构建标识（用于核对"线上跑的到底是哪一包"）：
 > `2026-10-07-1.0.0`　｜　`functions/api/music.js` 的构建号
 > `2026-10-06-a+playable-check` → `2026-10-07-b+gdstudio-org` → `2026-10-07-c+gd-first` → **`2026-10-07-d+migu-first`**（打开 `/api/music?probe=1` 即可看到）。

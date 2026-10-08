@@ -481,7 +481,7 @@ async function handleRequest(req, res) {
     if (/\.(png|jpg|jpeg|gif|webp|svg|ico|woff2)$/i.test(file)) {
       headers['Cache-Control'] = 'public, max-age=604800'; // 媒体资源安全保留一周
     } else {
-      headers['Cache-Control'] = 'no-cache, must-revalidate';
+      headers['Cache-Control'] = 'no-store';   // 本地预览：永远不缓存，避免"改了没生效"的假象
     }
   }
   res.writeHead(200, headers);
