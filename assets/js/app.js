@@ -1,6 +1,20 @@
 /* New Vote2 client: a small, dependency-free UI layer over the existing API. */
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+
+/* 版本一致性守卫：页面 HTML 与 app.js 必须同批次上传。
+   只传一半（比如新页面配旧脚本、或反之）时，页面会"点了没反应"——
+   这里直接把它变成一条看得懂的提示。 */
+const APP_VER = '3.2.0';
+{
+  const pageVer = document.body && document.body.dataset ? document.body.dataset.appVer : '';
+  if (pageVer && pageVer !== APP_VER) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:999;padding:10px 16px;background:#B45309;color:#fff;font:13px/1.5 -apple-system,"Microsoft YaHei",sans-serif;text-align:center;';
+    bar.textContent = '页面与脚本版本不一致（页面 ' + pageVer + ' / 脚本 ' + APP_VER + '）：本站是分文件部署的，请把交付包里的全部文件一起上传；本地预览请 Ctrl+F5 强制刷新。';
+    (document.body || document.documentElement).appendChild(bar);
+  }
+}
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api = async (url, options={}) => { const {quiet401=false,...init}=options; let r; try{ r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(init.headers||{})},...init}); }catch(err){ throw new Error('连不上后台服务——若你是"直接双击打开页面"预览的，请改用 server.mjs 启动本地服务器（见交付说明）'); } let d={}; try{d=await r.json();}catch{} if(r.status===401){if(!quiet401&&!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/login.html';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）')); return d; };
 const toast = (text) => { const n=document.createElement('div'); n.className='toast'; n.textContent=text; document.body.append(n); setTimeout(()=>n.remove(),2600); };
@@ -63,7 +77,17 @@ async function bootGate(){
 async function session(){ try{return await api('/api/me',{quiet401:true});}catch{return null;} }
 function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote.html','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule.html','本周排期');const suggest=link('/suggest.html','版本建议');const sets={home:[submit,sched,suggest],vote:[home,sched,suggest],schedule:[submit,home,suggest],suggest:[submit,sched,home],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');return `<header class="topbar"><a class="brand" href="/"><img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标"><div><strong>盐中之声</strong><small>Radio Light</small></div></a><div class="actions"><nav class="nav-links">${links}</nav><button class="btn quiet" data-logout>退出</button></div></header>`;}
 async function home(){
-  const root=$('#app');const me=await session();if(!me){location.replace('/landing.html');return;}root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;$('#identity').textContent=me.className||'已登录';if(me.isGuest){$('#guest').hidden=false;}
+  const root=$('#app');const me=await session();
+  if(!me){
+    // 未登录：送去发布页；若站点是"分文件没传全"的状态（缺 landing/login），
+    // 也要给出看得懂的提示，而不是白屏或点了没反应。
+    const exists=async(u)=>{try{const r=await fetch(u,{method:'HEAD'});return r.ok;}catch{return false;}};
+    if(await exists('/landing.html')){location.replace('/landing.html');return;}
+    if(await exists('/login.html')){location.replace('/login.html');return;}
+    document.body.innerHTML='<div class="shell"><div class="gate" style="margin:48px auto;max-width:520px"><h1>站点部署不完整</h1><p>缺少 landing.html / login.html：本次是"发布页 + 登录页"新结构，请把交付包里的<strong>全部</strong>文件一起上传（共 8 个 html + assets/css/app.css + assets/js/app.js）。</p></div></div>';
+    return;
+  }
+  root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;$('#identity').textContent=me.className||'已登录';if(me.isGuest){$('#guest').hidden=false;}
   const cfg=await api('/api/config').catch(()=>({}));if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
   const ads=await api('/api/announcements').catch(()=>({announcements:[],popups:[]}));const adList=ads.announcements||[];$('#announcements').innerHTML=adList.length?('<div class="section-title"><h2>广播站公告</h2></div>'+adList.map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('')):'';for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await loadRanks();reveal($$('.panel,.hero,.announcement'));
 }

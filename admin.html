@@ -6,7 +6,7 @@
   <title>后台 · 盐中之声</title>
   <link rel="icon" href="/assets/ico.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/css/app.css">
 </head>
-<body>
+<body data-app-ver="3.2.0">
   <div class="shell">
     <div id="nav"></div>
     <main class="form-wrap" id="adminScreen">
@@ -20,7 +20,6 @@
           <div class="field"><label for="adminPassword">密码</label><input id="adminPassword" class="input" type="password" placeholder="输入管理员密码" autocomplete="current-password"></div>
           <div class="form-actions"><button class="btn primary" type="submit">登录后台</button><a class="btn" href="/register.html">注册</a></div>
           <p id="adminMessage" class="message"></p>
-        <p class="muted">首次使用管理员账号？示例口令已被拒绝登录；请先按报错提示在数据库设置自己的口令（报错里有一行可直接执行的 SQL）。连续尝试会触发 15 分钟限流，稍后再试即可。</p>
         </form>
       </section>
     </main>
