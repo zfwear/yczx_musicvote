@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly remote update check for yczx music vote
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=yczx-musicvote-sync.service
+
+[Install]
+WantedBy=timers.target
