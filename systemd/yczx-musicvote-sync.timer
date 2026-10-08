@@ -3,7 +3,7 @@ Description=Hourly remote update check for yczx music vote
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=1h
+OnUnitActiveSec=5min
 Persistent=true
 Unit=yczx-musicvote-sync.service
 
