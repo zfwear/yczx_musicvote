@@ -510,6 +510,19 @@ button.song > span:last-child { flex: 0 0 auto; font-size: 13px; color: var(--se
 .gate .announcement-stack { margin-top: 16px; }
 .gate .announcement { padding: 12px 14px; }
 
+/* ---------- 发布页（landing） ---------- */
+.landing { display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
+.landing-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0 8px; }
+.landing-top .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.landing-hero { flex: 1 1 auto; display: flex; flex-direction: column; padding: 16px 0 0; }
+.hero-center { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px 0; }
+.hero-center h1 { max-width: 760px; font-size: clamp(27px, 5.2vw, 52px); letter-spacing: -.02em; margin: 0 0 12px; text-wrap: balance; }
+.hero-center > p { max-width: 520px; color: var(--secondary); font-size: 15px; }
+/* 「进入」：右下角，但在页脚那一片之上（与底部分隔出明显留白） */
+.landing-cta { display: flex; justify-content: flex-end; padding: 8px 0 64px; }
+.enter-btn { height: 52px; padding: 0 26px; font-size: 16px; border-radius: 12px; }
+.landing-footer { padding-top: 24px; }
+
 /* ---------- 弹窗（克制毛玻璃） ---------- */
 dialog.glass-dialog,
 dialog.rl-confirm {
@@ -665,6 +678,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .topbar .actions .btn { height: 38px; padding: 0 14px; font-size: 13px; }
   .topbar .actions .btn.quiet { padding: 0 10px; }
   .admin-nav button { min-width: 88px; }
+  .landing-top { padding: 14px 0 4px; }
+  .landing-top .muted { display: none; }
+  .hero-center { padding: 24px 0; }
+  .hero-center > p { font-size: 14px; }
+  .landing-cta { padding: 4px 0 48px; }
+  .enter-btn { height: 48px; padding: 0 22px; font-size: 15px; }
   .verification-note { bottom: 14px; font-size: 12px; }
   .track-dialog { max-height: 86vh; }
   .track-dialog-head { padding: 15px 16px 12px; }

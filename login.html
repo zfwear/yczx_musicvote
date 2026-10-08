@@ -3,36 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>版本建议 · 盐中之声</title>
+  <title>登录 · 盐中之声</title>
   <link rel="icon" href="/assets/ico.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="shell">
-    <div id="nav"></div>
-    <main class="form-wrap wide">
-      <div class="page-head">
-        <div>
-          <p class="kicker">BETTER VERSION</p>
-          <h1>为歌曲提出版本建议</h1>
-          <p class="muted">试听榜单中的已选版本后，告诉广播站哪一首需要更换或修正。</p>
-        </div>
-        <a class="btn" href="/">返回首页</a>
+    <section id="gateView" class="gate-wrap" hidden>
+      <div class="gate">
+        <img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标">
+        <p class="kicker">YANCHENG RADIO / 02</p>
+        <h1>让下一首旋律，由你决定。</h1>
+        <p>北校区广播站点歌系统，输入班级口令开始探索。</p>
+        <form id="gateForm">
+          <div class="field">
+            <label for="gatePassword">班级口令</label>
+            <input id="gatePassword" class="input" type="password" placeholder="请输入口令" autocomplete="current-password">
+          </div>
+          <div class="form-actions">
+            <button class="btn primary" type="submit">进入</button>
+            <button class="btn" type="button" id="guestLogin">游客浏览</button>
+          </div>
+          <p id="gateMessage" class="message"></p>
+        </form>
+        <div id="gateAnnouncements" class="announcement-stack"></div>
       </div>
-      <section class="form-card">
-        <form id="suggestSearch">
-          <div class="field"><label for="suggestQuery">搜索榜单歌曲</label><input class="input" id="suggestQuery" placeholder="歌曲名或歌手"></div>
-          <button class="btn" type="submit">搜索</button>
-        </form>
-        <div id="suggestResults" class="list"></div>
-        <form id="suggestForm">
-          <p id="suggestPicked" class="notice">请先从榜单选择歌曲</p>
-          <div class="field"><label for="suggestContent">建议内容</label><textarea class="input" id="suggestContent" maxlength="120" required placeholder="例如：当前版本不是原唱，希望改为……"></textarea></div>
-          <button class="btn primary" type="submit">提交建议</button>
-          <p id="suggestMessage" class="message"></p>
-        </form>
-      </section>
-    </main>
+    </section>
+
     <footer id="beianFooter" class="footer">
       <div class="beian-row">
         <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026011040号</a>

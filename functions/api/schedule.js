@@ -143,7 +143,24 @@ export async function onRequestGet(context) {
       weeklies: out,
     });
   } catch (err) {
-    if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+    // 老库没跑 012 迁移时**不要整页报错**：照常返回空的三周，
+    // 页面能打开（显示"待排歌曲"），再附 needsMigration 让前端提示管理员。
+    if (isMissingTable(err)) {
+      const out = [];
+      for (let i = 0; i < weeks; i++) {
+        const ws = addWeeks(start, i);
+        out.push({ weekStart: ws, weekEnd: addDays(ws, 4), slots: [] });
+      }
+      return json({
+        weekStart: start,
+        weeks,
+        perWeek: PER_WEEK * PERIODS.length,
+        periods: PERIODS,
+        weeklies: out,
+        needsMigration: true,
+        hint: MIGRATION_HINT,
+      });
+    }
     throw err;
   }
 }
