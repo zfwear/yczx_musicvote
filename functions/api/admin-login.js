@@ -57,7 +57,9 @@ export async function onRequestPost(context) {
   if (isSeedAdminPassword(password.value) && !allowSeedCredentials(env)) {
     return error(
       '这是公开仓库里的示例口令，任何人都知道，已被拒绝登录。'
-      + '请先按 README 的「部署后必做」设置你自己的管理员密码（一条 SQL 即可），然后再登录。',
+      + '请在 Cloudflare D1 控制台执行一条 SQL 设置你自己的口令：'
+      + "UPDATE admins SET password = '你的新口令' WHERE username = 'admin';"
+      + ' 然后回到这里用新口令登录（首次登录后会自动加密存储）。',
       403
     );
   }
