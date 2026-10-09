@@ -80,13 +80,7 @@ function nav(name){const guest=document.body.classList.contains('guest-mode');co
 async function home(){
   const root=$('#app');const me=await session();
   if(!me){
-    // 未登录：送去发布页；若站点是"分文件没传全"的状态（缺 landing/login），
-    // 也要给出看得懂的提示，而不是白屏或点了没反应。
-    const exists=async(u)=>{try{const r=await fetch(u,{method:'HEAD'});return r.ok;}catch{return false;}};
-    if(await exists('/landing.html')){location.replace('/landing.html');return;}
-    if(await exists('/login.html')){location.replace('/login.html');return;}
-    document.body.innerHTML='<div class="shell"><div class="gate" style="margin:48px auto;max-width:520px"><h1>站点部署不完整</h1><p>缺少 landing.html / login.html：本次是"发布页 + 登录页"新结构，请把交付包里的<strong>全部</strong>文件一起上传（共 8 个 html + assets/css/app.css + assets/js/app.js）。</p></div></div>';
-    return;
+    location.replace('/landing.html');return;
   }
   root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;$('#identity').textContent=me.className||'已登录';if(me.isGuest){$('#guest').hidden=false;}
   const cfg=await api('/api/config').catch(()=>({}));if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
