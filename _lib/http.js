@@ -20,9 +20,15 @@ export function json(body, status = 200, extraHeaders = {}) {
   });
 }
 
-/** 统一的错误响应。 */
+/**
+ * 统一的错误响应。
+ *
+ * 同一个错误给三个字段（2026-10-09 补）：`error` 是本项目前端一直在读的老字段，
+ * 保持不动；`code` 与 `message` 是对外的标准形状（{"code":400,"message":"…"}），
+ * 供第三方/测试脚本按通用约定解析 —— 多给字段不影响老读者，少给才会砸到人。
+ */
 export function error(message, status = 400, extraHeaders = {}) {
-  return json({ error: message }, status, extraHeaders);
+  return json({ error: message, code: status, message }, status, extraHeaders);
 }
 
 /**

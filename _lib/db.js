@@ -28,7 +28,15 @@ export function isMissingTable(err) {
   return /no such table/i.test(String((err && err.message) || ''));
 }
 
-/** 判断错误是否为"列不存在"（迁移只跑了一半）。 */
+/**
+ * 判断错误是否为"列不存在"（迁移只跑了一半）。
+ *
+ * ⚠️ 两种实现的说法不同，正则必须同时认（2026-10-09 修）：
+ *   · Cloudflare D1：   no such column: custom_title
+ *   · 本机 node:sqlite：table weekly_playlist has no column named custom_title
+ * 只认前一种时，**本机 server.mjs 上的降级会静默失效** ——
+ * "014 还没执行"的部署不会退回老 SQL，而是直接 500。
+ */
 export function isMissingColumn(err) {
-  return /no such column/i.test(String((err && err.message) || ''));
+  return /no such column|has no column named/i.test(String((err && err.message) || ''));
 }

@@ -721,3 +721,101 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .schedule-grid { gap: 20px; }
   .list { gap: 14px; }
 }
+
+
+/* ---------- 移动端抽屉导航（≤768px） ---------- */
+/* 桌面端：三个新元素全部隐藏，画面与之前一字不差。 */
+.nav-burger { display: none; }
+.nav-drawer-close { display: none; }
+.nav-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  /* 注意：抽屉与遮罩是 position:fixed，而 .topbar 原本带 backdrop-filter ——
+     那会让 fixed 子元素以**顶栏**为参照系（只能盖住顶栏那一条），抽屉会错位。
+     所以移动端把毛玻璃挪到 ::before 伪元素上：顶栏自身不再有 filter，
+     fixed 重新以视口为参照；模糊效果照旧（伪元素覆盖同样的区域）。 */
+  .topbar {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    flex-wrap: nowrap;
+    gap: 10px;
+    justify-content: flex-start;
+  }
+  .topbar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    backdrop-filter: blur(14px) saturate(1.5);
+  }
+  .brand { margin-right: auto; }
+
+  .nav-burger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    background: var(--chip);
+    border: 0;
+    border-radius: var(--radius-btn);
+    color: var(--body);
+    box-shadow: var(--chip-shadow);
+    cursor: pointer;
+  }
+  .nav-burger:hover { color: var(--title); }
+  .nav-burger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  /* .actions 整块变成抽屉：导航链接 + 退出都收在里面 */
+  .topbar .actions {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 80;
+    width: min(80vw, 320px);
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 20px 16px;
+    background: var(--card);
+    border-right: 1px solid var(--line);
+    box-shadow: var(--shadow-pop);
+    overflow-y: auto;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform .3s ease, visibility .3s;
+  }
+  body.nav-open .topbar .actions { transform: translateX(0); visibility: visible; }
+  .topbar .actions .btn { justify-content: flex-start; width: 100%; height: 44px; padding: 0 16px; text-align: left; }
+  .topbar .nav-links { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .topbar .actions .nav-drawer-close { display: inline-flex; color: var(--secondary); }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: var(--backdrop);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s ease;
+  }
+  body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
+  body.nav-open { overflow: hidden; }
+}
+
+/* ---------- 发布页页脚贴底 ---------- */
+/* 媒体查询里的 .shell{padding: … 56px/64px} 会覆盖 .landing 的 padding-bottom:0
+   （同优先级、后写者赢），页脚因此被内边距顶着，电脑端悬在页面中间。
+   两个类一起写提高优先级，页脚落到页面真正的最底端。 */
+.shell.landing { padding-bottom: 0; }
+#beianFooter .recaptcha-disclosure { margin-top: 10px; }

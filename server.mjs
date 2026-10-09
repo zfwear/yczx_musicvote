@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createSqliteD1 } from './_lib/sqlite-driver.js';
+import { resolveRootPage } from './_lib/rootpage.js';
 
 /**
  * Pages Functions 的中间件：域名白名单。
@@ -432,6 +433,19 @@ async function handleRequest(req, res) {
   if (mw !== NEXT) {
     await sendResponse(res, mw, url.pathname);
     return;
+  }
+
+  // ---- 0.5) 根路径分发：与 Cloudflare 上中间件包的那层 next 是**同一个判定** ----
+  // 已登录（学生侧会话有效）→ index.html；未登录 → landing.html。
+  // 判定来自 _lib/rootpage.js（两个入口共用一份，结论必然一致）。
+  // 这里改写 url.pathname 而不是直接读文件：让下面第 2 步的静态服务
+  // （含 _headers 安全头、缓存头、流式读取）原样接管，不复制第二份。
+  if ((url.pathname === '/' || url.pathname === '/index.html')
+      && req.method === 'GET'
+      && String(req.headers.accept || '').includes('text/html')) {
+    let page = 'landing';
+    try { page = await resolveRootPage(env, request); } catch { /* 判不出来就给发布页 */ }
+    url.pathname = page === 'app' ? '/index.html' : '/landing.html';
   }
 
   // ---- 1) /api/* → 交付处理器原样调用 ----

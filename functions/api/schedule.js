@@ -1,7 +1,7 @@
 import { readJson, error, json } from '../../_lib/http.js';
 import { requireSession, requireStaff, isGuestSession, readSession } from '../../_lib/auth.js';
-import { parsePositiveInt, parseEnum } from '../../_lib/validate.js';
-import { changedRows, isMissingTable } from '../../_lib/db.js';
+import { parsePositiveInt, parseEnum, sanitizeText } from '../../_lib/validate.js';
+import { changedRows, isMissingTable, isMissingColumn } from '../../_lib/db.js';
 
 /**
  * 每周歌单。
@@ -40,6 +40,36 @@ const MIGRATION_HINT =
   + '请先在 D1 控制台执行 sql/012_weekly_schedule.sql';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 往某个位置写入"曲库歌或待排"（songId 为数字=曲库歌，null=待排）。
+ *
+ * 014 之后写入时顺手把 custom_* 清成 NULL：不清理的话，
+ * "先手动录入 → 又排了曲库歌 → 再把曲库歌移除"这一串操作会让
+ * 早就被覆盖掉的旧手动条目凭空复活。014 还没执行的部署没有这些列，
+ * 整条 SQL 会报 no such column —— 退回不带 custom_* 的老写法。
+ */
+async function upsertLibrarySong(env, weekStart, period, position, songId) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO weekly_playlist (week_start, period, position, song_id,
+                                    custom_title, custom_artist, custom_source, updated_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, NULL, datetime('now'))
+       ON CONFLICT(week_start, period, position)
+       DO UPDATE SET song_id = excluded.song_id,
+                     custom_title = NULL, custom_artist = NULL, custom_source = NULL,
+                     updated_at = datetime('now')`
+    ).bind(weekStart, period, position, songId).run();
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err;
+    await env.DB.prepare(
+      `INSERT INTO weekly_playlist (week_start, period, position, song_id, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(week_start, period, position)
+       DO UPDATE SET song_id = excluded.song_id, updated_at = datetime('now')`
+    ).bind(weekStart, period, position, songId).run();
+  }
+}
 
 function parseDate(raw, field = '日期') {
   const value = String(raw == null ? '' : raw).trim();
@@ -103,26 +133,65 @@ export async function onRequestGet(context) {
   const start = mondayOf(from.value);
   const end = addWeeks(start, weeks);      // 不含
 
+  // 014 是否已执行：决定返回体里 customSupported（前端据此显示/隐藏手动录入表单）
+  let customSupported = true;
+
   try {
-    const { results } = await env.DB.prepare(
-      `SELECT w.week_start, w.period, w.position,
-              CAST(w.song_id AS INTEGER) AS song_id,
-              s.title, s.artist, s.track_id,
-              c.name AS category_name
-         FROM weekly_playlist w
-         LEFT JOIN songs s      ON s.id = w.song_id
-         LEFT JOIN categories c ON s.category_id = c.id
-        WHERE w.week_start >= ? AND w.week_start < ?
-        ORDER BY w.week_start ASC,
-                 CASE w.period WHEN 'noon' THEN 0 ELSE 1 END,
-                 w.position ASC`
-    ).bind(start, end).all();
+    let rows;
+    try {
+      ({ results: rows } = await env.DB.prepare(
+        `SELECT w.week_start, w.period, w.position,
+                CAST(w.song_id AS INTEGER) AS song_id,
+                s.title, s.artist, s.track_id,
+                w.custom_title, w.custom_artist, w.custom_source,
+                c.name AS category_name
+           FROM weekly_playlist w
+           LEFT JOIN songs s      ON s.id = w.song_id
+           LEFT JOIN categories c ON s.category_id = c.id
+          WHERE w.week_start >= ? AND w.week_start < ?
+          ORDER BY w.week_start ASC,
+                   CASE w.period WHEN 'noon' THEN 0 ELSE 1 END,
+                   w.position ASC`
+      ).bind(start, end).all());
+    } catch (err) {
+      // 014 还没执行（weekly_playlist 没有 custom_* 列）：退回老查询。
+      // 手动录入功能随之不可用（POST set_custom 会给出同样的提示），
+      // 但既有排期的读取完全不受影响 —— 迁移进度不同的部署都照常工作。
+      if (!isMissingColumn(err)) throw err;
+      ({ results: rows } = await env.DB.prepare(
+        `SELECT w.week_start, w.period, w.position,
+                CAST(w.song_id AS INTEGER) AS song_id,
+                s.title, s.artist, s.track_id,
+                c.name AS category_name
+           FROM weekly_playlist w
+           LEFT JOIN songs s      ON s.id = w.song_id
+           LEFT JOIN categories c ON s.category_id = c.id
+          WHERE w.week_start >= ? AND w.week_start < ?
+          ORDER BY w.week_start ASC,
+                   CASE w.period WHEN 'noon' THEN 0 ELSE 1 END,
+                   w.position ASC`
+      ).bind(start, end).all());
+      customSupported = false;
+    }
+
+    // 曲库歌与手动录入的外部歌在这里合成同一种形状：
+    // 标题/歌手取"曲库优先，其次手动录入"；外部条目带 is_custom 与来源备注。
+    const flatten = (row) => {
+      const isCustom = !row.song_id && !!row.custom_title;
+      return {
+        ...row,
+        title: row.title || row.custom_title || '',
+        artist: row.artist || row.custom_artist || '',
+        is_custom: isCustom,
+        source: row.custom_source || '',
+      };
+    };
 
     // 把行按周组织好，并把"没有歌"的周也补出来，前端好渲染
     const byWeek = new Map();
-    for (const row of results || []) {
+    for (const row of rows || []) {
       if (!byWeek.has(row.week_start)) byWeek.set(row.week_start, []);
-      byWeek.get(row.week_start).push(row);
+      byWeek.get(row.week_start).push(flatten(row));
     }
 
     const out = [];
@@ -140,6 +209,7 @@ export async function onRequestGet(context) {
       weeks,
       perWeek: PER_WEEK * PERIODS.length,
       periods: PERIODS,
+      customSupported,
       weeklies: out,
     });
   } catch (err) {
@@ -156,6 +226,7 @@ export async function onRequestGet(context) {
         weeks,
         perWeek: PER_WEEK * PERIODS.length,
         periods: PERIODS,
+        customSupported: false,
         weeklies: out,
         needsMigration: true,
         hint: MIGRATION_HINT,
@@ -189,6 +260,7 @@ export async function onRequestPost(context) {
     if (data.action === 'autofill') return await autofill(env, data);
     if (data.action === 'add_song') return await addSong(env, data);
     if (data.action === 'set_slot') return await setSlot(env, data);
+    if (data.action === 'set_custom') return await setCustom(env, data);
     if (data.action === 'clear_slot') return await clearSlot(env, data);
     if (data.action === 'clear_week') return await clearWeek(env, data);
     return error('未知操作', 400);
@@ -196,6 +268,69 @@ export async function onRequestPost(context) {
     if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
     throw err;
   }
+}
+
+/**
+ * 手动录入一首**不在曲库里**的外部歌曲（临时排期、比赛录音、老师指定曲目…）。
+ *
+ * 与 set_slot 的分工：set_slot 排的是曲库里已有的歌（song_id 必填）；
+ * 这里反过来 —— song_id 一律不写，标题必须来自请求体。两套入口不会互相污染：
+ * 手动录入的歌**永远不会**出现在榜单、投票或审核列表里，它只活在排期表上。
+ */
+async function setCustom(env, data) {
+  const date = parseDate(data.week_start || data.date, '周起始日');
+  if (!date.ok) return error(date.error, 400);
+  const weekStart = mondayOf(date.value);
+
+  const period = parseEnum(data.period, PERIODS, { field: '时段' });
+  if (!period.ok) return error(period.error, 400);
+
+  const position = parsePositiveInt(data.position, { field: '位置', max: PER_WEEK });
+  if (!position.ok) return error(position.error, 400);
+
+  const title = sanitizeText(data.title, { maxLength: 80, field: '歌曲名' });
+  if (!title.ok) return error(title.error, 400);
+  if (!title.value) return error('请填写歌曲名', 400);
+
+  // 歌手与来源是**选填**：空串直接通过，只有真的给了内容才做收敛校验
+  //（sanitizeText 对空输入会报"不能为空"，不适合直接用在可选字段上）。
+  const optional = (raw, field) => {
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    return text ? sanitizeText(text, { maxLength: 60, field }) : { ok: true, value: '' };
+  };
+  const artist = optional(data.artist, '歌手');
+  if (!artist.ok) return error(artist.error, 400);
+
+  const source = optional(data.source, '来源备注');
+  if (!source.ok) return error(source.error, 400);
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO weekly_playlist (week_start, period, position, song_id,
+                                    custom_title, custom_artist, custom_source, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, datetime('now'))
+       ON CONFLICT(week_start, period, position)
+       DO UPDATE SET song_id = NULL,
+                     custom_title = excluded.custom_title,
+                     custom_artist = excluded.custom_artist,
+                     custom_source = excluded.custom_source,
+                     updated_at = datetime('now')`
+    ).bind(weekStart, period.value, position.value, title.value, artist.value, source.value).run();
+  } catch (err) {
+    if (isMissingColumn(err)) {
+      return error('数据库尚未执行 014 迁移（weekly_playlist 缺少 custom_* 列），'
+        + '请先在 D1 控制台执行 sql/014_weekly_custom.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    week_start: weekStart,
+    period: period.value,
+    position: position.value,
+    message: `已把《${title.value}》手动排入 ${weekStart} 的${PERIOD_LABELS[period.value]}第 ${position.value} 首。`,
+  });
 }
 
 /**
@@ -307,12 +442,7 @@ async function autofill(env, data) {
         if (picked) filled += 1;
         else empty += 1;
 
-        await env.DB.prepare(
-          `INSERT INTO weekly_playlist (week_start, period, position, song_id, updated_at)
-           VALUES (?, ?, ?, ?, datetime('now'))
-           ON CONFLICT(week_start, period, position)
-           DO UPDATE SET song_id = excluded.song_id, updated_at = datetime('now')`
-        ).bind(weekStart, period, pos, picked ? picked.id : null).run();
+        await upsertLibrarySong(env, weekStart, period, pos, picked ? picked.id : null);
       }
     }
   }
@@ -437,12 +567,7 @@ async function addSong(env, data) {
       continue;
     }
 
-    await env.DB.prepare(
-      `INSERT INTO weekly_playlist (week_start, period, position, song_id, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(week_start, period, position)
-       DO UPDATE SET song_id = excluded.song_id, updated_at = datetime('now')`
-    ).bind(weekStart, period, position, songId.value).run();
+    await upsertLibrarySong(env, weekStart, period, position, songId.value);
 
     const title = String(song.title || '').trim();
     return json({
@@ -489,12 +614,7 @@ async function setSlot(env, data) {
   ).bind(songId.value).first();
   if (!song) return error('只能排已通过审核的歌', 400);
 
-  await env.DB.prepare(
-    `INSERT INTO weekly_playlist (week_start, period, position, song_id, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(week_start, period, position)
-     DO UPDATE SET song_id = excluded.song_id, updated_at = datetime('now')`
-  ).bind(weekStart, period.value, position.value, songId.value).run();
+  await upsertLibrarySong(env, weekStart, period.value, position.value, songId.value);
 
   return json({ ok: true, message: '已排入该位置' });
 }
@@ -509,9 +629,20 @@ async function clearSlot(env, data) {
   const position = parsePositiveInt(data.position, { field: '位置', max: PER_WEEK });
   if (!position.ok) return error(position.error, 400);
 
-  const result = await env.DB.prepare(
-    "UPDATE weekly_playlist SET song_id = NULL, updated_at = datetime('now') WHERE week_start = ? AND period = ? AND position = ?"
-  ).bind(mondayOf(date.value), period.value, position.value).run();
+  // 清空 = 回到「待排」。custom_* 一并清掉：否则先手动录入、再清空，
+  // 那条旧的手动条目会从"已清空"的位置里原样冒回来。
+  // 014 之前没有这些列：退回只清 song_id 的老写法。
+  let result;
+  try {
+    result = await env.DB.prepare(
+      "UPDATE weekly_playlist SET song_id = NULL, custom_title = NULL, custom_artist = NULL, custom_source = NULL, updated_at = datetime('now') WHERE week_start = ? AND period = ? AND position = ?"
+    ).bind(mondayOf(date.value), period.value, position.value).run();
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err;
+    result = await env.DB.prepare(
+      "UPDATE weekly_playlist SET song_id = NULL, updated_at = datetime('now') WHERE week_start = ? AND period = ? AND position = ?"
+    ).bind(mondayOf(date.value), period.value, position.value).run();
+  }
 
   if (changedRows(result) === 0) return error('这个位置还不存在', 404);
   return json({ ok: true, message: '已清空该位置' });

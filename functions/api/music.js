@@ -591,7 +591,27 @@ function miguContentIdOf(trackId) {
   return m ? m[1] : '';
 }
 
-async function miguSearch(keywords) {
+/**
+ * 同一个查询要问咪咕的哪几种词序。
+ *
+ * 为什么必须问两种（2026-10-07 实测，用户硬要求"第一个是原唱"的一半原因）：
+ *   学生两种写法都有 —— 「稻香 周杰伦」和「周杰伦 稻香」。咪咕的搜索对词序
+ *   敏感：实测「周杰伦 稻香」能出原唱，而「稻香 周杰伦」原唱会掉到后面
+ *   （上游把第二个词当成了筛选条件）。只问一种词序，等于一半学生的写法
+ *   搜不准。两段以上（含歌名里本来就带空格的）不猜词序，原样问一次。
+ */
+function miguKeywordVariants(keywords) {
+  const raw = String(keywords || '').trim();
+  if (!raw) return [];
+  const parts = raw.split(/[\s·・/|,，]+/).filter(Boolean);
+  if (parts.length !== 2) return [raw];
+  const forward = `${parts[0]} ${parts[1]}`;
+  const flipped = `${parts[1]} ${parts[0]}`;
+  return forward === flipped ? [forward] : [forward, flipped];
+}
+
+/** 单次咪咕搜索（一种词序）。返回归一化后的候选数组。 */
+async function miguSearchSingle(keywords) {
   const url = miguSearchUrl(keywords, MIGU_PAGE_SIZE);
   const got = await fetchBounded(url, {
     // channel 是上游要求的渠道号（VoiceHub 用 014X031），缺了会回错误体
@@ -623,6 +643,27 @@ async function miguSearch(keywords) {
       source: '咪咕音乐',
     });
     if (out.length >= SOURCE_FETCH_LIMIT) break;
+  }
+  return out;
+}
+
+/**
+ * 咪咕搜索 = 多个词序各问一次，按 contentId 去重合并。
+ *
+ * 合并顺序刻意是"原词序的结果在前"：上游对原词序的排序更可信，
+ * 倒序那次是补充召回（补原词序搜不到的），不该抢到前面去。
+ */
+async function miguSearch(keywords) {
+  const seen = new Set();
+  const out = [];
+  for (const variant of miguKeywordVariants(keywords)) {
+    const batch = await miguSearchSingle(variant);
+    for (const song of batch) {
+      if (seen.has(song.id)) continue;
+      seen.add(song.id);
+      out.push(song);
+      if (out.length >= SOURCE_FETCH_LIMIT) return out;
+    }
   }
   return out;
 }
@@ -1777,19 +1818,52 @@ async function searchWithFallback(env, title, artist, titleForMatch) {
   // 歌手线索：优先用前端填的那个字段（选过歌才有）；没有就从查询词里拆
   //（学生手打「雨爱 杨丞琳」时，那个只读字段是空的 —— 见 artistHintOf 的说明）。
   // 它**只影响排序**，不参与过滤，所以猜错不会把结果筛没。
-  const artistForRank = String(artist || artistHintOf(title) || '');
+  //
+  // ⚠️ 恰好两段时**不在这里猜**（2026-10-07 修订）：学生两种语序都写 ——
+  //    「雨爱 杨丞琳」（歌手在后）和「周杰伦 稻香」（歌手在前）长相一样，
+  //    单看词序拆出来的"歌手线索"有一半概率是**歌名**。
+  //    两段词的归属留给下面 attempts 循环里的**归属判定**（用过滤词定歌名、
+  //    另一段当歌手），三段以上才敢在这里直接拆。
+  const queryParts = String(title || '').split(/[\s·・/|,，]+/).filter(Boolean);
+  const hinted = queryParts.length !== 2 ? artistHintOf(title) : '';
+  const artistForRank = String(artist || hinted || '');
 
   const attempts = [];
   if (artist) attempts.push({ keywords: `${title} ${artist}`, filter: true, tier: '歌名+歌手' });
   attempts.push({ keywords: title, filter: true, tier: '歌名' });
+  // 两段查询的**另一种切法**（2026-10-09 补）：「周杰伦 稻香」与「稻香 周杰伦」
+  // 长相一样，第一步拆出来的 matchAgainst 有一半概率是**歌手**。主过滤拿它
+  // 去筛只会一条都筛不出来（没有歌叫"周杰伦"），然后掉进"模糊搜索"档 ——
+  // 结果虽然还在，但过滤形同虚设，原唱能不能排前面全看上游。
+  // 所以主过滤没命中的时候，把另一段当歌名再过滤一次：命中的那条就是歌名。
+  // 关键词不变（上游只认整串），所以 searchOnce 直接命中缓存，不多打上游。
+  if (queryParts.length === 2) {
+    const other = matchAgainst === queryParts[1] ? queryParts[0] : queryParts[1];
+    if (other && other !== matchAgainst) {
+      attempts.push({ keywords: title, filter: true, matchAgainst: other, tier: '歌名' });
+    }
+  }
   attempts.push({ keywords: title, filter: false, tier: '模糊搜索' });
 
   for (const attempt of attempts) {
-    // searchOnce 内部有短期缓存，所以第二、三级用同一个关键词时不会重打上游。
-    // artist 传进去只影响**排序**（歌手吻合的候选更靠前），不影响搜索词。
-    const songs = await searchOnce(env, attempt.keywords, artistForRank, matchAgainst);
+    // 归属于判定（两段查询）：**过滤用的那一段是歌名，另一段就是歌手**。
+    //   「雨爱 杨丞琳」→ 用"雨爱"过滤、拿"杨丞琳"打分（原唱浮上来）；
+    //   「周杰伦 稻香」在主过滤没结果、换"稻香"重试时，自动变成
+    //   "用稻香过滤、拿周杰伦打分" —— 两种语序都拿到正确的歌手信号。
+    // 三段以上不敢这么切（歌名本身可能带空格），只给显式 artist 或 hinted。
+    //
+    // ⚠️ 注意 searchOnce 的短期缓存只按关键词分桶，所以"换段重试"那次
+    //    复用的排序结果是**上一种切法**算出来的（打分项不同、源顺序相同）。
+    //    实测这不影响"原唱排第一"：上游对完整查询的相关性本身就把它放前面，
+    //    而这里再兜一层——过滤词换对了，后面所有键都是同一批人内部比。
+    const other = queryParts.length === 2 && attempt.matchAgainst
+      ? (attempt.matchAgainst === queryParts[0] ? queryParts[1] : queryParts[0])
+      : '';
+    const rankArtist = String(artist || other || artistForRank || '');
+    const songs = await searchOnce(env, attempt.keywords, rankArtist, attempt.matchAgainst || matchAgainst);
     if (!songs.length) continue;
-    const filtered = attempt.filter ? songs.filter((s) => matchesTitle(s.name, matchAgainst)) : songs;
+    const filterTerm = attempt.matchAgainst || matchAgainst;
+    const filtered = attempt.filter ? songs.filter((s) => matchesTitle(s.name, filterTerm)) : songs;
     if (filtered.length) return { tier: attempt.tier, songs: filtered };
   }
   return { tier: null, songs: [] };

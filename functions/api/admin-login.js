@@ -59,7 +59,8 @@ export async function onRequestPost(context) {
       '这是公开仓库里的示例口令，任何人都知道，已被拒绝登录。'
       + '请在 Cloudflare D1 控制台执行一条 SQL 设置你自己的口令：'
       + "UPDATE admins SET password = '你的新口令' WHERE username = 'admin';"
-      + ' 然后回到这里用新口令登录（首次登录后会自动加密存储）。',
+      + ' 然后回到这里用新口令登录（首次登录后会自动加密存储）。'
+      + '完整部署步骤见仓库 README 的「部署后必做」一节。',
       403
     );
   }

@@ -1,6 +1,7 @@
 import { error } from '../_lib/http.js';
 import { hmacHex } from '../_lib/crypto.js';
 import { DEFAULT_PEPPER } from '../_lib/auth.js';
+import { resolveRootPage } from '../_lib/rootpage.js';
 
 /**
  * 只允许通过**指定域名**访问（用户要求：其他途径断掉）。
@@ -201,7 +202,47 @@ function isNavigation(request) {
   return String(request.headers.get('accept') || '').includes('text/html');
 }
 
+/**
+ * 对外入口。
+ *
+ * 结构：hostGate 只负责"这个域名放不放行"，放行的方式是调用 next()。
+ * 这里把一个**包了一层**的 next 传进去 —— 命中根路径导航请求时，
+ * 先按会话把 `/` 分发成应用主页或发布页（见 _lib/rootpage.js），
+ * 没命中才落到平台默认的静态命中。
+ *
+ * 为什么做成包 next 而不是在 hostGate 里到处插：hostGate 有**七个**放行出口
+ * （本机、预览、白名单直配、转发头、签名标记、Host-OK Cookie、应急开关），
+ * 逐个插等于同一逻辑抄七遍，漏一个就是"有的入口有发布页、有的入口没有"。
+ * 包在 next 上，所有出口天然共用。
+ *
+ * env.ASSETS 只有 Cloudflare Pages 给；自建 server.mjs 没有这个绑定，
+ * 会走到 fallback（context.next()），由 server.mjs 自己的同一段逻辑分发 ——
+ * 判定模块是同一份（resolveRootPage），两边结论必然一致。
+ */
 export async function onRequest(context) {
+  const { request, env, next } = context;
+
+  const nextWithRootRouting = async () => {
+    let path = '';
+    try { path = new URL(request.url).pathname; } catch { /* 拿不到就按普通路径走 */ }
+    if ((path === '/' || path === '/index.html')
+        && request.method === 'GET'
+        && isNavigation(request)
+        && env && env.ASSETS) {
+      const page = await resolveRootPage(env, request);
+      try {
+        return await env.ASSETS.fetch(new URL(page === 'app' ? '/index.html' : '/landing.html', request.url));
+      } catch {
+        // ASSETS 意外不可用：退回默认静态命中，总比 500 好
+      }
+    }
+    return next();
+  };
+
+  return hostGate({ ...context, next: nextWithRootRouting });
+}
+
+async function hostGate(context) {
   const { request, env, next } = context;
 
   /**

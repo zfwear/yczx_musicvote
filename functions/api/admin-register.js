@@ -22,6 +22,24 @@ import { changedRows } from '../../_lib/db.js';
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_\u4e00-\u9fa5-]{2,24}$/;
 
+/**
+ * 密码强度：至少 8 位，且至少包含「字母 / 数字 / 符号」中的两类。
+ *
+ * 为什么在服务端再查一遍（前端也会查）：直接 curl 接口可以完全绕过前端，
+ * 前端校验只是体验，这一条才是真正的边界。规则刻意保持与前端提示一字不差，
+ * 免得出现"页面说能注册、服务端说不行"的错位。
+ */
+export function checkPasswordStrength(value) {
+  const pwd = String(value ?? '');
+  let kinds = 0;
+  if (/[A-Za-z]/.test(pwd)) kinds += 1;
+  if (/\d/.test(pwd)) kinds += 1;
+  if (/[^A-Za-z0-9]/.test(pwd)) kinds += 1;
+  if (pwd.length < 8) return { ok: false, error: '密码至少 8 位' };
+  if (kinds < 2) return { ok: false, error: '密码需包含字母、数字、符号中的至少两类' };
+  return { ok: true };
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -43,8 +61,16 @@ export async function onRequestPost(context) {
   }
 
    // vote2 is a local test instance; keep the documented 123456 test credential usable.
-   const password = parseSecret(data.password, { min: 6, max: 128, field: '密码' });
+   const password = parseSecret(data.password, { min: 8, max: 128, field: '密码' });
   if (!password.ok) return error(password.error, 400);
+  const strength = checkPasswordStrength(password.value);
+  if (!strength.ok) return error(strength.error, 400);
+
+  // 确认密码：页面表单永远带这一位；不一致直接拦在前面，别等人家注册完才发现打错了。
+  // 直接调 API 的旧调用方可以不带 —— 只有**带来了**才要求对得上。
+  if (data.password2 !== undefined && data.password2 !== null && String(data.password2) !== password.value) {
+    return error('两次输入的密码不一致', 400);
+  }
 
   const code = normalizeInviteCode(data.invite_code);
   if (!code) return error('请填写动态口令', 400);
