@@ -20,7 +20,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const api = async (url, options={}) => { const {quiet401=false,...init}=options; let r; try{ r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(init.headers||{})},...init}); }catch(err){ throw new Error('连不上后台服务——若你是"直接双击打开页面"预览的，请改用 server.mjs 启动本地服务器（见交付说明）'); } let d={}; try{d=await r.json();}catch{} if(r.status===401){if(!quiet401&&!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){/* 先把服务端会话与两种身份的 Cookie 一起清掉（logout 幂等，永远 200）——
    这一步就是"登出后再登录提示会话过期、只能手动清 Cookie"那类死锁的解药：
    回到登录页之前凭证已经被主动作废，不会留着一份过期的旧会话继续捣乱。 */
-    try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});}catch{}try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/login.html';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）')); return d; };
+    try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});}catch{}try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/login';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）')); return d; };
 const toast = (text) => { const n=document.createElement('div'); n.className='toast'; n.textContent=text; document.body.append(n); setTimeout(()=>n.remove(),2600); };
 /* 弹窗公告用的对话框：复用 app.css 的 .glass-dialog（zip 自己的样式）。
    用 <dialog> 而不是原生 alert —— 不阻塞渲染、手机上不会丑，而且能 await 成串行。 */
@@ -90,7 +90,7 @@ async function bootGate(){
   form.addEventListener('submit',async e=>{e.preventDefault(); const b=$('button[type=submit]',form); b.disabled=true; msg.textContent='正在验证…'; try{const recaptcha_token=await recaptchaToken('login');const d=await api('/api/login',{method:'POST',body:JSON.stringify({password:$('#gatePassword').value,recaptcha_token})}); sessionStorage.setItem('className',d.class_name||''); location.href='/';}catch(err){msg.textContent=err.message;}finally{b.disabled=false;}});
 }
 async function session(){ try{return await api('/api/me',{quiet401:true});}catch{return null;} }
-function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote.html','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule.html','本周排期');const suggest=link('/suggest.html','版本建议');const sets={home:[submit,sched,suggest],vote:[home,sched,suggest],schedule:[submit,home,suggest],suggest:[submit,sched,home],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');
+function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule','本周排期');const suggest=link('/suggest','版本建议');const sets={home:[submit,sched,suggest],vote:[home,sched,suggest],schedule:[submit,home,suggest],suggest:[submit,sched,home],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');
   /* 移动端（≤768px）：汉堡按钮 + 抽屉式侧边导航（.actions 整块变成抽屉，遮罩在其下）。
      桌面端这三个新元素全部 display:none，DOM 多了几项、画面一字不变。 */
   return `<header class="topbar"><button class="nav-burger" type="button" data-burger aria-label="打开导航" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button><a class="brand" href="/"><img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标"><div><strong>盐中之声</strong><small>Radio Light</small></div></a><div class="actions"><button class="btn quiet nav-drawer-close" type="button" data-nav-close aria-label="收起导航">关闭</button><nav class="nav-links">${links}</nav><button class="btn quiet" data-logout>退出</button></div><div class="nav-backdrop" data-nav-backdrop aria-hidden="true"></div></header>`;}
@@ -100,8 +100,8 @@ async function home(){
     // 未登录：送去发布页；若站点是"分文件没传全"的状态（缺 landing/login），
     // 也要给出看得懂的提示，而不是白屏或点了没反应。
     const exists=async(u)=>{try{const r=await fetch(u,{method:'HEAD'});return r.ok;}catch{return false;}};
-    if(await exists('/landing.html')){location.replace('/landing.html');return;}
-    if(await exists('/login.html')){location.replace('/login.html');return;}
+    if(await exists('/landing')){location.replace('/landing');return;}
+    if(await exists('/login')){location.replace('/login');return;}
     document.body.innerHTML='<div class="shell"><div class="gate" style="margin:48px auto;max-width:520px"><h1>站点部署不完整</h1><p>缺少 landing.html / login.html：本次是"发布页 + 登录页"新结构，请把交付包里的<strong>全部</strong>文件一起上传（共 8 个 html + assets/css/app.css + assets/js/app.js）。</p></div></div>';
     return;
   }
@@ -163,8 +163,8 @@ async function register(){const f=$('#registerForm'),m=$('#registerMessage');
     if(password!==password2){m.textContent='两次输入的密码不一致';return;}
     try{await api('/api/admin-register',{method:'POST',body:JSON.stringify({username,password,password2,invite_code:$('#invite').value})});
       m.textContent='注册成功，正在为你自动登录…';
-      try{await api('/api/admin-login',{method:'POST',body:JSON.stringify({username,password})});m.textContent='注册成功，已自动登录，正在进入后台…';setTimeout(()=>location.href='/admin.html',700);}
-      catch{toast('注册成功，请用新账号登录');setTimeout(()=>location.href='/admin.html',900);}
+      try{await api('/api/admin-login',{method:'POST',body:JSON.stringify({username,password})});m.textContent='注册成功，已自动登录，正在进入后台…';setTimeout(()=>location.href='/admin',700);}
+      catch{toast('注册成功，请用新账号登录');setTimeout(()=>location.href='/admin',900);}
     }catch(err){m.textContent=err.message;}});}
 if(!document.querySelector('.recaptcha-disclosure')){const note=document.createElement('p');note.className='recaptcha-disclosure';note.innerHTML='本网站使用 Google reCAPTCHA 保护服务，适用 Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">隐私权政策</a>与<a href="https://policies.google.com/terms" target="_blank" rel="noreferrer">服务条款</a>。';
   /* 挂到页脚**里面**（原来是挂到 .shell，排在页脚之后 —— 于是它成了整页
@@ -172,13 +172,18 @@ if(!document.querySelector('.recaptcha-disclosure')){const note=document.createE
   ((document.querySelector('#beianFooter')||document.querySelector('.shell'))?.append(note));}
 /* 登录页：已登录直接进主页；未登录显示门口表单（发布页的「进入」落到这里）。 */
 async function loginPage(){document.body.classList.remove('guest-mode');const me=await session();if(me){location.replace('/');return;}const gate=$('#gateView');if(gate)gate.hidden=false;await loadGateAnnouncements();bootGate();}
-/* 路由。注意：先看**页面身份**再按路径分发：服务端（中间件/server.mjs）会把发布页
-   直接挂在 `/` 上给未登录访客，这时 location.pathname 是 '/' 但页面是 landing.html。
-   若照旧按路径跑 home()，未登录会被 location.replace('/landing.html') 再改写一次地址栏
-   （画面不闪，但 URL 从 '/' 变成 '/landing.html'，还多一次无谓的取页）。 */
+/* 路由。两个必须知道的事实：
+   ① 先看**页面身份**再按路径分发：服务端（中间件/server.mjs）会把发布页直接挂在 `/` 上
+      给未登录访客，此时 location.pathname 是 '/' 但页面是 landing.html。
+   ② **Cloudflare Pages 会把 `/login.html` 这类地址 308 成 `/login`（去掉 .html）**。
+      2026-10-10 的线上事故就是它：路由原来写 `path.endsWith('login.html')`，
+      在 `/login` 上全都不匹配 —— 登录框不显示、按钮事件没绑上，
+      点按钮只剩原生表单提交、又被 CSP 的 form-action 'none' 静默拦掉，
+      表现就是"点按钮压根没反应"。所以这里把两种形态归一化后再分发。 */
 const isLandingBody=document.body.classList.contains('landing-page');
 const path=location.pathname;
-if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(path==='/')home(); else if(path.endsWith('landing.html')){/* 显式路径进来的发布页 */} else if(path.endsWith('login.html'))loginPage(); else if(path.endsWith('vote.html'))votePage(); else if(path.endsWith('schedule.html'))schedule(); else if(path.endsWith('admin.html'))admin(); else if(path.endsWith('register.html'))register();else if(path.endsWith('suggest.html'))suggestionsPage();
+const pageName=(path.replace(/\/+$/,'/').split('/').pop()||'index').replace(/\.html$/i,'')||'index';
+if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(pageName==='index')home(); else if(pageName==='landing'){/* 显式路径进来的发布页 */} else if(pageName==='login')loginPage(); else if(pageName==='vote')votePage(); else if(pageName==='schedule')schedule(); else if(pageName==='admin')admin(); else if(pageName==='register')register();else if(pageName==='suggest')suggestionsPage();
 ;
 
 /* 投稿须知与免责声明原文（2026-10-08 从旧前端补回；页面上的可见内容与此同源）*/

@@ -435,6 +435,10 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // 记录**原始请求路径**：下面的根路径分发会改写 url.pathname
+  //（'/' → '/landing.html'），308 判断必须看原始形态，否则会把改写结果再跳一次。
+  const requestedPath = url.pathname;
+
   // ---- 0.5) 根路径分发：与 Cloudflare 上中间件包的那层 next 是**同一个判定** ----
   // 已登录（学生侧会话有效）→ index.html；未登录 → landing.html。
   // 判定来自 _lib/rootpage.js（两个入口共用一份，结论必然一致）。
@@ -476,6 +480,27 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ error: '服务器内部错误' }));
     }
     return;
+  }
+
+  // ---- 1.5) 模拟 Cloudflare Pages 的"去扩展名"行为（本地必须和线上一致）----
+  //
+  // Cloudflare Pages 会把 `/login.html` 308 到 `/login`，`/index.html` 到 `/`。
+  // 本地不模拟的话，**依赖地址形态的前端问题在本地永远测不出来** ——
+  // 2026-10-10 线上"点按钮没反应"事故正是这样漏过去的：路由写的是
+  // `path.endsWith('login.html')`，线上地址是 `/login`，整段路由不匹配。
+  // 判定一律用**原始请求路径**（requestedPath），不受根路径分发改写的干扰。
+  if (req.method === 'GET' && /\.html$/i.test(requestedPath)) {
+    const clean = requestedPath.replace(/\.html$/i, '');
+    const target = clean === '/index' ? '/' : clean;
+    res.writeHead(308, { Location: target + url.search, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+  // 反向映射：无扩展名的 `/login` → 内部服务 `/login.html`（文件存在才算）。
+  // 跳过 '/'（它由上面的根路径分发决定给发布页还是主页）。
+  if (requestedPath !== '/' && !/\/[^/]*\.[^/]*$/.test(requestedPath)) {
+    const candidate = requestedPath.replace(/\/+$/, '') + '.html';
+    if (resolveStatic(candidate)) url.pathname = candidate;
   }
 
   // ---- 2) 其它 → 静态文件 ----
