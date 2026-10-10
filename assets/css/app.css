@@ -770,7 +770,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .nav-burger:hover { color: var(--title); }
   .nav-burger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
-  /* .actions 整块变成抽屉：导航链接 + 退出都收在里面 */
+  /* .actions 整块变成抽屉：导航链接 + 退出都收在里面。
+     flex-wrap 必须显式收成 nowrap —— 基础规则（164 行）带的是 wrap，
+     列向容器一旦内容比屏幕高就会把后面的子块折进"第二列"，
+     而第二列在抽屉右缘之外等于不可见（后台页签消失就是这个原因）。 */
   .topbar .actions {
     position: fixed;
     top: 0;
@@ -781,6 +784,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
     max-width: 320px;
     display: flex;
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
     justify-content: flex-start;
     gap: 8px;
@@ -795,8 +799,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
     transition: transform .3s ease, visibility .3s;
   }
   body.nav-open .topbar .actions { transform: translateX(0); visibility: visible; }
-  .topbar .actions .btn { justify-content: flex-start; width: 100%; height: 44px; padding: 0 16px; text-align: left; }
-  .topbar .nav-links { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  /* 子项不参与收缩：内容超过一屏时让抽屉滚动（overflow-y 已开），
+     而不是把「关闭/退出」这些按钮压扁成十几像素高的点不中目标。 */
+  .topbar .actions .btn { justify-content: flex-start; width: 100%; height: 44px; padding: 0 16px; text-align: left; flex: 0 0 auto; }
+  .topbar .nav-links { display: flex; flex-direction: column; align-items: stretch; gap: 8px; flex: 0 0 auto; }
   .topbar .actions .nav-drawer-close { display: inline-flex; color: var(--secondary); }
 
   .nav-backdrop {
@@ -839,8 +845,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   padding-top: 12px;
 }
 /* 撑满抽屉：搬进抽屉后该节点被 88px 按钮的 min-width 顶成 shrink-to-fit
-   （实测 89px、溢出 312px 抽屉右缘被裁），flex 拉伸不生效，按 ID 级强制铺满。 */
-.topbar .actions #adminTabs.in-drawer { width: 100%; margin: 0; align-self: stretch; }
+   （实测 89px、溢出 312px 抽屉右缘被裁），flex 拉伸不生效，按 ID 级强制铺满。
+   flex: 0 0 auto 同理 —— 内容超一屏时抽屉整体滚动，页签本身不许被压扁。 */
+.topbar .actions #adminTabs.in-drawer { width: 100%; margin: 0; align-self: stretch; flex: 0 0 auto; }
 .topbar .actions .admin-nav.in-drawer button {
   flex: 0 0 auto;
   width: 100%;
@@ -850,9 +857,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   padding: 0 12px;
 }
 
-/* ---------- 首页须知/免责声明在抽屉里（≤768px） ---------- */
-.topbar .actions .rules.in-drawer { margin: 8px 0 0; border-top: 1px solid var(--line-soft); }
-.topbar .actions .rules.in-drawer:first-of-type { margin-top: 12px; }
+/* ---------- 首页须知/免责声明（2026-10-11 起不再进抽屉） ---------- */
+/* 原来手机端把投稿须知与免责声明搬进抽屉菜单，用户反馈在抽屉里点了别的
+   它们就"消失"了。现已撤销搬动（app.js 同步删除），恢复为页面底部静态折叠块，
+   与电脑端一致；下面两条 in-drawer 样式随之作废删除，避免误导后来者。 */
 
 /* ---------- 排期编辑器的行内控件 ---------- */
 .slot-actions { display: inline-flex; flex: 0 0 auto; gap: 6px; margin-left: auto; }
@@ -872,4 +880,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .admin-layout { grid-template-columns: 200px minmax(0, 1fr); }
   .admin-nav { position: sticky; top: 76px; flex-direction: column; flex-wrap: nowrap; }
   .admin-nav button { flex: 0 0 auto; width: 100%; min-width: 0; text-align: left; }
+}
+
+/* ---------- 后台列表行（≤768px，手机与竖屏平板；>768px 不受影响） ---------- */
+/* .admin-row 是「左信息 + 右操作」的一行式布局，操作列 flex:0 0 auto 不可收缩；
+   手机宽度下三个操作按钮（通过/移入回收站/清除举报标记）把信息列挤成
+   两三个字宽的竖条（2026-10-11 用户截图）。窄屏改为纵向堆叠：
+   信息整行、按钮整行左排，列表恢复可读。 */
+@media (max-width: 768px) {
+  .admin-row { flex-wrap: wrap; row-gap: 12px; }
+  .admin-row > div:first-child { flex: 1 1 100%; }
+  .admin-row .actions { flex: 1 1 100%; justify-content: flex-start; }
+  .admin-song .song-actions { margin-top: 0; }
+
+  /* 后台抽屉的专属菜单结构：后台页签（#adminTabs）才是这个页面的主菜单，
+     排最上；前台三个链接（返回首页/本周排期/版本建议）挪到页签之后，
+     退出仍在最底。用 order 重排，不新增 DOM；桌面端顶栏与侧栏一字不变。 */
+  .admin-page .topbar .actions .nav-drawer-close { order: -3; }
+  .admin-page .topbar .actions #adminTabs.in-drawer { order: -2; }
+  .admin-page .topbar .actions .nav-links { order: -1; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 }
