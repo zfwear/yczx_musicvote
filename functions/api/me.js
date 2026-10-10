@@ -1,5 +1,6 @@
 import { json } from '../../_lib/http.js';
 import { requireSession, isGuestSession, GUEST_CLASS_NAME, GUEST_ROLE } from '../../_lib/auth.js';
+import { getClassLimits, countClassVotes, countClassSubmissions, getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 
 /**
  * 当前身份（学生端）。
@@ -17,6 +18,12 @@ import { requireSession, isGuestSession, GUEST_CLASS_NAME, GUEST_ROLE } from '..
  * 管理员身份请用 /api/admin-* 那边的接口自证，两边不混。
  * 顺带说明为什么 role 对普通学生返回 'class' 而不是 null ——
  * 学生没有"额外角色"这个概念，回一个明确的字串比回 null 更好用。
+ *
+ * 2026-10-10 追加 `limits` / `globalSubmit`：
+ *   前端要在**打开页面时**就置灰到顶的操作（班级暂停、达到班级上限、
+ *   达到全站投稿上限），而不是等学生填完表单点提交才吃一个 403。
+ *   这只是**体验层**的提前拦截，真正的闸门仍然在 vote / upvote 接口里 ——
+ *   两边读的是同一份配置与同一套计数，不会出现"前端说能、后端说不能"。
  */
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -36,16 +43,48 @@ export async function onRequestGet(context) {
     className = GUEST_CLASS_NAME;
   } else if (storedRole === 'debug') {
     className = '调试模式';
+  } else if (storedRole === 'test') {
+    className = '测试口令';
   } else {
     const row = await env.DB.prepare('SELECT name FROM classes WHERE id = ?')
       .bind(session.subject_id).first();
     className = row && row.name ? String(row.name) : '';
   }
 
+  // 班级维度的限制：只对真实班级会话有意义（游客/调试/测试口令没有班级归属）。
+  let limits = null;
+  if (!isGuest && storedRole !== 'debug' && storedRole !== 'test'
+      && Number(session.subject_id) > 0) {
+    const cfg = await getClassLimits(env, session.subject_id);
+    if (cfg.found) {
+      const [voteUsed, submitUsed] = await Promise.all([
+        countClassVotes(env, session.subject_id),
+        countClassSubmissions(env, session.subject_id),
+      ]);
+      limits = {
+        paused: cfg.paused,
+        voteLimit: cfg.voteLimit,          // 0 = 不限制
+        voteUsed,
+        submitLimit: cfg.submitLimit,      // 0 = 不限制
+        submitUsed,
+      };
+    }
+  }
+
+  // 全站投稿上限：真实班级与测试口令的投稿都会被它拦，所以两类身份都下发。
+  const globalSubmit = (!isGuest && storedRole !== 'debug')
+    ? await (async () => {
+      const cap = await getSubmitCap(env);
+      return { cap: cap.cap, used: await countGlobalSubmissions(env) };
+    })()
+    : null;
+
   return json({
     ok: true,
     role: isGuest ? GUEST_ROLE : (storedRole || 'class'),
     isGuest,
     className,
+    limits,
+    globalSubmit,
   });
 }

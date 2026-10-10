@@ -240,11 +240,40 @@ function presentedTokens(request, subject) {
  * @returns {Promise<{token: string, maxAge: number, setCookie: string}>}
  */
 export async function createSession(
-  env, request, { subject, subjectId, role = null, ttlSeconds, debugAdminId = null }
+  env, request, { subject, subjectId, role = null, ttlSeconds, debugAdminId = null, passId = null }
 ) {
   const token = randomToken(32);
   const tokenHash = await sha256Hex(token);
   const expiresAt = `+${Math.floor(ttlSeconds)} seconds`;
+
+  // 口令凭证（测试/游客口令）签发的会话：把凭证 ID 落在 sessions.pass_id，
+  // 作废凭证时能按列精确撤销会话；续期逻辑也会跳过这类会话（见 refreshTtlSeconds），
+  // 保证会话活不过凭证自己的有效期。015 未执行（无该列）时退回普通写法 ——
+  // 少记一个 ID 只影响"作废时精确撤销"，不影响登录本身。
+  if (passId !== null && passId !== undefined) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO sessions (token_hash, subject, subject_id, role, pass_id, ip, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', ?))`
+      ).bind(
+        tokenHash, subject, subjectId, role, Number(passId),
+        clientIp(request), header(request, 'User-Agent', 300), expiresAt
+      ).run();
+      return {
+        token,
+        maxAge: ttlSeconds,
+        setCookie: serializeCookie(cookieNameFor(subject), token, {
+          maxAge: ttlSeconds,
+          secure: isSecureRequest(request),
+          httpOnly: true,
+          sameSite: 'Lax',
+        }),
+      };
+    } catch (err) {
+      if (!isMissingColumnError(err)) throw err;
+      // 015 还没执行：退回普通会话（不带 pass_id）。
+    }
+  }
 
   // 只有真的建立调试会话时才写 debug_admin_id，普通会话的 INSERT 保持原样。
   if (debugAdminId === null || debugAdminId === undefined) {
@@ -341,19 +370,28 @@ export async function readSession(env, request, subject = null) {
       let row;
       try {
         row = await env.DB.prepare(
-          `SELECT id, subject, subject_id, role, debug_admin_id, expires_at, user_agent
+          `SELECT id, subject, subject_id, role, debug_admin_id, pass_id, expires_at, user_agent
              FROM sessions
             WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
         ).bind(tokenHash).first();
       } catch (err) {
-        // 013 迁移还没执行（没有 debug_admin_id 列）：退回旧查询，
+        // 013/015 迁移还没执行（没有 debug_admin_id / pass_id 列）：退回旧查询，
         // 让迁移进度不同的部署都还能正常登录。
         if (!isMissingColumnError(err)) throw err;
-        row = await env.DB.prepare(
-          `SELECT id, subject, subject_id, role, expires_at, user_agent
-             FROM sessions
-            WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
-        ).bind(tokenHash).first();
+        try {
+          row = await env.DB.prepare(
+            `SELECT id, subject, subject_id, role, NULL AS debug_admin_id, NULL AS pass_id, expires_at, user_agent
+               FROM sessions
+              WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
+          ).bind(tokenHash).first();
+        } catch (err2) {
+          if (!isMissingColumnError(err2)) throw err2;
+          row = await env.DB.prepare(
+            `SELECT id, subject, subject_id, role, expires_at, user_agent
+               FROM sessions
+              WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
+          ).bind(tokenHash).first();
+        }
       }
       if (!row) continue;
 
@@ -445,6 +483,13 @@ function withLastSeen(userAgent, isoNow) {
 async function refreshSessionOnUse(env, row) {
   const id = Number(row && row.id);
   if (!Number.isInteger(id) || id <= 0) return;
+
+  // 口令凭证（测试/游客口令）签发的会话**不续期**：
+  // 它的有效期在签发时就被压到"凭证到期之前"（见 _lib/passes.js 的
+  // passSessionTtlSeconds），一旦续期就会越过凭证有效期 ——
+  // 一个已过期的测试口令还能继续用到第二天，等于有效期形同虚设。
+  // 固定有效期到期后自然要重新输口令，这正是"限时口令"的本意。
+  if (Number(row.pass_id) > 0) return;
 
   // 节流：距上次续期不到一小时就什么都不做（连库都不碰）
   const lastSeen = lastSeenAtOf(row);
@@ -645,6 +690,28 @@ export async function revokeSession(env, request, subject = null) {
   for (const token of presentedTokens(request, subject)) {
     const tokenHash = await sha256Hex(token);
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+  }
+}
+
+/**
+ * 撤销某条口令凭证签发的**全部会话**。
+ *
+ * 作废/删除测试口令、游客口令时用：拿到会话的设备立即失效，
+ * 而不是等它自己到期。015 未执行（没有 pass_id 列）时按 role 粗略回退 ——
+ * 只清 subject='class' 且 role 为 guest/test 的会话，宁多勿漏。
+ */
+export async function revokeSessionsByPass(env, passId) {
+  const id = Number(passId);
+  if (!Number.isInteger(id) || id <= 0) return 0;
+  try {
+    const result = await env.DB.prepare('DELETE FROM sessions WHERE pass_id = ?').bind(id).run();
+    return Number((result && result.meta && result.meta.changes) || 0);
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    const result = await env.DB.prepare(
+      "DELETE FROM sessions WHERE subject = 'class' AND (role = 'guest' OR role = 'test')"
+    ).run();
+    return Number((result && result.meta && result.meta.changes) || 0);
   }
 }
 

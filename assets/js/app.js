@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 /* 版本一致性守卫：页面 HTML 与 app.js 必须同批次上传。
    只传一半（比如新页面配旧脚本、或反之）时，页面会"点了没反应"——
    这里直接把它变成一条看得懂的提示。 */
-const APP_VER = '3.3.0';
+const APP_VER = '3.4.0';
 {
   const pageVer = document.body && document.body.dataset ? document.body.dataset.appVer : '';
   if (pageVer && pageVer !== APP_VER) {
@@ -89,7 +89,22 @@ async function bootGate(){
   $('#guestLogin').onclick=()=>{const input=$('#gatePassword');input.placeholder='请输入游客口令';input.focus();msg.textContent='请输入广播站提供的游客口令';};
   form.addEventListener('submit',async e=>{e.preventDefault(); const b=$('button[type=submit]',form); b.disabled=true; msg.textContent='正在验证…'; try{const recaptcha_token=await recaptchaToken('login');const d=await api('/api/login',{method:'POST',body:JSON.stringify({password:$('#gatePassword').value,recaptcha_token})}); sessionStorage.setItem('className',d.class_name||''); location.href='/';}catch(err){msg.textContent=err.message;}finally{b.disabled=false;}});
 }
-async function session(){ try{return await api('/api/me',{quiet401:true});}catch{return null;} }
+async function session(){ try{const me=await api('/api/me',{quiet401:true});window.__me=me;return me;}catch{return null;} }
+/* 班级/全站上限的**体验层**预判：打开页面就知道还能不能投/能不能投稿。
+   服务端在 vote / upvote 接口里有同样的闸门 —— 这里只是为了别让学生
+   填完表单才吃一个 403。kind='vote' 看投票侧，kind='submit' 看投稿侧。 */
+function classBlockReason(kind){
+  const me=window.__me||{};
+  const L=me.limits;
+  if(L){
+    if(L.paused)return'本班级已被暂停投稿与投票，请联系广播站管理员';
+    if(kind==='vote'&&L.voteLimit>0&&L.voteUsed>=L.voteLimit)return'本班级投票数已达上限，暂时无法继续投票';
+    if(kind==='submit'&&L.submitLimit>0&&L.submitUsed>=L.submitLimit)return'本班级投稿数量已达上限，暂时无法继续投稿';
+  }
+  const g=me.globalSubmit;
+  if(kind==='submit'&&g&&g.cap>0&&g.used>=g.cap)return'站点投稿总数量已达上限，暂无法提交投稿';
+  return'';
+}
 function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule','本周排期');const suggest=link('/suggest','版本建议');const sets={home:[submit,sched,suggest],vote:[home,sched,suggest],schedule:[submit,home,suggest],suggest:[submit,sched,home],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');
   /* 移动端（≤768px）：汉堡按钮 + 抽屉式侧边导航（.actions 整块变成抽屉，遮罩在其下）。
      桌面端这三个新元素全部 display:none，DOM 多了几项、画面一字不变。 */
@@ -105,45 +120,350 @@ async function home(){
     document.body.innerHTML='<div class="shell"><div class="gate" style="margin:48px auto;max-width:520px"><h1>站点部署不完整</h1><p>缺少 landing.html / login.html：本次是"发布页 + 登录页"新结构，请把交付包里的<strong>全部</strong>文件一起上传（共 8 个 html + assets/css/app.css + assets/js/app.js）。</p></div></div>';
     return;
   }
-  root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;$('#identity').textContent=me.className||'已登录';if(me.isGuest){$('#guest').hidden=false;}
+  root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;
+  /* 身份行：游客要一眼看出是【游客状态】；班级被暂停也要当场说明（否则
+     学生只会看到按钮全灰，不知道为什么）。 */
+  let identityText=me.className||'已登录';
+  if(me.isGuest)identityText='【游客状态】游客模式 · 只能浏览与试听';
+  else if(me.limits&&me.limits.paused)identityText=identityText+'（班级已暂停投稿与投票）';
+  $('#identity').textContent=identityText;
+  if(me.isGuest){$('#guest').hidden=false;$('#guest').textContent='【游客状态】可以浏览榜单和试听，但不能投稿、投票或举报。';}
+  const voteBlock=classBlockReason('vote');if(voteBlock)window.__voteBlockReason=voteBlock;
+  /* 手机与竖屏平板（≤768px）：首页的投稿须知与免责声明收进左上角打开的抽屉菜单；
+     拉宽后放回原位。同一份节点搬动 + 切 class，不复制、不新增 UI 元素。 */
+  if(!window.__homeNoticesWired){
+    window.__homeNoticesWired=true;
+    const rules=document.getElementById('rulesBox'),disc=document.getElementById('disclaimerBox');
+    if(rules&&disc){
+      const anchor=document.createComment('rules-anchor');
+      rules.parentNode.insertBefore(anchor,rules);
+      const place=()=>{
+        const a=document.querySelector('.topbar .actions');
+        if(matchMedia('(max-width: 768px)').matches&&a){
+          if(!a.contains(rules)){
+            rules.classList.add('in-drawer');disc.classList.add('in-drawer');
+            a.appendChild(rules);a.appendChild(disc);
+          }
+        }else if(anchor.parentNode){
+          rules.classList.remove('in-drawer');disc.classList.remove('in-drawer');
+          anchor.parentNode.insertBefore(rules,anchor);
+          anchor.parentNode.insertBefore(disc,rules.nextSibling);
+        }
+      };
+      matchMedia('(max-width: 768px)').addEventListener('change',place);
+      place();
+    }
+  }
   const cfg=await api('/api/config').catch(()=>({}));if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
   const ads=await api('/api/announcements').catch(()=>({announcements:[],popups:[]}));const adList=ads.announcements||[];$('#announcements').innerHTML=adList.length?('<div class="section-title"><h2>广播站公告</h2></div>'+adList.map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('')):'';for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await loadRanks();reveal($$('.panel,.hero,.announcement'));
 }
 async function loadGateAnnouncements(){try{const d=await api('/api/announcements?scope=gate');$('#gateAnnouncements').innerHTML=(d.announcements||[]).map(a=>`<article class="announcement"><b>${esc(a.title)}</b><p>${esc(a.content)}</p></article>`).join('');}catch{}}
-async function loadRanks(){for(const status of ['pending','approved']){const box=$(`#${status}List`);try{const d=await api(`/api/rank?status=${status}`);const rows=Array.isArray(d)?d:[];box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${document.body.classList.contains('guest-mode')?'disabled title="游客模式只能查看排行，不能投票"':''}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${document.body.classList.contains('guest-mode')?'disabled':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
+async function loadRanks(){for(const status of ['pending','approved']){const box=$(`#${status}List`);try{const d=await api(`/api/rank?status=${status}`);const rows=Array.isArray(d)?d:[];const guestMode=document.body.classList.contains('guest-mode');const voteBlock=window.__voteBlockReason||classBlockReason('vote');const voteAttr=guestMode?'disabled title="游客状态：只能浏览与试听"':(voteBlock?`disabled title="${esc(voteBlock)}"`:'');box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${voteAttr}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${guestMode?'disabled title="游客状态：只能浏览与试听"':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
 async function reportSong(id){if(!await uiConfirm('确认举报这首歌曲？',{title:'举报歌曲',ok:'确认举报'}))return;try{const[fp,recaptcha_token]=await Promise.all([fingerprint(),recaptchaToken('report')]);await api('/api/report',{method:'POST',body:JSON.stringify({id:Number(id),reason:'',fingerprint:fp,client_id:fp,recaptcha_token})});toast('举报已提交');}catch(e){toast(e.message);}}
 async function preview(track,title,artist,container){if(!container)return;stopAllPlayers();container.innerHTML='<span class="muted">正在准备试听…</span>';try{let id=track;if(!id){const d=await api(`/api/music?q=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);id=(d.results||[]).find(x=>x.id)?.id;}if(!id){container.innerHTML='<span class="muted">没有可试听的音源</span>';return;}const check=await api(`/api/music?check=${encodeURIComponent(id)}`);if(check.playable===false){container.innerHTML='<span class="muted">该版本暂时无法试听</span>';return;}container.innerHTML=`<audio controls autoplay preload="none" src="/api/music?play=${encodeURIComponent(id)}"></audio>`;registerPlayer(container.querySelector('audio'));}catch(e){container.innerHTML=`<span class="message">${esc(e.message)} <button class="btn" data-retry>重试</button></span>`;container.querySelector('[data-retry]').onclick=()=>preview(track,title,artist,container);}}
-async function vote(id){const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks();}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
+async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks();}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
 async function logout(){await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.href='/';}
 function renderTrackChoices(tracks,container,onPick){container.innerHTML=tracks.map((x,i)=>`<article class="song track-option"><div><b>${esc(x.name||x.title)}</b><small class="muted">${esc(x.artist||'未知歌手')} · ${esc(x.album||'')}</small><div class="song-actions"><button class="btn primary" type="button" data-pick="${i}">选择此版本</button><button class="btn quiet" type="button" data-track-preview="${i}">试听版本</button></div><div id="result-player-${i}"></div></div><span class="muted">${esc(x.source||'')}${x.duration?` · ${Math.floor(x.duration/60)}:${String(x.duration%60).padStart(2,'0')}`:''}${x.playable===false?' · 暂不可播':x.playable===true?' · 可试听':''}</span></article>`).join('');$$('[data-pick]',container).forEach(b=>b.onclick=()=>onPick(tracks[Number(b.dataset.pick)]));$$('[data-track-preview]',container).forEach(b=>b.onclick=()=>{const x=tracks[Number(b.dataset.trackPreview)];preview(x.id,x.name||x.title,x.artist,$(`#result-player-${b.dataset.trackPreview}`,container));});}
 async function votePage(){
   $('#nav').innerHTML=nav('vote');$('[data-logout]').onclick=logout;
-  const me=await session();if(!me){location.href='/';return;}if(me.isGuest){toast('游客模式只能浏览，不能投稿');location.href='/';return;}
+  const me=await session();if(!me){location.href='/';return;}
+  /* 游客也能打开投稿页浏览曲目与试听，但提交按钮置灰 —— 需求只要求
+     "写入类功能禁用、按钮置灰"，不再把游客一脚踢回首页。 */
+  document.body.classList.toggle('guest-mode',me.isGuest);
+  const submitBlock=classBlockReason('submit');
   const cfg=await api('/api/config').catch(()=>({}));if(cfg.submit?.paused){$('#voteMessage').textContent='广播站现在暂停接收投稿。';$('#submitPaused').hidden=false;$('#submitForm button[type=submit]').disabled=true;}
+  const submitBtn=$('#submitForm button[type=submit]');
+  if(me.isGuest){submitBtn.disabled=true;submitBtn.title='游客状态：只能浏览与试听，不能投稿';if(!cfg.submit?.paused)$('#voteMessage').textContent='当前是【游客状态】：可以浏览与试听，不能投稿。';}
+  else if(submitBlock){submitBtn.disabled=true;submitBtn.title=submitBlock;if(!cfg.submit?.paused)$('#voteMessage').textContent=submitBlock+'。';}
   $('#category').innerHTML=(cfg.categories||[]).map(c=>`<option value="${Number(c.id)}">${esc(c.name)}</option>`).join('');
   const form=$('#submitForm'),search=$('#searchForm'),results=$('#results'),dialog=$('#trackDialog'),message=$('#searchMessage');
   $('[data-close-track-dialog]').onclick=()=>dialog.close();dialog.addEventListener('click',e=>{if(e.target===dialog)dialog.close();});
   /* 弹窗一关就把试听停掉：原生 <audio> 不随弹窗隐藏暂停，不这样做会"关了还在放"。 */
   dialog.addEventListener('close',()=>stopAllPlayers());
   search.addEventListener('submit',async e=>{e.preventDefault();const query=$('#query').value.trim();message.textContent='正在搜索歌曲…';try{const d=await api('/api/music?q='+encodeURIComponent(query)),tracks=d.results||[];if(!tracks.length){message.textContent='没有找到歌曲，请换个关键词试试。';return;}message.textContent=`找到 ${tracks.length} 个版本，请在弹窗中选择。`;$('#trackDialogQuery').textContent=`搜索：${query}`;renderTrackChoices(tracks,results,x=>{form.__selected=x;$('#picked').textContent=`已选择：${x.name||x.title} · ${x.artist||''}`;message.textContent='已选择版本，可以提交投稿。';dialog.close();});dialog.showModal();}catch(err){message.textContent=err.message;}});
-  form.addEventListener('submit',async e=>{e.preventDefault();const x=form.__selected;if(!x){$('#voteMessage').textContent='请先搜索并选择一首歌曲';return;}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('vote'),powProof('vote')]);await api('/api/vote',{method:'POST',body:JSON.stringify({title:x.name||x.title,artist:x.artist||'',track_id:x.id,category_id:Number($('#category').value),track_token:x.track_token||x.token||'',fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast('投稿成功，等待审核');setTimeout(()=>location.href='/',900);}catch(err){$('#voteMessage').textContent=err.message;}});
+  form.addEventListener('submit',async e=>{e.preventDefault();const block=classBlockReason('submit');if(block){$('#voteMessage').textContent=block+'。';return;}const x=form.__selected;if(!x){$('#voteMessage').textContent='请先搜索并选择一首歌曲';return;}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('vote'),powProof('vote')]);await api('/api/vote',{method:'POST',body:JSON.stringify({title:x.name||x.title,artist:x.artist||'',track_id:x.id,category_id:Number($('#category').value),track_token:x.track_token||x.token||'',fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast('投稿成功，等待审核');setTimeout(()=>location.href='/',900);}catch(err){$('#voteMessage').textContent=err.message;}});
 }
-async function suggestionsPage(){const me=await session();if(!me){location.href='/';return;}document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('suggest');$('[data-logout]').onclick=logout;const search=$('#suggestSearch'),results=$('#suggestResults'),form=$('#suggestForm');if(me.isGuest){$('#suggestMessage').textContent='游客模式只能浏览，不能提交建议。';form.hidden=true;}search.onsubmit=async e=>{e.preventDefault();try{const d=await api('/api/rank?status=pending');const q=$('#suggestQuery').value.trim().toLowerCase(),rows=(Array.isArray(d)?d:[]).filter(s=>`${s.title} ${s.artist}`.toLowerCase().includes(q));results.innerHTML=rows.map(s=>`<button class="song" type="button" data-select-suggest="${s.id}" data-title="${esc(s.title)}" data-artist="${esc(s.artist)}"><span><b>${esc(s.title)}</b><small class="muted">${esc(s.artist)}</small></span><span>选择</span></button>`).join('')||'<p class="muted">榜单中没有匹配歌曲。</p>';$$('[data-select-suggest]').forEach(b=>b.onclick=()=>{form.dataset.songId=b.dataset.selectSuggest;$('#suggestPicked').textContent=`已选择：${b.dataset.title} · ${b.dataset.artist}`;});}catch(err){results.innerHTML=`<p class="message">${esc(err.message)}</p>`;}};form.onsubmit=async e=>{e.preventDefault();if(!form.dataset.songId)return;try{const recaptcha_token=await recaptchaToken('suggest');await api('/api/suggest',{method:'POST',body:JSON.stringify({song_id:Number(form.dataset.songId),content:$('#suggestContent').value,recaptcha_token})});$('#suggestMessage').textContent='版本建议已提交。';form.reset();delete form.dataset.songId;}catch(err){$('#suggestMessage').textContent=err.message;}};}
-async function schedule(){ $('#nav').innerHTML=nav('schedule'); $('[data-logout]').onclick=logout; const box=$('#weeks'); try{const now=new Date(),day=now.getUTCDay(),thisWeek=new Date(now);thisWeek.setUTCDate(now.getUTCDate()-(day===0?6:day-1));const from=new Date(thisWeek);from.setUTCDate(from.getUTCDate()-7);const d=await api('/api/schedule?week_start='+from.toISOString().slice(0,10)+'&weeks=3');const needs=d.needsMigration?`<p class="notice">排期数据尚未初始化：${esc(d.hint||'请在数据库执行 012 迁移')}（页面先按空排期显示）</p>`:'';box.innerHTML='<p class="notice">每周共安排 6 首歌曲，三个午间曲目与三个纯音乐曲目会在该周每天循环播放。</p>'+needs+(d.weeklies||[]).map((w,i)=>`<article class="week ${i===1?'current':''}"><h2>${esc(w.weekStart)} – ${esc(w.weekEnd)} <span class="muted">${i===1?'本周':i===0?'上周':'下周'}</span></h2><div class="slot-title">中午放学 · 含歌词</div>${[0,1,2].map(n=>slot(w,'noon',n+1)).join('')}<div class="slot-title">下午上学 · 纯音乐</div>${[0,1,2].map(n=>slot(w,'afternoon',n+1)).join('')}</article>`).join(''); reveal($$('.week'));}catch(e){box.innerHTML=`<p class="message">加载排期失败：${esc(e.message)}</p>`;} }
+async function suggestionsPage(){const me=await session();if(!me){location.href='/';return;}document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('suggest');$('[data-logout]').onclick=logout;const search=$('#suggestSearch'),results=$('#suggestResults'),form=$('#suggestForm');if(me.isGuest){$('#suggestMessage').textContent='当前是【游客状态】：可以浏览，不能提交建议。';form.hidden=true;}search.onsubmit=async e=>{e.preventDefault();try{const d=await api('/api/rank?status=pending');const q=$('#suggestQuery').value.trim().toLowerCase(),rows=(Array.isArray(d)?d:[]).filter(s=>`${s.title} ${s.artist}`.toLowerCase().includes(q));results.innerHTML=rows.map(s=>`<button class="song" type="button" data-select-suggest="${s.id}" data-title="${esc(s.title)}" data-artist="${esc(s.artist)}"><span><b>${esc(s.title)}</b><small class="muted">${esc(s.artist)}</small></span><span>选择</span></button>`).join('')||'<p class="muted">榜单中没有匹配歌曲。</p>';$$('[data-select-suggest]').forEach(b=>b.onclick=()=>{form.dataset.songId=b.dataset.selectSuggest;$('#suggestPicked').textContent=`已选择：${b.dataset.title} · ${b.dataset.artist}`;});}catch(err){results.innerHTML=`<p class="message">${esc(err.message)}</p>`;}};form.onsubmit=async e=>{e.preventDefault();if(!form.dataset.songId)return;try{const recaptcha_token=await recaptchaToken('suggest');await api('/api/suggest',{method:'POST',body:JSON.stringify({song_id:Number(form.dataset.songId),content:$('#suggestContent').value,recaptcha_token})});$('#suggestMessage').textContent='版本建议已提交。';form.reset();delete form.dataset.songId;}catch(err){$('#suggestMessage').textContent=err.message;}};}
+async function schedule(){ $('#nav').innerHTML=nav('schedule'); $('[data-logout]').onclick=logout; const box=$('#weeks'); try{const now=new Date(),day=now.getUTCDay(),thisWeek=new Date(now);thisWeek.setUTCDate(now.getUTCDate()-(day===0?6:day-1));const from=new Date(thisWeek);from.setUTCDate(from.getUTCDate()-7);const d=await api('/api/schedule?week_start='+from.toISOString().slice(0,10)+'&weeks=3');
+  /* 排期现在是可配置的：模式（上下午都有/仅上午）+ 每时段数量。
+     接口没带 schedule（老部署）时回落 3+3，与旧行为一字不差。 */
+  const sc=d.schedule||{mode:'both',noonCount:3,afternoonCount:3};
+  const active=sc.mode==='noon'?['noon']:['noon','afternoon'];
+  const countOf=p=>Number(p==='noon'?sc.noonCount:sc.afternoonCount)||3;
+  const needs=d.needsMigration?`<p class="notice">排期数据尚未初始化：${esc(d.hint||'请在数据库执行 012 迁移')}（页面先按空排期显示）</p>`:'';
+  const summary=sc.mode==='noon'
+    ?`每周共安排 ${countOf('noon')} 首歌曲（当前为「仅上午」模式），会在该周每天循环播放。`
+    :`每周共安排 ${countOf('noon')+countOf('afternoon')} 首歌曲，${countOf('noon')} 个午间曲目与 ${countOf('afternoon')} 个纯音乐曲目会在该周每天循环播放。`;
+  box.innerHTML=`<p class="notice schedule-notice">${summary}</p>`+needs+(d.weeklies||[]).map((w,i)=>`<article class="week ${i===1?'current':''}"><h2>${esc(w.weekStart)} – ${esc(w.weekEnd)} <span class="muted">${i===1?'本周':i===0?'上周':'下周'}</span></h2>${active.map(p=>`<div class="slot-title">${p==='noon'?'中午放学 · 含歌词':'下午上学 · 纯音乐'}</div>${Array.from({length:countOf(p)},(_,k)=>slot(w,p,k+1)).join('')}`).join('')}</article>`).join(''); reveal($$('.week'));}catch(e){box.innerHTML=`<p class="message">加载排期失败：${esc(e.message)}</p>`;} }
 function slot(w,p,n){const x=(w.slots||[]).find(s=>s.period===p&&Number(s.position)===n); return `<div class="slot"><b>${n}</b><div>${x?esc(x.title):'待排歌曲'}<span>${x?esc(x.artist||''):'等待管理员安排'}</span></div></div>`;}
 async function admin(){ $('#nav').innerHTML=nav('admin'); $$('[data-logout]').forEach(b=>b.onclick=logout); const form=$('#adminLogin'), msg=$('#adminMessage');
+  /* 后台侧边栏（视口宽度判定，不看设备型号）：
+     ≤768px  —— #adminTabs 这一**同一个节点**搬进顶栏抽屉（完全复用前台抽屉交互）；
+     >768px  —— 搬回 .admin-layout 原位（≥1024 是固定侧栏，769~1024 由 CSS 同样分栏）。
+     只搬动 + 切 class，不复制 DOM、不新增元素；从窄拉宽越过 768 时顺手关掉抽屉。 */
+  if(!window.__adminDrawerWired){
+    window.__adminDrawerWired=true;
+    const tabs=$('#adminTabs');
+    if(tabs){
+      const anchor=document.createElement('span');
+      anchor.hidden=true;
+      tabs.parentNode.insertBefore(anchor,tabs);
+      const place=()=>{
+        if(matchMedia('(max-width: 768px)').matches){
+          const a=document.querySelector('.topbar .actions');
+          if(a&&!a.contains(tabs)){tabs.classList.add('in-drawer');a.appendChild(tabs);}
+        }else{
+          if(tabs.classList.contains('in-drawer')){
+            tabs.classList.remove('in-drawer');
+            anchor.parentNode.insertBefore(tabs,anchor);
+          }
+          document.body.classList.remove('nav-open');
+        }
+      };
+      matchMedia('(max-width: 768px)').addEventListener('change',place);
+      place();
+    }
+  }
   const enterWork=async()=>{$('#adminScreen').hidden=true;$('#adminWork').hidden=false;await adminView('pending');};
   form.addEventListener('submit',async e=>{e.preventDefault();try{await withVerification(()=>api('/api/admin-login',{method:'POST',body:JSON.stringify({username:$('#adminName').value,password:$('#adminPassword').value})}));await enterWork();}catch(err){msg.textContent=err.message;}});
-  $('#adminTabs').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b)return;$$('#adminTabs [data-view]').forEach(x=>x.classList.toggle('active',x===b));adminView(b.dataset.view);});
+  $('#adminTabs').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b)return;$$('#adminTabs [data-view]').forEach(x=>x.classList.toggle('active',x===b));adminView(b.dataset.view);/* ≤768 抽屉形态：选中页签即收起抽屉（对齐前台"点链接即离开抽屉"的体验；桌面端 nav-open 本就不存在，无副作用） */document.body.classList.remove('nav-open');});
   $('#adminRefresh').onclick=()=>adminView($('#adminTabs .active')?.dataset.view||'pending');
   /* 会话还在就直接进工作台：注册后自动登录、或刷新页面时不用再登一次。
      探测失败（401/403，含只带学生会话的情况）才显示登录表单。 */
   try{await api('/api/admin-settings',{quiet401:true});await enterWork();}catch{} }
-async function adminView(view){const titles={pending:'待审核歌曲',approved:'已通过歌曲',rejected:'回收站',schedule:'排期管理',banned:'违禁词库',settings:'系统设置',reports:'举报收件箱',announcements:'公告管理',suggestions:'版本建议',accounts:'管理员账号',invites:'管理员邀请码'};$('#adminTitle').textContent=titles[view]||'管理工作台';$('#reportInbox').innerHTML='';if(['pending','approved','rejected'].includes(view))return adminList(view);if(view==='schedule')return adminSchedule();if(view==='banned')return adminBanned();if(view==='reports')return adminReports();if(view==='announcements')return adminAnnouncements();if(view==='suggestions')return adminSuggestions();if(view==='accounts')return adminAccounts();if(view==='invites')return adminInvites();return adminSettings();}
-async function adminList(status){const box=$('#adminRows');try{const rows=await api('/api/admin-list?status='+status),cfg=await api('/api/admin-settings').catch(()=>({categories:[]})),cats=cfg.categories||[];box.innerHTML=rows.length?rows.map(x=>`<article class="admin-row admin-song"><div class="admin-song-info"><b>${esc(x.title)}</b><div class="muted">${esc(x.artist)} · ${esc(x.category_name||'')} · ${Number(x.votes||0)} 票 ${x.is_reported?'· 被举报':''} ${x.playable===false?'· 当前版本无音频':''} ${x.is_debug?'· 调试投稿':''}</div><div class="song-actions"><button class="btn quiet" data-preview="${esc(x.track_id||'')}" data-song="${x.id}" data-title="${esc(x.title)}" data-artist="${esc(x.artist||'')}">试听已选版本</button>${status!=='rejected'?`<select class="input category-select" data-category-song="${x.id}">${cats.map(c=>`<option value="${c.id}" ${Number(c.id)===Number(x.category_id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><button class="btn quiet" data-update-category="${x.id}">改分类</button><button class="btn quiet" data-suggest="${x.id}">查看建议</button>`:''}</div><div class="inline-player" id="admin-player-${x.id}"></div></div><div class="actions">${status==='pending'?`<button class="btn primary" data-action="approve" data-id="${x.id}">通过</button><button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn quiet" data-clear-report="${x.id}">清除举报标记</button>`:status==='rejected'?`<button class="btn" data-action="restore" data-id="${x.id}">恢复</button><button class="btn danger" data-delete-song="${x.id}">彻底删除</button>`:''}${status==='approved'?`<button class="btn" data-add-song="${x.id}">加入排期</button>`:''}</div></article>`).join(''):'<p class="muted">这里暂时没有歌曲。</p>';if(status==='pending')await renderReportInbox();$$('#adminRows [data-action]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:b.dataset.action,id:Number(b.dataset.id)})});toast('操作已完成');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-add-song]').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'add_song',song_id:Number(b.dataset.addSong)})});toast(d.message||'已加入排期');}catch(e){toast(e.message);}});$$('#adminRows [data-delete-song]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm('永久删除这首歌及其相关记录？',{title:'彻底删除',ok:'永久删除',danger:true}))return;try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'delete',id:Number(b.dataset.deleteSong)})});toast('歌曲已永久删除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-clear-report]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'clear_report',id:Number(b.dataset.clearReport)})});toast('举报标记已清除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-update-category]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-update',{method:'POST',body:JSON.stringify({id:Number(b.dataset.updateCategory),category_id:Number($(`[data-category-song="${b.dataset.updateCategory}"]`).value)})});toast('分类已更新');}catch(e){toast(e.message);}});$$('#adminRows [data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#admin-player-${b.dataset.song}`)));$$('#adminRows [data-suggest]').forEach(b=>b.onclick=()=>showSuggestions(b.dataset.suggest));}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;} }
-async function adminSchedule(){const box=$('#adminRows');try{const [cfg,d]=await Promise.all([api('/api/admin-settings'),api('/api/schedule?week_start='+new Date().toISOString().slice(0,10)+'&weeks=4')]);const cats=cfg.categories||[];box.innerHTML=`<div class="toolbar"><label class="field">起始日期<input class="input" type="date" id="scheduleStart" value="${esc(d.weekStart)}"></label><label class="field">排期周数<input class="input" type="number" id="scheduleCount" min="1" max="12" value="4"></label><label class="field">限定分类<select class="input" id="scheduleCategory"><option value="">全部分类</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><button class="btn primary" id="autofill">自动安排</button></div><div class="schedule-grid admin-schedule">${(d.weeklies||[]).map(w=>`<article class="week"><div class="panel-head"><h3>${esc(w.weekStart)}</h3><button class="btn quiet" data-clear-week="${esc(w.weekStart)}">清空本周</button></div>${['noon','afternoon'].map(period=>`<h4 class="slot-title">${period==='noon'?'中午放学 · 含歌词':'下午上学 · 纯音乐'}</h4>${[1,2,3].map(pos=>{const s=(w.slots||[]).find(v=>v.period===period&&Number(v.position)===pos);return `<div class="slot"><b>${pos}</b><div>${s?.title?`${esc(s.title)}<span>${esc(s.artist||'')}</span>`:'待排歌曲'}</div>${s?`<button class="btn quiet" data-clear-slot="${esc(w.weekStart)}|${period}|${pos}">移除</button>`:''}</div>`}).join('')}`).join('')}</article>`).join('')}</div>`;$('#autofill').onclick=async()=>{const week_start=$('#scheduleStart').value,weeks=Number($('#scheduleCount').value);if(!week_start||!Number.isInteger(weeks)||weeks<1||weeks>12){toast('请填写有效的起始日期与周数');return;}const affected=new Set(Array.from({length:weeks},(_,i)=>{const date=new Date(`${week_start}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+i*7-((date.getUTCDay()+6)%7));return date.toISOString().slice(0,10)}));const occupied=(d.weeklies||[]).filter(w=>affected.has(w.weekStart)).flatMap(w=>w.slots||[]).filter(s=>s.song_id||s.title);if(occupied.length&&!await uiConfirm(`选定范围内已有 ${occupied.length} 个排期位置。自动安排会覆盖这些内容，继续吗？`,{title:'覆盖已有排期',ok:'继续自动安排'}))return;try{const body={action:'autofill',week_start,weeks};if($('#scheduleCategory').value)body.category_id=Number($('#scheduleCategory').value);const r=await api('/api/schedule',{method:'POST',body:JSON.stringify(body)});toast(r.message||'排期已更新');adminSchedule();}catch(e){toast(e.message);}};$$('[data-clear-week]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm(`清空 ${b.dataset.clearWeek} 这一周的排期？`,{title:'清空本周',ok:'清空',danger:true}))return;try{await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'clear_week',week_start:b.dataset.clearWeek})});adminSchedule();}catch(e){toast(e.message);}});$$('[data-clear-slot]').forEach(b=>b.onclick=async()=>{const [week_start,period,position]=b.dataset.clearSlot.split('|');try{await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'clear_slot',week_start,period,position:Number(position)})});adminSchedule();}catch(e){toast(e.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
+async function adminView(view){const titles={pending:'待审核歌曲',approved:'已通过歌曲',rejected:'回收站',schedule:'排期管理',banned:'违禁词库',settings:'系统设置',reports:'举报收件箱',announcements:'公告管理',suggestions:'版本建议',accounts:'管理员账号',invites:'管理员邀请码',classes:'班级管理',passes:'口令管理'};$('#adminTitle').textContent=titles[view]||'管理工作台';$('#reportInbox').innerHTML='';if(['pending','approved','rejected'].includes(view))return adminList(view);if(view==='schedule')return adminSchedule();if(view==='classes')return adminClasses();if(view==='passes')return adminPasses();if(view==='banned')return adminBanned();if(view==='reports')return adminReports();if(view==='announcements')return adminAnnouncements();if(view==='suggestions')return adminSuggestions();if(view==='accounts')return adminAccounts();if(view==='invites')return adminInvites();return adminSettings();}
+async function adminList(status){const box=$('#adminRows');try{const rows=await api('/api/admin-list?status='+status),cfg=await api('/api/admin-settings').catch(()=>({categories:[]})),cats=cfg.categories||[];/* 慢响应守卫：用户已切到别的页签时，这次迟到的旧列表不许覆盖新视图（登录后立刻点页签时必现） */if(($('#adminTabs .active')?.dataset.view||'pending')!==status)return;box.innerHTML=rows.length?rows.map(x=>`<article class="admin-row admin-song"><div class="admin-song-info"><b>${esc(x.title)}</b><div class="muted">${esc(x.artist)} · ${esc(x.category_name||'')} · ${Number(x.votes||0)} 票 ${x.is_reported?'· 被举报':''} ${x.playable===false?'· 当前版本无音频':''} ${x.is_debug?'· 调试投稿':''}</div><div class="song-actions"><button class="btn quiet" data-preview="${esc(x.track_id||'')}" data-song="${x.id}" data-title="${esc(x.title)}" data-artist="${esc(x.artist||'')}">试听已选版本</button>${status!=='rejected'?`<select class="input category-select" data-category-song="${x.id}">${cats.map(c=>`<option value="${c.id}" ${Number(c.id)===Number(x.category_id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><button class="btn quiet" data-update-category="${x.id}">改分类</button><button class="btn quiet" data-suggest="${x.id}">查看建议</button>`:''}</div><div class="inline-player" id="admin-player-${x.id}"></div></div><div class="actions">${status==='pending'?`<button class="btn primary" data-action="approve" data-id="${x.id}">通过</button><button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn quiet" data-clear-report="${x.id}">清除举报标记</button>`:status==='rejected'?`<button class="btn" data-action="restore" data-id="${x.id}">恢复</button><button class="btn danger" data-delete-song="${x.id}">彻底删除</button>`:''}${status==='approved'?`<button class="btn" data-add-song="${x.id}">加入排期</button>`:''}</div></article>`).join(''):'<p class="muted">这里暂时没有歌曲。</p>';if(status==='pending')await renderReportInbox();$$('#adminRows [data-action]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:b.dataset.action,id:Number(b.dataset.id)})});toast('操作已完成');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-add-song]').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'add_song',song_id:Number(b.dataset.addSong)})});toast(d.message||'已加入排期');}catch(e){toast(e.message);}});$$('#adminRows [data-delete-song]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm('永久删除这首歌及其相关记录？',{title:'彻底删除',ok:'永久删除',danger:true}))return;try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'delete',id:Number(b.dataset.deleteSong)})});toast('歌曲已永久删除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-clear-report]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'clear_report',id:Number(b.dataset.clearReport)})});toast('举报标记已清除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-update-category]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-update',{method:'POST',body:JSON.stringify({id:Number(b.dataset.updateCategory),category_id:Number($(`[data-category-song="${b.dataset.updateCategory}"]`).value)})});toast('分类已更新');}catch(e){toast(e.message);}});$$('#adminRows [data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#admin-player-${b.dataset.song}`)));$$('#adminRows [data-suggest]').forEach(b=>b.onclick=()=>showSuggestions(b.dataset.suggest));}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;} }
+async function adminSchedule(){const box=$('#adminRows');try{
+  const [cfg,d,approved]=await Promise.all([
+    api('/api/admin-settings'),
+    api('/api/schedule?week_start='+new Date().toISOString().slice(0,10)+'&weeks=4'),
+    api('/api/admin-list?status=approved'),
+  ]);
+  if($('#adminTabs .active')?.dataset.view!=='schedule')return;
+  const cats=cfg.categories||[];
+  const pool=Array.isArray(approved)?approved:[];
+  const sc=d.schedule||{mode:'both',noonCount:3,afternoonCount:3};
+  const active=sc.mode==='noon'?['noon']:['noon','afternoon'];
+  const countOf=p=>Number(p==='noon'?sc.noonCount:sc.afternoonCount)||3;
+  const periodTitle=p=>p==='noon'?'中午放学 · 含歌词':'下午上学 · 纯音乐';
+  const songOptions=selected=>`<option value="">选择已通过的歌曲…</option>${pool.map(x=>`<option value="${x.id}" ${Number(selected)===Number(x.id)?'selected':''}>${esc(x.title)}${x.artist?` · ${esc(x.artist)}`:''}</option>`).join('')}`;
+
+  box.innerHTML=`
+    <div class="toolbar">
+      <label class="field">播放模式
+        <select class="input" id="scheduleMode">
+          <option value="both" ${sc.mode!=='noon'?'selected':''}>上下午都有</option>
+          <option value="noon" ${sc.mode==='noon'?'selected':''}>仅上午</option>
+        </select></label>
+      <label class="field">起始日期<input class="input" type="date" id="scheduleStart" value="${esc(d.weekStart)}"></label>
+      <label class="field">排期周数<input class="input" type="number" id="scheduleCount" min="1" max="12" value="4"></label>
+      <label class="field">限定分类<select class="input" id="scheduleCategory"><option value="">全部分类</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
+      <button class="btn primary" id="autofill">自动安排</button>
+    </div>
+    <div class="toolbar">
+      <label class="field">中午每周数量<input class="input" type="number" id="noonCount" min="1" max="12" value="${countOf('noon')}"></label>
+      ${active.includes('afternoon')?`<label class="field">下午每周数量<input class="input" type="number" id="afternoonCount" min="1" max="12" value="${countOf('afternoon')}"></label>`:''}
+      <button class="btn" id="saveCounts">保存数量（减少时末尾退回待排）</button>
+    </div>
+    <p class="muted">播放模式与每周数量对整站生效；「起始日期」用来选定当前编辑的主周。插歌支持任意序号：插入后其后的曲目整体后移。</p>
+    <div class="schedule-grid admin-schedule">${(d.weeklies||[]).map(w=>`
+      <article class="week" data-week="${esc(w.weekStart)}">
+        <div class="panel-head"><h3>${esc(w.weekStart)}</h3><button class="btn quiet" data-clear-week="${esc(w.weekStart)}">清空本周</button></div>
+        ${active.map(period=>{
+          const count=countOf(period);
+          const slots=Array.from({length:count},(_,k)=>k+1);
+          const filledCount=slots.filter(pos=>((w.slots||[]).find(s=>s.period===period&&Number(s.position)===pos)||{}).title).length;
+          return `<h4 class="slot-title">${periodTitle(period)}（已排 ${filledCount}/${count}）</h4>${slots.map(pos=>{
+            const s=(w.slots||[]).find(v=>v.period===period&&Number(v.position)===pos);
+            return `<div class="slot"><b>${pos}</b><div>${s&&s.title?`${esc(s.title)}<span>${esc(s.artist||'')}${s.is_custom&&s.source?` · ${esc(s.source)}`:''}</span>`:'待排歌曲'}</div>${s&&s.title?`<span class="slot-actions"><button class="btn quiet" data-slot-up="${esc(w.weekStart)}|${period}|${pos}" ${pos<=1?'disabled':''}>上移</button><button class="btn quiet" data-slot-down="${esc(w.weekStart)}|${period}|${pos}" ${pos>=count?'disabled':''}>下移</button><button class="btn quiet" data-clear-slot="${esc(w.weekStart)}|${period}|${pos}">移除</button></span>`:''}</div>`;
+          }).join('')}
+          <div class="slot"><b>改</b><div class="slot-edit">
+            <select class="input" data-edit-pos="${esc(w.weekStart)}|${period}">${slots.filter(pos=>((w.slots||[]).find(s=>s.period===period&&Number(s.position)===pos)||{}).title).map(pos=>`<option value="${pos}">第 ${pos} 首</option>`).join('')||'<option value="">（本周该时段还没有已排曲目）</option>'}</select>
+            <select class="input" data-edit-song="${esc(w.weekStart)}|${period}">${songOptions('')}</select>
+            <button class="btn quiet" data-edit-save="${esc(w.weekStart)}|${period}">替换该曲目</button>
+          </div></div>
+          <div class="slot"><b>插</b><div class="slot-edit">
+            <select class="input" data-insert-song="${esc(w.weekStart)}|${period}">${songOptions('')}</select>
+            <input class="input" type="number" min="1" max="${count}" value="${Math.min(filledCount+1,count)}" data-insert-pos="${esc(w.weekStart)}|${period}" aria-label="插入位置">
+            <button class="btn quiet" data-insert-save="${esc(w.weekStart)}|${period}">插入到此位</button>
+          </div></div>`;
+        }).join('')}
+      </article>`).join('')}</div>`;
+
+  const reload=()=>adminSchedule();
+  const post=async body=>{const r=await api('/api/schedule',{method:'POST',body:JSON.stringify(body)});toast(r.message||'排期已更新');};
+
+  $('#autofill').onclick=async()=>{const week_start=$('#scheduleStart').value,weeks=Number($('#scheduleCount').value);if(!week_start||!Number.isInteger(weeks)||weeks<1||weeks>12){toast('请填写有效的起始日期与周数');return;}const affected=new Set(Array.from({length:weeks},(_,i)=>{const date=new Date(`${week_start}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+i*7-((date.getUTCDay()+6)%7));return date.toISOString().slice(0,10)}));const occupied=(d.weeklies||[]).filter(w=>affected.has(w.weekStart)).flatMap(w=>w.slots||[]).filter(s=>s.song_id||s.title);if(occupied.length&&!await uiConfirm(`选定范围内已有 ${occupied.length} 个排期位置。自动安排会覆盖这些内容，继续吗？`,{title:'覆盖已有排期',ok:'继续自动安排'}))return;try{const body={action:'autofill',week_start,weeks};if($('#scheduleCategory').value)body.category_id=Number($('#scheduleCategory').value);const r=await api('/api/schedule',{method:'POST',body:JSON.stringify(body)});toast(r.message||'排期已更新');reload();}catch(e){toast(e.message);}};
+
+  $('#scheduleMode').onchange=async e=>{
+    const mode=e.target.value;
+    if(mode==='noon'&&!await uiConfirm('切到「仅上午」后，当前编辑周（起始日期那周）的下午排期会整段退回待排；其它周的下午排期保留，切回后原样恢复。继续吗？',{title:'切换播放模式',ok:'切换为仅上午'})){reload();return;}
+    try{await post({action:'set_mode',mode,week_start:$('#scheduleStart').value});reload();}catch(err){toast(err.message);reload();}
+  };
+
+  $('#saveCounts').onclick=async()=>{
+    try{
+      const weekStart=$('#scheduleStart').value;
+      const noon=Number($('#noonCount').value);
+      if(!Number.isInteger(noon)||noon<1||noon>12){toast('中午数量需要是 1 到 12 的整数');return;}
+      await post({action:'set_block_count',period:'noon',count:noon,week_start:weekStart});
+      const afternoonInput=$('#afternoonCount');
+      if(afternoonInput){const afternoon=Number(afternoonInput.value);if(!Number.isInteger(afternoon)||afternoon<1||afternoon>12){toast('下午数量需要是 1 到 12 的整数');return;}await post({action:'set_block_count',period:'afternoon',count:afternoon,week_start:weekStart});}
+      reload();
+    }catch(err){toast(err.message);}
+  };
+
+  $$('[data-clear-week]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm(`清空 ${b.dataset.clearWeek} 这一周的排期？`,{title:'清空本周',ok:'清空',danger:true}))return;try{await post({action:'clear_week',week_start:b.dataset.clearWeek});reload();}catch(e){toast(e.message);}});
+  $$('[data-clear-slot]').forEach(b=>b.onclick=async()=>{const [week_start,period,position]=b.dataset.clearSlot.split('|');try{await post({action:'clear_slot',week_start,period,position:Number(position)});reload();}catch(e){toast(e.message);}});
+  $$('[data-slot-up]').forEach(b=>b.onclick=async()=>{const [week_start,period,position]=b.dataset.slotUp.split('|');try{await post({action:'move_slot',week_start,period,from:Number(position),to:Number(position)-1});reload();}catch(e){toast(e.message);}});
+  $$('[data-slot-down]').forEach(b=>b.onclick=async()=>{const [week_start,period,position]=b.dataset.slotDown.split('|');try{await post({action:'move_slot',week_start,period,from:Number(position),to:Number(position)+1});reload();}catch(e){toast(e.message);}});
+  $$('[data-edit-save]').forEach(b=>b.onclick=async()=>{
+    const key=b.dataset.editSave,[week_start,period]=key.split('|');
+    const posSel=$(`[data-edit-pos="${key}"]`,box),songSel=$(`[data-edit-song="${key}"]`,box);
+    if(!posSel.value){toast('该时段还没有可替换的曲目');return;}
+    if(!songSel.value){toast('请选择要替换成的歌曲');return;}
+    try{await post({action:'set_slot',week_start,period,position:Number(posSel.value),song_id:Number(songSel.value)});reload();}catch(e){toast(e.message);}
+  });
+  $$('[data-insert-save]').forEach(b=>b.onclick=async()=>{
+    const key=b.dataset.insertSave,[week_start,period]=key.split('|');
+    const songSel=$(`[data-insert-song="${key}"]`,box),posInput=$(`[data-insert-pos="${key}"]`,box);
+    if(!songSel.value){toast('请选择要插入的歌曲');return;}
+    try{await post({action:'insert_slot',week_start,period,position:Number(posInput.value||1),song_id:Number(songSel.value)});reload();}catch(e){toast(e.message);}
+  });
+}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
+/* 班级管理（独立视图，2026-10-10）：新增班级、编辑配置（人数 / 上限表达式）、
+   暂停与恢复、修改口令。上限支持两种写法：固定数字（52）或 x*比例（x=本班人数）。
+   原「系统设置」里的班级卡片保留不动 —— 那是口令生成功能的原入口。 */
+async function adminClasses(){const box=$('#adminRows');try{
+  const d=await api('/api/admin-settings');
+  if($('#adminTabs .active')?.dataset.view!=='classes')return;
+  const isSuper=d.security?.isSuper===true;
+  if(!isSuper){box.innerHTML='<p class="notice">班级管理仅向高级管理员开放（与「系统设置 → 班级管理」一致）。</p>';return;}
+  const classes=d.classes||[];
+  const canView=!!d.security?.canViewPasswords;
+  const limitHint='两种写法：固定数字（如 52）或 x*比例（x = 本班人数，如 x*0.25）；留空不限制';
+  box.innerHTML=`<div class="settings-grid">
+    <section class="settings-card"><h3>新增班级</h3>
+      <form id="classAddForm" class="settings-form">
+        <input class="input" id="newClassName" maxlength="30" placeholder="班级名称" required>
+        <input class="input" id="newClassPassword" type="password" minlength="6" placeholder="初始口令（至少 6 位）" required>
+        <input class="input" id="newClassGrade" maxlength="20" placeholder="年级（选填，如高一）">
+        <input class="input" id="newClassCount" type="number" min="0" max="10000" placeholder="班级人数（选填）">
+        <input class="input" id="newClassVoteLimit" placeholder="投票上限：52 或 x*0.25（选填）">
+        <input class="input" id="newClassSubmitLimit" placeholder="投稿上限：52 或 x*0.25（选填）">
+        <button class="btn primary">添加班级</button>
+      </form>
+      <p class="muted">${limitHint}。达到上限的班级会被拦截投票 / 投稿；暂停的班级不能投票与投稿但仍可浏览。</p>
+    </section>
+    ${classes.map(c=>`<section class="settings-card">
+      <div class="settings-class-head"><b>${esc(c.name)}</b><span class="muted">${esc(c.grade||'未设年级')} · ${c.member_count==null?'未填写人数':`${Number(c.member_count)} 人`}</span>${c.paused?'<span class="muted">（已暂停）</span>':''}${canView&&c.password?`<span class="muted">当前口令：${esc(c.password)}</span>`:''}</div>
+      <form class="settings-form" data-class-info="${c.id}">
+        <input class="input" maxlength="20" value="${esc(c.grade||'')}" aria-label="年级" placeholder="年级">
+        <input class="input" type="number" min="0" max="10000" value="${c.member_count==null?'':Number(c.member_count)}" aria-label="人数" placeholder="人数">
+        <input class="input" value="${esc(c.vote_limit||'')}" aria-label="投票上限" placeholder="投票上限：52 或 x*0.25">
+        <input class="input" value="${esc(c.submit_limit||'')}" aria-label="投稿上限" placeholder="投稿上限：52 或 x*0.25">
+        <button class="btn quiet">保存配置</button>
+      </form>
+      <form class="settings-form" data-class-password="${c.id}">
+        <input class="input" type="password" minlength="6" placeholder="修改班级口令">
+        <button class="btn quiet">更新口令</button>
+      </form>
+      <div class="settings-form">
+        <button class="btn ${c.paused?'':'danger'}" type="button" data-toggle-pause="${c.id}" data-paused="${c.paused?0:1}" data-class-name="${esc(c.name)}">${c.paused?'恢复班级':'暂停班级'}</button>
+        <button class="btn danger" type="button" data-delete-class="${c.id}" data-class-name="${esc(c.name)}">删除班级</button>
+      </div>
+    </section>`).join('')||'<p class="muted">尚无班级。</p>'}
+  </div>`;
+
+  $('#classAddForm').onsubmit=async e=>{e.preventDefault();try{
+    const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'add_class',name:$('#newClassName').value,password:$('#newClassPassword').value,grade:$('#newClassGrade').value,member_count:$('#newClassCount').value,vote_limit:$('#newClassVoteLimit').value,submit_limit:$('#newClassSubmitLimit').value})});
+    toast(r.message||'班级已添加');adminClasses();
+  }catch(err){toast(err.message);}};
+
+  $$('[data-class-info]',box).forEach(f=>f.onsubmit=async e=>{e.preventDefault();const inputs=$$('input',f);try{
+    const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_info',id:Number(f.dataset.classInfo),grade:inputs[0].value,member_count:inputs[1].value,vote_limit:inputs[2].value,submit_limit:inputs[3].value})});
+    toast(r.message||'班级配置已保存');adminClasses();
+  }catch(err){toast(err.message);}});
+
+  $$('[data-class-password]',box).forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{
+    const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_password',id:Number(f.dataset.classPassword),new_password:$('input',f).value})});
+    toast(r.message||'口令已更新');adminClasses();
+  }catch(err){toast(err.message);}});
+
+  $$('[data-toggle-pause]',box).forEach(b=>b.onclick=async()=>{
+    const pausing=b.dataset.paused==='1';
+    if(pausing&&!await uiConfirm(`暂停「${b.dataset.className}」？该班级用户将不能投票与投稿（仍可浏览）。`,{title:'暂停班级',ok:'暂停',danger:true}))return;
+    try{
+      const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_class_paused',id:Number(b.dataset.togglePause),paused:pausing?1:0})});
+      toast(r.message||'已更新');adminClasses();
+    }catch(err){toast(err.message);}
+  });
+
+  $$('[data-delete-class]',box).forEach(b=>b.onclick=async()=>{
+    if(!await uiConfirm(`确认删除「${b.dataset.className}」？该班级会话将立即失效。`,{title:'删除班级',ok:'删除',danger:true}))return;
+    try{
+      const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_class',id:Number(b.dataset.deleteClass)})});
+      toast(r.message||'班级已删除');adminClasses();
+    }catch(err){toast(err.message);}
+  });
+}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
+
+/* 口令管理（独立视图，2026-10-10）：生成 / 作废 / 删除 测试口令与游客口令。
+   用户在前台现有的登录框里直接输入这些口令即可 —— 不新增游客登录按钮。 */
+async function adminPasses(){const box=$('#adminRows');try{
+  const d=await api('/api/admin-passes');
+  if($('#adminTabs .active')?.dataset.view!=='passes')return;
+  const passes=d.passes||[];
+  box.innerHTML=`<div class="settings-grid">
+    <section class="settings-card"><h3>生成测试口令</h3>
+      <p class="muted">登录后拥有完整投稿与投票权限；到期自动失效。</p>
+      <form id="testPassForm" class="settings-form">
+        <input class="input" id="testPassLabel" maxlength="40" placeholder="备注（如：周五演示）">
+        <input class="input" type="number" id="testPassDays" min="1" max="3650" value="7" placeholder="有效天数（默认 7）">
+        <button class="btn primary">生成测试口令</button>
+      </form>
+    </section>
+    <section class="settings-card"><h3>生成游客口令</h3>
+      <p class="muted">登录后只能浏览榜单与试听，不能投稿、投票或举报。</p>
+      <form id="guestPassForm" class="settings-form">
+        <input class="input" id="guestPassLabel" maxlength="40" placeholder="备注（选填）">
+        <input class="input" type="number" id="guestPassDays" min="1" max="3650" placeholder="有效天数（留空=长期）">
+        <button class="btn primary">生成游客口令</button>
+      </form>
+    </section>
+  </div>
+  <div id="newPass"></div>
+  <p class="muted">口令在生成时完整显示一次${d.canView?'，之后也可在列表里查看':''}；用户在登录框输入口令后，页面会显示【游客状态】或测试身份。</p>
+  ${passes.map(p=>`<div class="admin-row"><div><b>${p.kind==='test'?'测试口令':'游客口令'}${p.label?` · ${esc(p.label)}`:''}</b>
+    <div class="muted">${p.token?`口令：${esc(p.token)}`:'口令不可查看（未配置 AUTH_PEPPER，仅生成时显示一次）'} · ${p.expires_at?`有效期至 ${esc(p.expires_at)}`:'长期有效'} · ${p.revoked?'已作废':'有效'}${p.last_used_at?` · 最近使用 ${esc(p.last_used_at)}`:''}</div></div>
+    <div class="actions">${p.token?`<button class="btn quiet" data-copy-pass="${p.id}" data-token="${esc(p.token)}">复制口令</button>`:''}${p.revoked?'':`<button class="btn" data-revoke-pass="${p.id}">作废</button>`}<button class="btn danger" data-delete-pass="${p.id}">删除</button></div></div>`).join('')||'<p class="muted">还没有口令凭证。</p>'}`;
+
+  const showNew=(kind,r)=>{
+    $('#newPass').innerHTML=`<p class="notice">新的${kind==='test'?'测试口令':'游客口令'}：<strong>${esc(r.token)}</strong>（${r.expires_at?`有效期至 ${esc(r.expires_at)}`:'长期有效'}）—— 请立即复制分发。</p>`;
+    navigator.clipboard?.writeText(r.token).catch(()=>{});
+  };
+  $('#testPassForm').onsubmit=async e=>{e.preventDefault();try{
+    const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'create',kind:'test',label:$('#testPassLabel').value,expires_days:$('#testPassDays').value})});
+    await adminPasses();showNew('test',r);
+  }catch(err){toast(err.message);}};
+  $('#guestPassForm').onsubmit=async e=>{e.preventDefault();try{
+    const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'create',kind:'guest',label:$('#guestPassLabel').value,expires_days:$('#guestPassDays').value})});
+    await adminPasses();showNew('guest',r);
+  }catch(err){toast(err.message);}};
+
+  $$('[data-copy-pass]',box).forEach(b=>b.onclick=()=>{navigator.clipboard?.writeText(b.dataset.token).then(()=>toast('口令已复制')).catch(()=>toast(b.dataset.token));});
+  $$('[data-revoke-pass]',box).forEach(b=>b.onclick=async()=>{
+    if(!await uiConfirm('作废这条口令？它签发的所有登录会立即失效。',{title:'作废口令',ok:'作废',danger:true}))return;
+    try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'revoke',id:Number(b.dataset.revokePass)})});toast(r.message||'已作废');adminPasses();}catch(err){toast(err.message);}
+  });
+  $$('[data-delete-pass]',box).forEach(b=>b.onclick=async()=>{
+    if(!await uiConfirm('彻底删除这条口令？它签发的所有登录会立即失效。',{title:'删除口令',ok:'删除',danger:true}))return;
+    try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'delete',id:Number(b.dataset.deletePass)})});toast(r.message||'已删除');adminPasses();}catch(err){toast(err.message);}
+  });
+}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
+
 async function adminBanned(){const box=$('#adminRows');try{const d=await api('/api/admin-settings');box.innerHTML=`<form id="bannedForm" class="toolbar"><label class="field">违禁词<input class="input" id="bannedWord" maxlength="12" required></label><label class="field">原因<input class="input" id="bannedReason" maxlength="60" placeholder="管理员封禁"></label><label class="field">失效时间<input class="input" type="date" id="bannedExpiry"></label><button class="btn primary">加入词库</button></form><p class="muted">命中规则会拦截包含该词的歌名或歌手；未设置日期时默认长期有效。</p><div>${(d.banned||[]).map(x=>`<div class="admin-row"><div><b>${esc(x.keyword)}</b><div class="muted">${esc(x.reason||'管理员封禁')} · 至 ${esc(x.expire_at||'长期')}</div></div><button class="btn" data-remove-ban="${x.id}">移除</button></div>`).join('')||'<p class="muted">词库目前为空。</p>'}</div>`;$('#bannedForm').onsubmit=async e=>{e.preventDefault();try{const expiry=$('#bannedExpiry').value;const body={action:'add_banned',keyword:$('#bannedWord').value,reason:$('#bannedReason').value};if(expiry)body.expire_at=expiry+' 23:59:59';await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast('违禁词已加入');adminBanned();}catch(err){toast(err.message);}};$$('[data-remove-ban]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_banned',id:Number(b.dataset.removeBan)})});adminBanned();}catch(e){toast(e.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
-async function adminSettings(){const box=$('#adminRows');try{const d=await api('/api/admin-settings');const isSuper=d.security?.isSuper===true;const classes=d.classes||[];const memberTotal=classes.reduce((n,c)=>n+(Number(c.member_count)||0),0);const missingCounts=classes.some(c=>c.member_count==null);box.innerHTML=`<div class="settings-grid"><section class="settings-card"><h3>安全状态与修改密码</h3><p class="muted">${d.security?.pepperConfigured?'私有 AUTH_PEPPER 已配置，班级口令索引受保护。':esc(d.security?.canViewPasswordsReason||'未确认私有 AUTH_PEPPER 配置。')}</p><p class="muted">当前身份：${isSuper?'高级管理员':'普通管理员'}。</p><form id="adminPasswordForm" class="settings-form"><input class="input" type="password" id="currentAdminPassword" autocomplete="current-password" placeholder="当前管理员密码" required><input class="input" type="password" id="newAdminPassword" minlength="8" autocomplete="new-password" placeholder="新密码（至少 8 位）" required><button class="btn primary">修改我的密码</button></form></section><section class="settings-card"><h3>投稿入口</h3><p class="muted">${d.submit?.paused?'当前暂停接收投稿':'当前正常接收投稿'}</p><button class="btn ${d.submit?.paused?'':'primary'}" id="toggleSubmissions">${d.submit?.paused?'恢复接收':'暂停接收'}</button></section>${isSuper?`<section class="settings-card"><h3>投票上限</h3><p class="muted">按全校人数汇总：${memberTotal} 人${missingCounts?'；有班级尚未填写人数':''}。0 表示不限。</p><form id="capForm" class="settings-form"><input class="input" type="number" min="0" max="1000000" id="voteCap" value="${Number(d.vote?.cap||0)}"><button class="btn quiet" type="button" id="fillMemberTotal">填入全校人数</button><button class="btn primary">保存上限</button></form></section><section class="settings-card"><h3>举报收件箱阈值</h3><p class="muted">同一首歌被不同班级达到此数量后进入待审核页收件箱。</p><form id="thresholdForm" class="settings-form"><input class="input" type="number" min="2" max="20" id="reportThreshold" value="${Number(d.report?.threshold||3)}"><button class="btn primary">保存阈值</button></form></section><section class="settings-card"><h3>分类排序权重</h3><p class="muted">权重越高，正式榜中该分类越靠前。</p>${(d.categories||[]).map(c=>`<form class="admin-row weight-form" data-category="${c.id}"><b>${esc(c.name)}</b><input class="input weight-input" type="number" min="0" max="1000" value="${Number(c.weight)||0}"><button class="btn">更新</button></form>`).join('')||'<p class="muted">没有分类配置。</p>'}</section><section class="settings-card"><h3>班级管理</h3><form id="addClassForm" class="settings-form"><input class="input" id="newClassName" maxlength="30" placeholder="班级名称" required><input class="input" id="newClassPassword" type="password" minlength="6" placeholder="初始口令（至少 6 位）" required><input class="input" id="newClassGrade" maxlength="20" placeholder="年级（选填，如高一）"><input class="input" id="newClassCount" type="number" min="0" max="10000" placeholder="班级人数（选填）"><button class="btn primary">添加班级</button></form><p class="muted">${classes.length} 个班级 · ${memberTotal} 人${missingCounts?'（人数尚未填全）':''}</p><div class="class-settings-list">${classes.map(c=>`<article class="settings-class"><div class="settings-class-head"><b>${esc(c.name)}</b><span class="muted">${esc(c.grade||'未设年级')} · ${c.member_count==null?'未填写人数':`${Number(c.member_count)} 人`}</span>${d.security?.canViewPasswords&&c.password?`<span class="muted">当前口令：${esc(c.password)}</span>`:''}</div><form class="settings-form class-info-form" data-class-info="${c.id}"><input class="input" maxlength="20" value="${esc(c.grade||'')}" aria-label="年级" placeholder="年级"><input class="input" type="number" min="0" max="10000" value="${c.member_count==null?'':Number(c.member_count)}" aria-label="人数" placeholder="人数"><button class="btn quiet">保存年级/人数</button></form><form class="settings-form class-password-form" data-class-password="${c.id}"><input class="input" type="password" minlength="6" placeholder="修改班级口令"><button class="btn quiet">更新口令</button><button class="btn danger" type="button" data-delete-class="${c.id}" data-class-name="${esc(c.name)}">删除班级</button></form></article>`).join('')||'<p class="muted">尚无班级口令。</p>'}</div></section>`:''}</div>`;$('#adminPasswordForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'change_admin_password',current_password:$('#currentAdminPassword').value,new_password:$('#newAdminPassword').value})});toast(r.message||'密码已更新');e.currentTarget.reset();}catch(err){toast(err.message);}};$('#toggleSubmissions').onclick=async()=>{try{await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_submissions_paused',paused:!d.submit?.paused})});await adminSettings();}catch(e){toast(e.message);}};if(!isSuper)return;$('#fillMemberTotal').onclick=()=>{if(!memberTotal){toast('尚未填写班级人数');return;}$('#voteCap').value=String(memberTotal);};$('#capForm').onsubmit=e=>{e.preventDefault();settingsPost({action:'set_vote_cap',cap:Number($('#voteCap').value)});};$('#thresholdForm').onsubmit=e=>{e.preventDefault();settingsPost({action:'set_report_threshold',threshold:Number($('#reportThreshold').value)});};$$('.weight-form').forEach(f=>f.onsubmit=e=>{e.preventDefault();settingsPost({action:'update_category_weight',id:Number(f.dataset.category),weight:Number($('.weight-input',f).value)});});$('#addClassForm').onsubmit=async e=>{e.preventDefault();const body={action:'add_class',name:$('#newClassName').value,password:$('#newClassPassword').value,grade:$('#newClassGrade').value,member_count:$('#newClassCount').value};try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast(r.message||'班级已添加');adminSettings();}catch(err){toast(err.message);}};$$('.class-info-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();const inputs=$$('input',f);try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_info',id:Number(f.dataset.classInfo),grade:inputs[0].value,member_count:inputs[1].value})});toast(r.message||'班级信息已更新');await adminSettings();}catch(err){toast(err.message);}});$$('.class-password-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_password',id:Number(f.dataset.classPassword),new_password:$('input',f).value})});toast(r.message||'口令已更新');await adminSettings();}catch(err){toast(err.message);}});$$('[data-delete-class]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm(`确认删除「${b.dataset.className}」？该班级会话将立即失效。`,{title:'删除班级',ok:'删除',danger:true}))return;try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_class',id:Number(b.dataset.deleteClass)})});toast(r.message||'班级已删除');await adminSettings();}catch(err){toast(err.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
+async function adminSettings(){const box=$('#adminRows');try{const d=await api('/api/admin-settings');const isSuper=d.security?.isSuper===true;const classes=d.classes||[];const memberTotal=classes.reduce((n,c)=>n+(Number(c.member_count)||0),0);const missingCounts=classes.some(c=>c.member_count==null);box.innerHTML=`<div class="settings-grid"><section class="settings-card"><h3>安全状态与修改密码</h3><p class="muted">${d.security?.pepperConfigured?'私有 AUTH_PEPPER 已配置，班级口令索引受保护。':esc(d.security?.canViewPasswordsReason||'未确认私有 AUTH_PEPPER 配置。')}</p><p class="muted">当前身份：${isSuper?'高级管理员':'普通管理员'}。</p><form id="adminPasswordForm" class="settings-form"><input class="input" type="password" id="currentAdminPassword" autocomplete="current-password" placeholder="当前管理员密码" required><input class="input" type="password" id="newAdminPassword" minlength="8" autocomplete="new-password" placeholder="新密码（至少 8 位）" required><button class="btn primary">修改我的密码</button></form></section><section class="settings-card"><h3>投稿入口</h3><p class="muted">${d.submit?.paused?'当前暂停接收投稿':'当前正常接收投稿'}</p><button class="btn ${d.submit?.paused?'':'primary'}" id="toggleSubmissions">${d.submit?.paused?'恢复接收':'暂停接收'}</button></section>${isSuper?`<section class="settings-card"><h3>投票上限</h3><p class="muted">按全校人数汇总：${memberTotal} 人${missingCounts?'；有班级尚未填写人数':''}。0 表示不限。</p><form id="capForm" class="settings-form"><input class="input" type="number" min="0" max="1000000" id="voteCap" value="${Number(d.vote?.cap||0)}"><button class="btn quiet" type="button" id="fillMemberTotal">填入全校人数</button><button class="btn primary">保存上限</button></form></section><section class="settings-card"><h3>全站投稿总量上限</h3><p class="muted">当前累计投稿 ${Number(d.submitCap?.used||0)} 份。${d.submitCap?.raw?`已设上限 ${esc(d.submitCap.raw)}${Number(d.submitCap.cap)?`（有效值 ${Number(d.submitCap.cap)} 份）`:''}。`:'未设置（不限制）。'}达到上限后投稿入口自动关闭；投票不受此项影响。</p><form id="submitCapForm" class="settings-form"><input class="input" id="submitCapInput" value="${esc(d.submitCap?.raw||'')}" placeholder="如 100，或 x*0.25（x=全校有效班级总人数）"><button class="btn primary">保存上限</button><button class="btn quiet" type="button" id="clearSubmitCap">清空关闭</button></form></section><section class="settings-card"><h3>举报收件箱阈值</h3><p class="muted">同一首歌被不同班级达到此数量后进入待审核页收件箱。</p><form id="thresholdForm" class="settings-form"><input class="input" type="number" min="2" max="20" id="reportThreshold" value="${Number(d.report?.threshold||3)}"><button class="btn primary">保存阈值</button></form></section><section class="settings-card"><h3>分类排序权重</h3><p class="muted">权重越高，正式榜中该分类越靠前。</p>${(d.categories||[]).map(c=>`<form class="admin-row weight-form" data-category="${c.id}"><b>${esc(c.name)}</b><input class="input weight-input" type="number" min="0" max="1000" value="${Number(c.weight)||0}"><button class="btn">更新</button></form>`).join('')||'<p class="muted">没有分类配置。</p>'}</section><section class="settings-card"><h3>班级管理</h3><form id="addClassForm" class="settings-form"><input class="input" id="newClassName" maxlength="30" placeholder="班级名称" required><input class="input" id="newClassPassword" type="password" minlength="6" placeholder="初始口令（至少 6 位）" required><input class="input" id="newClassGrade" maxlength="20" placeholder="年级（选填，如高一）"><input class="input" id="newClassCount" type="number" min="0" max="10000" placeholder="班级人数（选填）"><button class="btn primary">添加班级</button></form><p class="muted">${classes.length} 个班级 · ${memberTotal} 人${missingCounts?'（人数尚未填全）':''}</p><div class="class-settings-list">${classes.map(c=>`<article class="settings-class"><div class="settings-class-head"><b>${esc(c.name)}</b><span class="muted">${esc(c.grade||'未设年级')} · ${c.member_count==null?'未填写人数':`${Number(c.member_count)} 人`}</span>${d.security?.canViewPasswords&&c.password?`<span class="muted">当前口令：${esc(c.password)}</span>`:''}</div><form class="settings-form class-info-form" data-class-info="${c.id}"><input class="input" maxlength="20" value="${esc(c.grade||'')}" aria-label="年级" placeholder="年级"><input class="input" type="number" min="0" max="10000" value="${c.member_count==null?'':Number(c.member_count)}" aria-label="人数" placeholder="人数"><button class="btn quiet">保存年级/人数</button></form><form class="settings-form class-password-form" data-class-password="${c.id}"><input class="input" type="password" minlength="6" placeholder="修改班级口令"><button class="btn quiet">更新口令</button><button class="btn danger" type="button" data-delete-class="${c.id}" data-class-name="${esc(c.name)}">删除班级</button></form></article>`).join('')||'<p class="muted">尚无班级口令。</p>'}</div></section>`:''}</div>`;$('#adminPasswordForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'change_admin_password',current_password:$('#currentAdminPassword').value,new_password:$('#newAdminPassword').value})});toast(r.message||'密码已更新');e.currentTarget.reset();}catch(err){toast(err.message);}};$('#toggleSubmissions').onclick=async()=>{try{await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_submissions_paused',paused:!d.submit?.paused})});await adminSettings();}catch(e){toast(e.message);}};if(!isSuper)return;$('#fillMemberTotal').onclick=()=>{if(!memberTotal){toast('尚未填写班级人数');return;}$('#voteCap').value=String(memberTotal);};$('#capForm').onsubmit=e=>{e.preventDefault();settingsPost({action:'set_vote_cap',cap:Number($('#voteCap').value)});};$('#submitCapForm').onsubmit=e=>{e.preventDefault();settingsPost({action:'set_submit_cap',cap:$('#submitCapInput').value});};$('#clearSubmitCap').onclick=()=>{settingsPost({action:'set_submit_cap',cap:''});};$('#thresholdForm').onsubmit=e=>{e.preventDefault();settingsPost({action:'set_report_threshold',threshold:Number($('#reportThreshold').value)});};$$('.weight-form').forEach(f=>f.onsubmit=e=>{e.preventDefault();settingsPost({action:'update_category_weight',id:Number(f.dataset.category),weight:Number($('.weight-input',f).value)});});$('#addClassForm').onsubmit=async e=>{e.preventDefault();const body={action:'add_class',name:$('#newClassName').value,password:$('#newClassPassword').value,grade:$('#newClassGrade').value,member_count:$('#newClassCount').value};try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast(r.message||'班级已添加');adminSettings();}catch(err){toast(err.message);}};$$('.class-info-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();const inputs=$$('input',f);try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_info',id:Number(f.dataset.classInfo),grade:inputs[0].value,member_count:inputs[1].value})});toast(r.message||'班级信息已更新');await adminSettings();}catch(err){toast(err.message);}});$$('.class-password-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'update_class_password',id:Number(f.dataset.classPassword),new_password:$('input',f).value})});toast(r.message||'口令已更新');await adminSettings();}catch(err){toast(err.message);}});$$('[data-delete-class]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm(`确认删除「${b.dataset.className}」？该班级会话将立即失效。`,{title:'删除班级',ok:'删除',danger:true}))return;try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_class',id:Number(b.dataset.deleteClass)})});toast(r.message||'班级已删除');await adminSettings();}catch(err){toast(err.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
 async function settingsPost(body){try{const d=await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast(d.message||'设置已保存');adminSettings();}catch(e){toast(e.message);}}
 async function renderReportInbox(){const box=$('#reportInbox');try{const d=await api('/api/admin-reports');box.innerHTML=`<section class="inbox"><h3>待处理举报 · 阈值 ${Number(d.threshold)||3}</h3>${d.available===false?'<p class="muted">举报收件箱需先执行数据库迁移 008。</p>':''}${(d.reports||[]).map(r=>`<article class="report-card"><b>${esc(r.title)} · ${Number(r.report_count)} 次举报</b><p class="muted">${esc(r.artist)} · ${esc(r.category_name)} · 最近 ${esc(r.last_at)}</p><ul>${(r.details||[]).map(x=>`<li>${esc(x.class_name||'未知班级')}${x.reason?`：${esc(x.reason)}`:''} · ${esc(x.created_at)}</li>`).join('')}</ul><button class="btn primary" data-handle-report="${r.song_id}">标记已处理</button></article>`).join('')||'<p class="muted">目前没有达到阈值的待处理举报。</p>'}</section>`;$$('[data-handle-report]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-reports',{method:'POST',body:JSON.stringify({action:'handle',song_id:Number(b.dataset.handleReport)})});toast('举报已处理');renderReportInbox();}catch(e){toast(e.message);}});}catch(e){box.innerHTML=`<p class="message">举报收件箱：${esc(e.message)}</p>`;}}
 async function adminReports(){const box=$('#adminRows');box.innerHTML='<p class="muted">举报详情显示在待审核页的收件箱中。</p>';await renderReportInbox();}
@@ -163,8 +483,8 @@ async function register(){const f=$('#registerForm'),m=$('#registerMessage');
     if(password!==password2){m.textContent='两次输入的密码不一致';return;}
     try{await api('/api/admin-register',{method:'POST',body:JSON.stringify({username,password,password2,invite_code:$('#invite').value})});
       m.textContent='注册成功，正在为你自动登录…';
-      try{await api('/api/admin-login',{method:'POST',body:JSON.stringify({username,password})});m.textContent='注册成功，已自动登录，正在进入后台…';setTimeout(()=>location.href='/admin',700);}
-      catch{toast('注册成功，请用新账号登录');setTimeout(()=>location.href='/admin',900);}
+      try{await api('/api/admin-login',{method:'POST',body:JSON.stringify({username,password})});m.textContent='注册成功，已自动登录，正在进入后台…';setTimeout(()=>location.href='/admin7318434',700);}
+      catch{toast('注册成功，请用新账号登录');setTimeout(()=>location.href='/admin7318434',900);}
     }catch(err){m.textContent=err.message;}});}
 if(!document.querySelector('.recaptcha-disclosure')){const note=document.createElement('p');note.className='recaptcha-disclosure';note.innerHTML='本网站使用 Google reCAPTCHA 保护服务，适用 Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">隐私权政策</a>与<a href="https://policies.google.com/terms" target="_blank" rel="noreferrer">服务条款</a>。';
   /* 挂到页脚**里面**（原来是挂到 .shell，排在页脚之后 —— 于是它成了整页
@@ -183,7 +503,7 @@ async function loginPage(){document.body.classList.remove('guest-mode');const me
 const isLandingBody=document.body.classList.contains('landing-page');
 const path=location.pathname;
 const pageName=(path.replace(/\/+$/,'/').split('/').pop()||'index').replace(/\.html$/i,'')||'index';
-if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(pageName==='index')home(); else if(pageName==='landing'){/* 显式路径进来的发布页 */} else if(pageName==='login')loginPage(); else if(pageName==='vote')votePage(); else if(pageName==='schedule')schedule(); else if(pageName==='admin')admin(); else if(pageName==='register')register();else if(pageName==='suggest')suggestionsPage();
+if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(pageName==='index')home(); else if(pageName==='landing'){/* 显式路径进来的发布页 */} else if(pageName==='login')loginPage(); else if(pageName==='vote')votePage(); else if(pageName==='schedule')schedule(); else if(pageName==='admin7318434')admin(); else if(pageName==='register')register();else if(pageName==='suggest')suggestionsPage();
 ;
 
 /* 投稿须知与免责声明原文（2026-10-08 从旧前端补回；页面上的可见内容与此同源）*/

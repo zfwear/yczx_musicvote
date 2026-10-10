@@ -2,6 +2,10 @@ import { readJson, error, json } from '../../_lib/http.js';
 import { requireSession, requireStaff, isGuestSession, readSession } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum, sanitizeText } from '../../_lib/validate.js';
 import { changedRows, isMissingTable, isMissingColumn } from '../../_lib/db.js';
+import {
+  getScheduleConfig, setSetting,
+  SETTING_SCHEDULE_MODE, SETTING_NOON_COUNT, SETTING_AFTERNOON_COUNT, SCHEDULE_SLOT_MAX,
+} from '../../_lib/settings.js';
 
 /**
  * 每周歌单。
@@ -11,12 +15,19 @@ import { changedRows, isMissingTable, isMissingColumn } from '../../_lib/db.js';
  *   下午上学 = 3 首纯音乐
  * 下周换一批，所以歌消耗得比较快 —— 接口支持一次排好几周。
  *
+ * 2026-10-10 追加（排期编辑需求）：
+ *   · 播放模式可切换：both（上下午都有，默认）/ noon（仅上午）；
+ *   · 每个时段的槽位数量可增减（1 ~ 12），减少时**末尾曲目退回待排**；
+ *   · 已通过的歌可以插到任意时段的任意位置（insert_slot 会把后面的行整体
+ *     后移），也可以在时段内移动（move_slot）；
+ *   · 全部配置存 system_settings，**默认值与旧行为完全一致**（3 + 3）。
+ *
  * GET  —— 从某一周起，往后连续读若干周（学生与管理员都能看）
- * POST —— 管理员：排某一周 / 连续排多周 / 指定某个位置 / 清空
+ * POST —— 管理员：排某一周 / 连续排多周 / 指定某个位置 / 清空 / 模式与数量
  */
 
 const PERIODS = ['noon', 'afternoon'];
-const PER_WEEK = 3;                  // 每个时段 3 首 → 一周 6 首
+const PER_WEEK = 3;                  // 默认每个时段 3 首 → 一周 6 首（历史口径，作 fallback）
 const MAX_WEEKS = 12;                // 一次最多排/看 12 周
 
 /**
@@ -40,6 +51,43 @@ const MIGRATION_HINT =
   + '请先在 D1 控制台执行 sql/012_weekly_schedule.sql';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 某个时段当前的每周槽位数（含"该时段在当前模式下是否存在"）。 */
+async function periodCapacity(env, period) {
+  const cfg = await getScheduleConfig(env);
+  if (period === 'noon') {
+    return { exists: true, count: cfg.noonCount, cfg };
+  }
+  return { exists: cfg.mode === 'both', count: cfg.afternoonCount, cfg };
+}
+
+/**
+ * 槽位上限的统一出口：位置参数一律先过这里。
+ * 超出当前配置（或时段被模式隐藏）→ 返回错误；调用方直接 400。
+ */
+async function checkSlotRange(env, period, position) {
+  const cap = await periodCapacity(env, period);
+  if (!cap.exists) {
+    return { error: `当前播放模式下没有${PERIOD_LABELS[period]}板块，请先把播放模式切回「上下午都有」` };
+  }
+  if (Number(position) > cap.count) {
+    return { error: `第 ${position} 首超出${PERIOD_LABELS[period]}当前的排曲总数（${cap.count}），请先调大数量` };
+  }
+  return { ok: true, count: cap.count };
+}
+
+/**
+ * 把某周某时段 position > count 的行删掉 —— 这就是"末尾曲目退回待排"：
+ * weekly_playlist 的行只是"排期占位"，歌曲本体一直在曲库里，
+ * 删掉占位后它自然回到已通过待排的池子里。
+ * 只删超出的部分：当前已排 ≤ 目标数量时一个字都不动（需求明确要求）。
+ */
+async function trimPeriodTail(env, weekStart, period, count) {
+  const result = await env.DB.prepare(
+    'DELETE FROM weekly_playlist WHERE week_start = ? AND period = ? AND position > ?'
+  ).bind(weekStart, period, count).run();
+  return changedRows(result);
+}
 
 /**
  * 往某个位置写入"曲库歌或待排"（songId 为数字=曲库歌，null=待排）。
@@ -204,12 +252,19 @@ export async function onRequestGet(context) {
       });
     }
 
+    // 排期配置（模式 + 每时段数量）：前端据此渲染板块（仅上午模式隐藏下午）
+    // 与"待排"占位数量。未配置时回落 3+3，与旧行为一致。
+    const schedule = await getScheduleConfig(env);
+    const activePeriods = schedule.mode === 'noon' ? ['noon'] : PERIODS.slice();
+
     return json({
       weekStart: start,
       weeks,
-      perWeek: PER_WEEK * PERIODS.length,
+      perWeek: schedule.noonCount + schedule.afternoonCount,
       periods: PERIODS,
+      activePeriods,
       customSupported,
+      schedule,
       weeklies: out,
     });
   } catch (err) {
@@ -221,12 +276,15 @@ export async function onRequestGet(context) {
         const ws = addWeeks(start, i);
         out.push({ weekStart: ws, weekEnd: addDays(ws, 4), slots: [] });
       }
+      const schedule = await getScheduleConfig(env).catch(() => null);
       return json({
         weekStart: start,
         weeks,
-        perWeek: PER_WEEK * PERIODS.length,
+        perWeek: schedule ? schedule.noonCount + schedule.afternoonCount : PER_WEEK * PERIODS.length,
         periods: PERIODS,
+        activePeriods: schedule && schedule.mode === 'noon' ? ['noon'] : PERIODS.slice(),
         customSupported: false,
+        schedule: schedule || { mode: 'both', noonCount: PER_WEEK, afternoonCount: PER_WEEK },
         weeklies: out,
         needsMigration: true,
         hint: MIGRATION_HINT,
@@ -263,6 +321,10 @@ export async function onRequestPost(context) {
     if (data.action === 'set_custom') return await setCustom(env, data);
     if (data.action === 'clear_slot') return await clearSlot(env, data);
     if (data.action === 'clear_week') return await clearWeek(env, data);
+    if (data.action === 'set_mode') return await setMode(env, data);
+    if (data.action === 'set_block_count') return await setBlockCount(env, data);
+    if (data.action === 'insert_slot') return await insertSlot(env, data);
+    if (data.action === 'move_slot') return await moveSlot(env, data);
     return error('未知操作', 400);
   } catch (err) {
     if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
@@ -285,8 +347,11 @@ async function setCustom(env, data) {
   const period = parseEnum(data.period, PERIODS, { field: '时段' });
   if (!period.ok) return error(period.error, 400);
 
-  const position = parsePositiveInt(data.position, { field: '位置', max: PER_WEEK });
+  const position = parsePositiveInt(data.position, { field: '位置' });
   if (!position.ok) return error(position.error, 400);
+
+  const range = await checkSlotRange(env, period.value, position.value);
+  if (range.error) return error(range.error, 400);
 
   const title = sanitizeText(data.title, { maxLength: 80, field: '歌曲名' });
   if (!title.ok) return error(title.error, 400);
@@ -406,11 +471,19 @@ async function autofill(env, data) {
   const withLyrics = all.filter((s) => Number(s.category_id) !== 1);
   const instrumental = all.filter((s) => Number(s.category_id) === 1);
 
+  // 排期配置（模式 + 每时段数量）：仅上午模式下下午整段不参与；
+  // 数量未配置时与旧的 3+3 完全一致。
+  const cfg = await getScheduleConfig(env);
+  const activePeriods = cfg.mode === 'noon' ? ['noon'] : PERIODS.slice();
+  const countOf = (period) => (period === 'noon' ? cfg.noonCount : cfg.afternoonCount);
+  const noonCount = cfg.noonCount;
+  const afternoonCount = cfg.afternoonCount;
+
   let cursorLyric = 0;
   let cursorInst = 0;
   let filled = 0;
   let empty = 0;
-  const total = weeks * PERIODS.length * PER_WEEK;
+  const total = weeks * activePeriods.reduce((n, p) => n + countOf(p), 0);
 
   const pick = (list, cursorName) => {
     // 从游标往后找一首没被占用的；`% list.length` 只是防止越界，不是"从头再来"。
@@ -432,8 +505,8 @@ async function autofill(env, data) {
   for (let w = 0; w < weeks; w++) {
     const weekStart = addWeeks(start, w);
 
-    for (const period of PERIODS) {
-      for (let pos = 1; pos <= PER_WEEK; pos++) {
+    for (const period of activePeriods) {
+      for (let pos = 1; pos <= countOf(period); pos++) {
         const isNoon = period === 'noon';
         // **只用本类别**：中午只放含歌词的、下午只放纯音乐的。
         // 本类别没歌了就留「待排」—— 不再跨类别补位（用户要求"歌不够就填待排"）。
@@ -456,13 +529,15 @@ async function autofill(env, data) {
   const scopeNote = categoryId
     ? `；本次只用了分类「${categoryName}」的歌`
       + (withLyrics.length === 0
-        ? `，所以${PERIOD_LABELS.noon}没有含歌词的歌可排，那 3 个位置全部留成「待排」`
+        ? `，所以${PERIOD_LABELS.noon}没有含歌词的歌可排，那 ${noonCount} 个位置全部留成「待排」`
         : '')
-      + (instrumental.length === 0
-        ? `，所以${PERIOD_LABELS.afternoon}没有纯音乐可排，那 3 个位置全部留成「待排」`
+      + (instrumental.length === 0 && cfg.mode !== 'noon'
+        ? `，所以${PERIOD_LABELS.afternoon}没有纯音乐可排，那 ${afternoonCount} 个位置全部留成「待排」`
         : '')
       + '。'
-    : '';
+    : (cfg.mode === 'noon'
+      ? '；当前播放模式为「仅上午」，本次只排了中午板块。'
+      : '');
 
   return json({
     ok: true,
@@ -508,8 +583,12 @@ async function addSong(env, data) {
   if (!song) return error('只能排已通过审核的歌', 400);
 
   // 纯音乐（category_id = 1）排下午；含歌词的排中午。与 autofill 同一套分工。
+  // 例外：播放模式为「仅上午」时下午板块不存在，所有歌都排进中午板块 ——
+  // 否则纯音乐永远找不到位置（4 周全满），管理员还得手动绕路。
+  const cfg = await getScheduleConfig(env);
   const isInstrumental = Number(song.category_id) === 1;
-  const period = isInstrumental ? 'afternoon' : 'noon';
+  const period = cfg.mode === 'noon' ? 'noon' : (isInstrumental ? 'afternoon' : 'noon');
+  const periodCount = period === 'noon' ? cfg.noonCount : cfg.afternoonCount;
   const periodLabel = PERIOD_LABELS[period];
 
   const start = thisMonday();
@@ -537,7 +616,7 @@ async function addSong(env, data) {
         .filter((r) => r.period === period && r.song_id !== null && r.song_id !== undefined)
         .map((r) => Number(r.position))
     );
-    for (let pos = 1; pos <= PER_WEEK; pos++) if (!taken.has(pos)) return pos;
+    for (let pos = 1; pos <= periodCount; pos++) if (!taken.has(pos)) return pos;
     return 0;
   };
 
@@ -582,11 +661,14 @@ async function addSong(env, data) {
 
   // 4 周都放不下 —— 把两种原因分开说，别让管理员去猜。
   const reasons = [];
-  if (fullWeeks.length) reasons.push(`${fullWeeks.join('、')} 的${periodLabel}已经排满 3 首`);
+  if (fullWeeks.length) reasons.push(`${fullWeeks.join('、')} 的${periodLabel}已经排满 ${periodCount} 首`);
   if (adjacentWeeks.length) {
     reasons.push(`${adjacentWeeks.join('、')} 的前后相邻一周里已经有这首歌（相邻两周不能重复）`);
   }
   if (duplicateWeeks.length) reasons.push(`${duplicateWeeks.join('、')} 里本来就有这首歌，不能排两遍`);
+  if (cfg.mode === 'noon' && isInstrumental) {
+    reasons.push('当前播放模式为「仅上午」，这首歌已按中午板块寻找空位');
+  }
 
   return error(
     `从本周（${start}）起往后 ${ADD_SONG_MAX_WEEKS} 周都放不下这首歌：`
@@ -603,8 +685,11 @@ async function setSlot(env, data) {
   const period = parseEnum(data.period, PERIODS, { field: '时段' });
   if (!period.ok) return error(period.error, 400);
 
-  const position = parsePositiveInt(data.position, { field: '位置', max: PER_WEEK });
+  const position = parsePositiveInt(data.position, { field: '位置' });
   if (!position.ok) return error(position.error, 400);
+
+  const range = await checkSlotRange(env, period.value, position.value);
+  if (range.error) return error(range.error, 400);
 
   const songId = parsePositiveInt(data.song_id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);
@@ -626,12 +711,17 @@ async function clearSlot(env, data) {
   const period = parseEnum(data.period, PERIODS, { field: '时段' });
   if (!period.ok) return error(period.error, 400);
 
-  const position = parsePositiveInt(data.position, { field: '位置', max: PER_WEEK });
+  const position = parsePositiveInt(data.position, { field: '位置' });
   if (!position.ok) return error(position.error, 400);
 
   // 清空 = 回到「待排」。custom_* 一并清掉：否则先手动录入、再清空，
   // 那条旧的手动条目会从"已清空"的位置里原样冒回来。
   // 014 之前没有这些列：退回只清 song_id 的老写法。
+  // 位置上限不因模式/数量收紧（清掉一个"看不见"的残留位置是合法操作），
+  // 但仍要有上限防注入式的超大数字 —— 用硬上限即可。
+  if (position.value > SCHEDULE_SLOT_MAX) {
+    return error(`位置最大只到 ${SCHEDULE_SLOT_MAX}`, 400);
+  }
   let result;
   try {
     result = await env.DB.prepare(
@@ -658,4 +748,300 @@ async function clearWeek(env, data) {
   ).bind(weekStart).run();
 
   return json({ ok: true, deleted: changedRows(result), message: '已清空这一周' });
+}
+
+/* --------------------- 播放模式与排曲总数（2026-10-10） --------------------- */
+
+/**
+ * 切换播放模式：both（上下午都有）/ noon（仅上午）。
+ *
+ * 前端会同时传 week_start（当前正在编辑的那一周）：切到「仅上午」时，
+ * **只对这一周**执行需求里的减量逻辑 —— 下午板块整段退回待排。
+ * 其它周的下午排期**保留**：模式切回来时它们原样恢复，
+ * 不做全局删除是刻意的（"别把原有功能改坏"优先于数据清理）。
+ */
+async function setMode(env, data) {
+  const mode = parseEnum(data.mode, ['both', 'noon'], { field: '播放模式' });
+  if (!mode.ok) return error(mode.error, 400);
+
+  try {
+    await setSetting(env, SETTING_SCHEDULE_MODE, mode.value);
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  let released = 0;
+  let weekStart = '';
+  if (mode.value === 'noon' && data.week_start) {
+    const date = parseDate(data.week_start, '周起始日');
+    if (date.ok) {
+      weekStart = mondayOf(date.value);
+      // 仅上午模式下下午板块不存在 —— 该周下午整段退回待排。
+      const result = await env.DB.prepare(
+        "DELETE FROM weekly_playlist WHERE week_start = ? AND period = 'afternoon'"
+      ).bind(weekStart).run();
+      released = changedRows(result);
+    }
+  }
+
+  return json({
+    ok: true,
+    mode: mode.value,
+    released,
+    message: mode.value === 'noon'
+      ? `已切换为「仅上午」模式${released ? `：${weekStart} 有 ${released} 首下午曲目退回待排` : ''}；` +
+        '下午板块在前端隐藏，切回「上下午都有」后其余各周的下午排期原样恢复。'
+      : '已切换为「上下午都有」模式。',
+  });
+}
+
+/**
+ * 调整某个时段的每周排曲总数。
+ *
+ * 减量判定（需求原文的重点）：**仅当当前已排数量 > 目标数量**才触发退回，
+ * 且优先移除排在**末尾**的曲目 —— 被移除的歌变回"待排"。
+ * 已排数量 ≤ 目标数量时不做任何事。
+ */
+async function setBlockCount(env, data) {
+  const period = parseEnum(data.period, PERIODS, { field: '时段' });
+  if (!period.ok) return error(period.error, 400);
+
+  const count = Number(data.count);
+  if (!Number.isInteger(count) || count < 1 || count > SCHEDULE_SLOT_MAX) {
+    return error(`每周排曲数量需要是 1 到 ${SCHEDULE_SLOT_MAX} 之间的整数`, 400);
+  }
+
+  const key = period.value === 'noon' ? SETTING_NOON_COUNT : SETTING_AFTERNOON_COUNT;
+  try {
+    await setSetting(env, key, count);
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  let released = 0;
+  let weekStart = '';
+  if (data.week_start) {
+    const date = parseDate(data.week_start, '周起始日');
+    if (date.ok) {
+      weekStart = mondayOf(date.value);
+      released = await trimPeriodTail(env, weekStart, period.value, count);
+    }
+  }
+
+  return json({
+    ok: true,
+    period: period.value,
+    count,
+    released,
+    message: `${PERIOD_LABELS[period.value]}每周排曲数量已设为 ${count} 首`
+      + (released ? `；${weekStart} 有 ${released} 首末尾曲目退回待排` : '；当前已排数量未超出，无需退回'),
+  });
+}
+
+/**
+ * 读取某周某时段的"已排"行（song_id 或手动录入，二者必有其一；
+ * song_id 为 NULL 且 custom_title 为空的行是"待排"占位，不算已排）。
+ * 返回按位置升序的内容数组。
+ */
+async function loadFilledSlots(env, weekStart, period) {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT position, CAST(song_id AS INTEGER) AS song_id,
+              custom_title, custom_artist, custom_source
+         FROM weekly_playlist
+        WHERE week_start = ? AND period = ?
+        ORDER BY position ASC`
+    ).bind(weekStart, period).all();
+    return (results || []).filter((r) => r.song_id || r.custom_title);
+  } catch (err) {
+    // 014 未执行（没有 custom_* 列）：只有曲库歌可读。
+    if (!isMissingColumn(err)) throw err;
+    const { results } = await env.DB.prepare(
+      `SELECT position, CAST(song_id AS INTEGER) AS song_id
+         FROM weekly_playlist
+        WHERE week_start = ? AND period = ?
+        ORDER BY position ASC`
+    ).bind(weekStart, period).all();
+    return (results || [])
+      .filter((r) => r.song_id)
+      .map((r) => ({ ...r, custom_title: null, custom_artist: null, custom_source: null }));
+  }
+}
+
+/**
+ * 把某周某时段的已排队列整体重写（先删后写放进同一个 batch = 一个事务）。
+ *
+ * 为什么不用"逐行挪位置"：position 上有唯一索引，SQLite 的唯一性检查是
+ * 即时的，顺序挪必然会撞出瞬时冲突；先删后写在事务里既原子又不用关心顺序。
+ * 传入的 rows 数组顺序就是新位置顺序（第 1 项 = 位置 1）。
+ */
+async function rewriteFilledSlots(env, weekStart, period, rows) {
+  const statements = [
+    env.DB.prepare('DELETE FROM weekly_playlist WHERE week_start = ? AND period = ?')
+      .bind(weekStart, period),
+  ];
+  rows.forEach((row, index) => {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO weekly_playlist (week_start, period, position, song_id,
+                                      custom_title, custom_artist, custom_source, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      ).bind(
+        weekStart, period, index + 1,
+        row.song_id || null,
+        row.custom_title || null, row.custom_artist || null, row.custom_source || null
+      )
+    );
+  });
+  try {
+    await env.DB.batch(statements);
+  } catch (err) {
+    // 014 未执行：退回不带 custom_* 的写法（手动录入的行本来也读不到）。
+    if (!isMissingColumn(err)) throw err;
+    const plain = [
+      env.DB.prepare('DELETE FROM weekly_playlist WHERE week_start = ? AND period = ?')
+        .bind(weekStart, period),
+    ];
+    rows.forEach((row, index) => {
+      plain.push(
+        env.DB.prepare(
+          `INSERT INTO weekly_playlist (week_start, period, position, song_id, updated_at)
+           VALUES (?, ?, ?, ?, datetime('now'))`
+        ).bind(weekStart, period, index + 1, row.song_id || null)
+      );
+    });
+    await env.DB.batch(plain);
+  }
+}
+
+/**
+ * 自由放置：把一首已通过的歌（或一条手动录入）**插入**到任意位置，
+ * 该位置之后的已排曲目整体后移一位。
+ *
+ * 请求：{ week_start, period, position, song_id } 或
+ *       { week_start, period, position, title, artist?, source? }
+ * 已排满（= 当前排曲总数）时拒绝，提示先调大数量或腾位置 ——
+ * 刻意不把末尾挤出去：插入不该有"静默丢一首"的副作用。
+ */
+async function insertSlot(env, data) {
+  const date = parseDate(data.week_start || data.date, '周起始日');
+  if (!date.ok) return error(date.error, 400);
+  const weekStart = mondayOf(date.value);
+
+  const period = parseEnum(data.period, PERIODS, { field: '时段' });
+  if (!period.ok) return error(period.error, 400);
+
+  const position = parsePositiveInt(data.position, { field: '位置' });
+  if (!position.ok) return error(position.error, 400);
+
+  const range = await checkSlotRange(env, period.value, position.value);
+  if (range.error) return error(range.error, 400);
+  const count = range.count;
+
+  const filled = await loadFilledSlots(env, weekStart, period.value);
+  if (filled.length >= count) {
+    return error(`${PERIOD_LABELS[period.value]}已排满 ${count} 首；请先调大每周排曲数量，或移除一首`, 400);
+  }
+
+  // 新条目：曲库歌（必须已通过）或手动录入（必须给歌名），与 set_slot / set_custom 同一套判据。
+  let entry;
+  if (data.song_id !== undefined && data.song_id !== null && data.song_id !== '') {
+    const songId = parsePositiveInt(data.song_id, { field: '歌曲' });
+    if (!songId.ok) return error(songId.error, 400);
+    const song = await env.DB.prepare(
+      "SELECT id, title, artist FROM songs WHERE id = ? AND status = 'approved'"
+    ).bind(songId.value).first();
+    if (!song) return error('只能排已通过审核的歌', 400);
+    entry = { song_id: song.id, title: String(song.title || ''), artist: String(song.artist || '') };
+  } else {
+    const title = sanitizeText(data.title, { maxLength: 80, field: '歌曲名' });
+    if (!title.ok) return error(title.error, 400);
+    if (!title.value) return error('请填写歌曲名，或先在曲库里选一首已通过的歌', 400);
+    const optional = (raw, field) => {
+      const text = typeof raw === 'string' ? raw.trim() : '';
+      return text ? sanitizeText(text, { maxLength: 60, field }) : { ok: true, value: '' };
+    };
+    const artist = optional(data.artist, '歌手');
+    if (!artist.ok) return error(artist.error, 400);
+    const source = optional(data.source, '来源备注');
+    if (!source.ok) return error(source.error, 400);
+    entry = { song_id: null, custom_title: title.value, custom_artist: artist.value, custom_source: source.value, title: title.value, artist: artist.value };
+  }
+
+  // 插入到目标序号（1 起）：位置之前的不动，位置及之后的整体后移。
+  const list = filled.map((r) => ({
+    song_id: r.song_id || null,
+    custom_title: r.custom_title || null,
+    custom_artist: r.custom_artist || null,
+    custom_source: r.custom_source || null,
+  }));
+  const insertIndex = Math.min(Math.max(position.value - 1, 0), list.length);
+  list.splice(insertIndex, 0, {
+    song_id: entry.song_id,
+    custom_title: entry.custom_title || null,
+    custom_artist: entry.custom_artist || null,
+    custom_source: entry.custom_source || null,
+  });
+
+  await rewriteFilledSlots(env, weekStart, period.value, list);
+
+  return json({
+    ok: true,
+    week_start: weekStart,
+    period: period.value,
+    position: insertIndex + 1,
+    message: `已插入到 ${weekStart} 的${PERIOD_LABELS[period.value]}第 ${insertIndex + 1} 首，`
+      + `其后的 ${Math.max(list.length - insertIndex - 1, 0)} 首已整体后移`,
+  });
+}
+
+/**
+ * 时段内移动：把第 from 位的已排曲目移到第 to 位，中间的行相应让位。
+ * 只在**同一时段内**移动；跨时段请用 insert_slot（插入）+ clear_slot（移除）。
+ */
+async function moveSlot(env, data) {
+  const date = parseDate(data.week_start || data.date, '周起始日');
+  if (!date.ok) return error(date.error, 400);
+  const weekStart = mondayOf(date.value);
+
+  const period = parseEnum(data.period, PERIODS, { field: '时段' });
+  if (!period.ok) return error(period.error, 400);
+
+  const from = parsePositiveInt(data.from, { field: '原位置' });
+  if (!from.ok) return error(from.error, 400);
+  const to = parsePositiveInt(data.to, { field: '目标位置' });
+  if (!to.ok) return error(to.error, 400);
+
+  const range = await checkSlotRange(env, period.value, Math.max(from.value, to.value));
+  if (range.error) return error(range.error, 400);
+
+  const filled = await loadFilledSlots(env, weekStart, period.value);
+  if (from.value > filled.length) return error('原位置没有已排曲目', 400);
+  if (from.value === to.value) return json({ ok: true, message: '位置没有变化' });
+
+  const list = filled.map((r) => ({
+    song_id: r.song_id || null,
+    custom_title: r.custom_title || null,
+    custom_artist: r.custom_artist || null,
+    custom_source: r.custom_source || null,
+  }));
+  const [moved] = list.splice(from.value - 1, 1);
+  list.splice(Math.min(Math.max(to.value - 1, 0), list.length), 0, moved);
+
+  await rewriteFilledSlots(env, weekStart, period.value, list);
+
+  return json({
+    ok: true,
+    week_start: weekStart,
+    period: period.value,
+    from: from.value,
+    to: to.value,
+    message: `已把${PERIOD_LABELS[period.value]}第 ${from.value} 首移到第 ${Math.min(to.value, list.length)} 位`,
+  });
 }

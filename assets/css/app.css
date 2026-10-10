@@ -819,3 +819,57 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
    两个类一起写提高优先级，页脚落到页面真正的最底端。 */
 .shell.landing { padding-bottom: 0; }
 #beianFooter .recaptcha-disclosure { margin-top: 10px; }
+
+/* ---------- 排期页：提示段落横跨整行 ---------- */
+/* #weeks 是多列 grid；schedule() 往里写的第一条 <p class="notice"> 原本会被
+   当成普通网格项占住第一列 —— 行高又被高大的周卡片拉伸，第一列于是出现
+   一大块空白（2026-10-10 用户截图的"大方块"）。让它横跨所有列即修复。 */
+.schedule-grid > .notice { grid-column: 1 / -1; }
+
+/* ---------- 后台侧边栏：≤768px 抽屉形态 ---------- */
+/* #adminTabs 被搬进顶栏抽屉时（JS 挪同一个节点），去掉卡片观感、改成竖排菜单。 */
+.topbar .actions .admin-nav.in-drawer {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+/* 撑满抽屉：搬进抽屉后该节点被 88px 按钮的 min-width 顶成 shrink-to-fit
+   （实测 89px、溢出 312px 抽屉右缘被裁），flex 拉伸不生效，按 ID 级强制铺满。 */
+.topbar .actions #adminTabs.in-drawer { width: 100%; margin: 0; align-self: stretch; }
+.topbar .actions .admin-nav.in-drawer button {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  text-align: left;
+  padding: 0 12px;
+}
+
+/* ---------- 首页须知/免责声明在抽屉里（≤768px） ---------- */
+.topbar .actions .rules.in-drawer { margin: 8px 0 0; border-top: 1px solid var(--line-soft); }
+.topbar .actions .rules.in-drawer:first-of-type { margin-top: 12px; }
+
+/* ---------- 排期编辑器的行内控件 ---------- */
+.slot-actions { display: inline-flex; flex: 0 0 auto; gap: 6px; margin-left: auto; }
+.slot-actions .btn { height: 30px; padding: 0 10px; font-size: 12px; }
+.slot-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.slot-edit .input { width: auto; flex: 1 1 150px; min-width: 0; height: 34px; }
+.slot-edit .btn { height: 34px; }
+@media (pointer: coarse) {
+  .slot-actions .btn { height: 38px; }
+  .slot-edit .input, .slot-edit .btn { height: 38px; }
+}
+
+/* ---------- 后台 769~1023：与电脑同一套分栏结构 ---------- */
+/* 原来这个区间只有 1 列（页签横排占一整行）；横屏平板上参照电脑：
+   侧栏在左、工作面板在右，首页两榜（待审核/正式曲库）本就双栏横铺。 */
+@media (min-width: 769px) and (max-width: 1023px) {
+  .admin-layout { grid-template-columns: 200px minmax(0, 1fr); }
+  .admin-nav { position: sticky; top: 76px; flex-direction: column; flex-wrap: nowrap; }
+  .admin-nav button { flex: 0 0 auto; width: 100%; min-width: 0; text-align: left; }
+}

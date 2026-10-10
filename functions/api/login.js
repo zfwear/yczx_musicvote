@@ -9,6 +9,7 @@ import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.js';
+import { findUsablePassByLookup, passSessionTtlSeconds, PASS_LABELS } from '../../_lib/passes.js';
 
 /**
  * 班级口令登录。
@@ -20,7 +21,9 @@ import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.j
  *  - 登录成功后口令会从"明文/弱哈希"自动升级为 PBKDF2 哈希，
  *    因此不需要提前知道现网口令就能完成迁移。
  *
- * 同一个入口还承担两种"非班级"身份（顺序：班级 → 游客 → 调试）：
+ * 同一个入口还承担几种"非班级"身份（顺序：班级 → 口令凭证 → 环境变量游客 → 调试）：
+ *  - 口令凭证：后台「口令管理」生成的测试口令（限时、完整权限，role='test'）
+ *    与游客口令（只读，role='guest'），见 _lib/passes.js；
  *  - 游客：配了环境变量 GUEST_PASSWORD 时，它是一条独立口令，
  *    登录后拿到只读会话（role='guest'）。不配就等于这个入口没有。
  *  - 调试：DEBUG_LOGIN=1 且用高级管理员的"账号:密码"。
@@ -125,6 +128,52 @@ export async function onRequestPost(context) {
         matched = candidate;
         needsUpgrade = true;
         break;
+      }
+    }
+  }
+
+  // 2.4) 口令凭证（后台「口令管理」生成的测试口令 / 游客口令）。
+  //
+  // 判定顺序仍然是「班级口令优先」：真实班级压过一切临时身份。
+  // 凭证按与班级口令同一把 HMAC 做等值定位（O(1)），再查
+  // revoked / expires_at —— 已作废或已过期的凭证不命中，
+  // 落下去就是普通的"口令错误"，不向外界泄露"这里曾经有过一条口令"。
+  //
+  // 会话有效期限定在"凭证剩余有效期"之内（passSessionTtlSeconds），
+  // 且这类会话不参与滑动续期（见 auth.js）——限时口令到点即停。
+  // 测试口令 role='test' 拥有完整投稿与投票权限；游客口令 role='guest'
+  // 是只读身份，各写接口里的 denyGuest() 是真正的闸门。
+  if (!matched) {
+    const pass = await findUsablePassByLookup(env, lookup);
+    if (pass) {
+      const ttl = passSessionTtlSeconds(pass);
+      if (ttl > 0) {
+        const role = pass.kind === 'guest' ? GUEST_ROLE : 'test';
+        const session = await createSession(env, request, {
+          subject: 'class',
+          subjectId: 0,
+          role,
+          ttlSeconds: ttl,
+          passId: pass.id,
+        });
+        await clearRateLimit(env, loginBucket);
+        try {
+          await env.DB.prepare('UPDATE access_passes SET last_used_at = datetime(\'now\') WHERE id = ?')
+            .bind(pass.id).run();
+        } catch { /* 记录用不上就不管 */ }
+
+        return json(
+          {
+            ok: true,
+            class_id: 0,
+            class_name: PASS_LABELS[pass.kind] || '临时身份',
+            guest: pass.kind === 'guest',
+            test: pass.kind === 'test',
+            role,
+          },
+          200,
+          { 'Set-Cookie': session.setCookie }
+        );
       }
     }
   }

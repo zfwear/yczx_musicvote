@@ -7,6 +7,7 @@ import { verifyPow } from '../../_lib/pow.js';
 import { verifyTrackToken } from '../../_lib/tracktoken.js';
 import { parseRequestId } from '../../_lib/idempotency.js';
 import { isSubmissionsPaused } from '../../_lib/settings.js';
+import { getClassLimits, countClassSubmissions, getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 
 /** 查重窗口：每人每周一次。 */
 const DEDUP_WINDOW_DAYS = 7;
@@ -65,6 +66,39 @@ export async function onRequestPost(context) {
   const classId = auth.session.subject_id;
   // 调试模式（用管理员身份在学生端登录）不走每周限次、不查重
   const isDebug = auth.session.role === 'debug';
+
+  // ---- 班级暂停 → 班级投稿上限 → 全站投稿上限（2026-10-10 需求）----
+  //
+  // 三道闸的顺序就是需求指定的顺序：先班级、再全站，任意一项命中即拦截。
+  // 位置与 denyGuest / isSubmissionsPaused 相同 —— 读请求体、限流与任何
+  // 写入之前，被拒的请求不留下限流计数、不落库。
+  //
+  // 口径：
+  //   · 班级暂停 / 班级投稿上限只对**真实班级**会话生效（测试口令、调试
+  //     会话没有班级归属，getClassLimits 对 subject_id=0 返回"不限制"）；
+  //   · 全站投稿上限对所有非调试身份生效（含测试口令）—— 它管的是
+  //     "全站累计收到多少份投稿"，调试投稿不算数（is_debug=1 不计入）；
+  //   · 上限表达式 / 计数有任何一样取不到，都按"不限制"处理：
+  //     配置坏了只会少一道闸，不能把全班挡在门外。
+  if (!isDebug) {
+    const limits = await getClassLimits(env, classId);
+    if (limits.paused) {
+      return error('本班级已被暂停投稿与投票，请联系广播站管理员', 403);
+    }
+    if (limits.submitLimit > 0) {
+      const used = await countClassSubmissions(env, classId);
+      if (used >= limits.submitLimit) {
+        return error('本班级投稿数量已达上限，暂时无法继续投稿', 403);
+      }
+    }
+    const capInfo = await getSubmitCap(env);
+    if (capInfo.cap > 0) {
+      const used = await countGlobalSubmissions(env);
+      if (used >= capInfo.cap) {
+        return error('站点投稿总数量已达上限，暂无法提交投稿', 403);
+      }
+    }
+  }
 
   const ip = clientIp(request);
   const parsed = await readJson(request);

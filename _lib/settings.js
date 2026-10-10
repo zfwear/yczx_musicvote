@@ -16,6 +16,26 @@ import { isMissingTable } from './db.js';
 
 export const SETTING_VOTE_CAP = 'vote_cap';
 export const SETTING_REPORT_THRESHOLD = 'report_threshold';
+
+/**
+ * 「全局投稿总量上限」（2026-10-10 需求）。
+ *
+ * 与 vote_cap 的分工要分清：vote_cap 管的是**一首歌**最多显示多少票
+ * （票数封顶）；submit_cap 管的是**全站累计收到多少份投稿** ——
+ * 达到上限后投稿入口整体关闭。值可以是固定数字，也可以是
+ * x*比例 表达式（x=全站有效班级总人数），原始写法存这里，
+ * 求值见 _lib/limits.js 的 evalLimit。空 = 不限制（默认）。
+ */
+export const SETTING_SUBMIT_CAP = 'submit_cap';
+
+/** 排期播放模式：'both' = 上下午都有（默认）；'noon' = 仅上午。 */
+export const SETTING_SCHEDULE_MODE = 'schedule_mode';
+/** 每周排曲数量：中午（含歌词）与下午（纯音乐）各自的槽位数。 */
+export const SETTING_NOON_COUNT = 'schedule_noon_count';
+export const SETTING_AFTERNOON_COUNT = 'schedule_afternoon_count';
+
+/** 排期槽位的硬上限（防止误操作把一周排成 9999 首）。 */
+export const SCHEDULE_SLOT_MAX = 12;
 /**
  * 「暂停接收投稿」开关（2026-10-07 用户要求，以按钮形式给管理员）。
  *
@@ -112,4 +132,27 @@ export async function getReportThreshold(env) {
 export async function isSubmissionsPaused(env) {
   const raw = await getSetting(env, SETTING_SUBMISSIONS_PAUSED, '');
   return String(raw) === '1';
+}
+
+/* --------------------- 排期模式与数量 --------------------- */
+
+/** 排期配置默认值：与 012 迁移时代的 3+3 完全一致，未配置时行为不变。 */
+export const SCHEDULE_DEFAULTS = { mode: 'both', noonCount: 3, afternoonCount: 3 };
+
+/** 读排期配置；任何一项缺失/非法都回落默认值（配置坏了不给排期页添堵）。 */
+export async function getScheduleConfig(env) {
+  const [mode, noon, afternoon] = await Promise.all([
+    getSetting(env, SETTING_SCHEDULE_MODE, ''),
+    getSetting(env, SETTING_NOON_COUNT, ''),
+    getSetting(env, SETTING_AFTERNOON_COUNT, ''),
+  ]);
+  const clampCount = (raw, fallback) => {
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= SCHEDULE_SLOT_MAX ? n : fallback;
+  };
+  return {
+    mode: String(mode).trim() === 'noon' ? 'noon' : 'both',
+    noonCount: clampCount(noon, SCHEDULE_DEFAULTS.noonCount),
+    afternoonCount: clampCount(afternoon, SCHEDULE_DEFAULTS.afternoonCount),
+  };
 }

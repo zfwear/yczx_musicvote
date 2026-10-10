@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>后台 · 盐中之声</title>
+  <link rel="icon" href="/assets/ico.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body data-app-ver="3.4.0">
+  <div class="shell">
+    <div id="nav"></div>
+    <main class="form-wrap" id="adminScreen">
+      <section class="form-card">
+        <img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标">
+        <p class="kicker">CONTROL ROOM</p>
+        <h1>广播站控制台</h1>
+        <p>管理员登录后管理投稿与审核状态。</p>
+        <form id="adminLogin">
+          <div class="field"><label for="adminName">管理员账号</label><input id="adminName" class="input" value="admin" autocomplete="username"></div>
+          <div class="field"><label for="adminPassword">密码</label><input id="adminPassword" class="input" type="password" placeholder="输入管理员密码" autocomplete="current-password"></div>
+          <div class="form-actions"><button class="btn primary" type="submit">登录后台</button><a class="btn" href="/register">注册</a></div>
+          <p id="adminMessage" class="message"></p>
+        </form>
+      </section>
+    </main>
+    <main id="adminWork" hidden>
+      <div class="page-head"><div><p class="kicker">OPERATIONS</p><h1>管理工作台</h1></div><span class="muted">审核、排期与站点规则</span></div>
+      <div class="admin-layout">
+        <nav id="adminTabs" class="panel admin-nav">
+          <button class="active" data-view="pending">待审核</button>
+          <button data-view="approved">已通过</button>
+          <button data-view="rejected">回收站</button>
+          <button data-view="reports">举报收件箱</button>
+          <button data-view="suggestions">版本建议</button>
+          <button data-view="announcements">公告</button>
+          <button data-view="schedule">排期管理</button>
+          <button data-view="classes">班级管理</button>
+          <button data-view="passes">口令管理</button>
+          <button data-view="banned">违禁词库</button>
+          <button data-view="settings">系统设置</button>
+          <button data-view="accounts">管理员账号</button>
+          <button data-view="invites">邀请码</button>
+        </nav>
+        <section class="panel">
+          <div class="panel-head"><h2 id="adminTitle">待审核歌曲</h2><button class="btn quiet" id="adminRefresh" type="button">刷新</button></div>
+          <div class="admin-toolbar" id="adminToolbar"></div>
+          <div id="reportInbox"></div>
+          <div id="adminRows"><p class="muted">加载中…</p></div>
+        </section>
+      </div>
+    </main>
+    <dialog id="adminDialog" class="glass-dialog">
+      <form method="dialog"><button class="btn quiet dialog-close" aria-label="关闭">×</button></form>
+      <div id="dialogContent"></div>
+    </dialog>
+    <details class="rules" id="rulesBox">
+  <summary>投稿须知与广播站规则（共 9 条）</summary>
+  <ol id="rulesList">
+    <li>中午放学播放 3 首含歌词的音乐，下午上学播放 3 首纯音乐。</li>
+    <li>不出现含有日语或韩语的歌曲，尽量避免小语种歌曲；英语歌曲可以投稿，但播放比例较小。</li>
+    <li>歌词积极向上，减少情爱类型；不出现政治敏感、脏话等违规内容；不出现有特殊含义的歌曲（如校歌、国歌）。</li>
+    <li>歌手无违法犯罪行为。</li>
+    <li>不出现 rap，以及底噪、低音、高音过大的歌曲；音游、二次元相关歌曲请尽量少投稿。</li>
+    <li>投稿的歌曲将交由广播站老师和分管校长审核，审核通过后会安排在相应时间播放。学校审核较严格，如未通过请谅解。</li>
+    <li>参与投稿即表明“我已阅读投稿须知并知晓该歌曲可能无法播出”，审核不通过的歌曲将被驳回。</li>
+    <li>本系统仅提供音乐搜索与播放管理功能，不存储任何音乐文件。所有音乐内容均来自第三方音乐平台，版权归原平台及版权方所有。投稿时请遵守相关音乐平台的服务条款、尊重音乐作品版权；我们鼓励支持正版音乐，在官方平台购买和收听喜爱的作品。</li>
+    <li>最终解释权归盐中之声广播站所有。</li>
+  </ol>
+</details>
+<footer id="beianFooter" class="footer">
+  <div class="beian-row">
+    <a id="beianIcp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026011040号</a>
+    <span class="beian-sep" aria-hidden="true">·</span>
+    <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"><img src="/assets/gongan-badge.png" alt="" width="14" height="15"><span id="beianGonganText">苏公网安备32090302000745号</span></a>
+  </div>
+  <div class="beian-copy">© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
+
+  <div class="site-version">版本 3.4.0</div>
+</footer>
+  </div>
+  <script src="/assets/js/gsap.min.js"></script>
+  <script src="/assets/js/app.js"></script>
+<script>setTimeout(function(){if(!window.__appJsLoaded){var m=document.querySelector('#adminMessage, #gateMessage, #suggestMessage, #voteMessage, #regMsg, #weeks, #rankList');if(m){m.textContent='页面脚本没有加载成功：请按 Ctrl+F5 强制刷新；若仍不行，说明本地服务器没在运行——双击 start-preview.cmd 启动后重试。';}else{document.body.insertAdjacentHTML('afterbegin','<p style="padding:12px 16px;background:#FEF3C7;color:#92400E;font:13px/1.6 sans-serif">页面脚本没有加载成功：请按 Ctrl+F5 强制刷新（本地预览需先启动服务器）。</p>');}}},2500);</script>
+</body>
+</html>

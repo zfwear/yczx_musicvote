@@ -4,12 +4,14 @@ import {
   isDebugSession, revokeDebugSessions,
 } from '../../_lib/auth.js';
 import { sanitizeText, parsePositiveInt, parseSecret, parseBannedKeyword } from '../../_lib/validate.js';
+import { parseLimitExpr } from '../../_lib/limits.js';
 import { hashPassword, verifyPassword, encryptSecret, decryptSecret } from '../../_lib/crypto.js';
 import {
   getVoteCap, setSetting, SETTING_VOTE_CAP, getSetting,
   getReportThreshold, SETTING_REPORT_THRESHOLD, DEFAULT_REPORT_THRESHOLD,
-  isSubmissionsPaused, SETTING_SUBMISSIONS_PAUSED,
+  isSubmissionsPaused, SETTING_SUBMISSIONS_PAUSED, SETTING_SUBMIT_CAP,
 } from '../../_lib/settings.js';
+import { getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
 const DEFAULT_EXPIRY = '2099-12-31 23:59:59';
@@ -71,10 +73,10 @@ export async function onRequestGet(context) {
   let hasClassMeta = false;
 
   const ATTEMPTS = [
-    { sql: 'SELECT id, name, grade, member_count, password_encrypted FROM classes ORDER BY grade ASC, id ASC', vault: true, meta: true },
-    { sql: 'SELECT id, name, grade, member_count, NULL AS password_encrypted FROM classes ORDER BY grade ASC, id ASC', vault: false, meta: true },
-    { sql: 'SELECT id, name, NULL AS grade, NULL AS member_count, password_encrypted FROM classes ORDER BY id ASC', vault: true, meta: false },
-    { sql: 'SELECT id, name, NULL AS grade, NULL AS member_count, NULL AS password_encrypted FROM classes ORDER BY id ASC', vault: false, meta: false },
+    { sql: 'SELECT id, name, grade, member_count, vote_limit, submit_limit, paused, password_encrypted FROM classes ORDER BY grade ASC, id ASC', vault: true, meta: true },
+    { sql: 'SELECT id, name, grade, member_count, NULL AS vote_limit, NULL AS submit_limit, 0 AS paused, NULL AS password_encrypted FROM classes ORDER BY grade ASC, id ASC', vault: false, meta: true },
+    { sql: 'SELECT id, name, NULL AS grade, NULL AS member_count, NULL AS vote_limit, NULL AS submit_limit, 0 AS paused, password_encrypted FROM classes ORDER BY id ASC', vault: true, meta: false },
+    { sql: 'SELECT id, name, NULL AS grade, NULL AS member_count, NULL AS vote_limit, NULL AS submit_limit, 0 AS paused, NULL AS password_encrypted FROM classes ORDER BY id ASC', vault: false, meta: false },
   ];
 
   for (const attempt of ATTEMPTS) {
@@ -102,6 +104,11 @@ export async function onRequestGet(context) {
       name: row.name,
       grade: row.grade || '',
       member_count: Number.isFinite(count) ? count : null,
+      // 015 的班级配置：上限表达式原样返回（前端展示用），paused 布尔化。
+      // 015 未执行时这三列是 NULL/0 —— 前端按"未配置"渲染。
+      vote_limit: row.vote_limit || '',
+      submit_limit: row.submit_limit || '',
+      paused: Number(row.paused) === 1,
     };
     // 口令明文只回给高级管理员，**并且**必须真的允许查看口令。
     //
@@ -127,6 +134,12 @@ export async function onRequestGet(context) {
   const totalMembers = classes.reduce((sum, c) => sum + (c.member_count || 0), 0);
 
   const reportThreshold = await getReportThreshold(env);
+
+  // 全站投稿总量上限（2026-10-10）：原始写法 + 求值结果 + 当前累计投稿数。
+  const [submitCapInfo, submitUsed] = await Promise.all([
+    getSubmitCap(env),
+    countGlobalSubmissions(env),
+  ]);
 
   const banned = await env.DB.prepare(
     'SELECT id, type, keyword, reason, expire_at FROM banned_items ORDER BY id DESC LIMIT 200'
@@ -158,6 +171,14 @@ export async function onRequestGet(context) {
     // 「暂停接收投稿」的当前状态：前端据此决定两个按钮哪个是可用态。
     submit: {
       paused: await isSubmissionsPaused(env),
+    },
+    // 全站投稿总量上限：raw 是后台保存的原始写法（''=不限制），
+    // cap 是代入"全站有效班级总人数"求出的有效数值，used 是当前累计投稿数。
+    submitCap: {
+      raw: submitCapInfo.raw || '',
+      cap: submitCapInfo.cap,
+      used: submitUsed,
+      totalMembers: submitCapInfo.totalMembers,
     },
     security: {
       // 是否配置了私有的 AUTH_PEPPER。
@@ -226,6 +247,12 @@ export async function onRequestPost(context) {
       return setReportThreshold(env, data);
     case 'update_class_info':
       return updateClassInfo(env, data);
+    case 'set_class_limits':
+      return setClassLimits(env, data);
+    case 'set_class_paused':
+      return setClassPaused(env, data);
+    case 'set_submit_cap':
+      return setSubmitCap(env, data);
     case 'change_admin_password':
       return changeAdminPassword(env, auth.session, data);
     default:
@@ -285,7 +312,7 @@ async function addClass(env, data) {
   const password = parseSecret(data.password, { min: 6, max: 128, field: '班级口令' });
   if (!password.ok) return error(password.error, 400);
 
-  const meta = parseClassMeta(data);
+  const meta = await parseClassMeta(data);
   if (meta.error) return error(meta.error, 400);
 
   // 批量生成时很容易撞名，先查一下给出可读提示，而不是默默建一堆同名班级。
@@ -323,21 +350,29 @@ async function addClass(env, data) {
     return error('添加失败：数据库结构可能尚未迁移', 500);
   }
 
-  // 年级 / 人数：007 未执行时静默跳过，不影响添加口令
-  if (meta.grade || meta.memberCount !== null) {
+  // 年级 / 人数：007 未执行时静默跳过，不影响添加口令。
+  // 015 的上限表达式同样可选：给了就一起写，没给保持 NULL（不限制）。
+  if (meta.grade || meta.memberCount !== null || meta.voteLimit !== '' || meta.submitLimit !== '') {
     try {
-      await env.DB.prepare('UPDATE classes SET grade = ?, member_count = ? WHERE name = ?')
-        .bind(meta.grade, meta.memberCount, name.value).run();
+      await env.DB.prepare(
+        'UPDATE classes SET grade = ?, member_count = ?, vote_limit = ?, submit_limit = ? WHERE name = ?'
+      ).bind(meta.grade, meta.memberCount, meta.voteLimit, meta.submitLimit, name.value).run();
     } catch (err) {
       if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+      try {
+        await env.DB.prepare('UPDATE classes SET grade = ?, member_count = ? WHERE name = ?')
+          .bind(meta.grade, meta.memberCount, name.value).run();
+      } catch (err2) {
+        if (!/no such column/i.test(String((err2 && err2.message) || ''))) throw err2;
+      }
     }
   }
 
   return json({ ok: true, message: '已添加班级口令' });
 }
 
-/** 解析年级与人数（都可选）。 */
-function parseClassMeta(data) {
+/** 解析年级与人数（都可选）。015 的上限表达式在这里一起收敛。 */
+async function parseClassMeta(data) {
   let grade = '';
   if (typeof data.grade === 'string' && data.grade.trim()) {
     const parsed = sanitizeText(data.grade, { maxLength: 20, field: '年级' });
@@ -355,7 +390,22 @@ function parseClassMeta(data) {
     memberCount = n;
   }
 
-  return { grade, memberCount };
+  // 上限表达式（可选，''=不限制）。这里只校验写法，不求值 ——
+  // 求值发生在读取侧（evalLimit），这样改人数之后比例上限自动跟着变。
+  let voteLimit = '';
+  let submitLimit = '';
+  if (data.vote_limit !== undefined && data.vote_limit !== null) {
+    const parsed = parseLimitExpr(data.vote_limit, { field: '投票上限' });
+    if (!parsed.ok) return { error: parsed.error };
+    voteLimit = parsed.value;
+  }
+  if (data.submit_limit !== undefined && data.submit_limit !== null) {
+    const parsed = parseLimitExpr(data.submit_limit, { field: '投稿上限' });
+    if (!parsed.ok) return { error: parsed.error };
+    submitLimit = parsed.value;
+  }
+
+  return { grade, memberCount, voteLimit, submitLimit };
 }
 
 /**
@@ -444,7 +494,7 @@ async function setReportThreshold(env, data) {
   const id = parsePositiveInt(data.id, { field: '班级' });
   if (!id.ok) return error(id.error, 400);
 
-  const meta = parseClassMeta(data);
+  const meta = await parseClassMeta(data);
   if (meta.error) return error(meta.error, 400);
 
   try {
@@ -452,6 +502,15 @@ async function setReportThreshold(env, data) {
       'UPDATE classes SET grade = ?, member_count = ? WHERE id = ?'
     ).bind(meta.grade, meta.memberCount, id.value).run();
     if (changedRows(result) === 0) return error('班级不存在', 404);
+    // 上限表达式可单独随表单带过来（班级管理页把这两块放在一起保存）。
+    if (meta.voteLimit !== '' || meta.submitLimit !== '' || data.vote_limit !== undefined || data.submit_limit !== undefined) {
+      try {
+        await env.DB.prepare('UPDATE classes SET vote_limit = ?, submit_limit = ? WHERE id = ?')
+          .bind(meta.voteLimit, meta.submitLimit, id.value).run();
+      } catch (err) {
+        if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+      }
+    }
   } catch (err) {
     if (/no such column/i.test(String((err && err.message) || ''))) {
       return error('数据库尚未执行 007 迁移（缺少 grade / member_count 列），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
@@ -460,6 +519,94 @@ async function setReportThreshold(env, data) {
   }
 
   return json({ ok: true, message: '已保存该班级的年级与人数' });
+}
+
+/**
+ * 设置一个班级的 投票上限 / 投稿上限（2026-10-10 需求）。
+ * 两种写法：固定数字（52）或 x*比例（x*0.25，x=本班人数）。
+ * 传空串即清空（不限制）。
+ */
+async function setClassLimits(env, data) {
+  const id = parsePositiveInt(data.id, { field: '班级' });
+  if (!id.ok) return error(id.error, 400);
+
+  const vote = parseLimitExpr(data.vote_limit, { field: '投票上限' });
+  if (!vote.ok) return error(vote.error, 400);
+  const submit = parseLimitExpr(data.submit_limit, { field: '投稿上限' });
+  if (!submit.ok) return error(submit.error, 400);
+
+  try {
+    const result = await env.DB.prepare(
+      'UPDATE classes SET vote_limit = ?, submit_limit = ? WHERE id = ?'
+    ).bind(vote.value, submit.value, id.value).run();
+    if (changedRows(result) === 0) return error('班级不存在', 404);
+  } catch (err) {
+    if (/no such column/i.test(String((err && err.message) || ''))) {
+      return error('数据库尚未执行 015 迁移（缺少 vote_limit / submit_limit 列），请先执行 sql/015_access_passes_and_limits.sql', 500);
+    }
+    throw err;
+  }
+
+  const parts = [];
+  parts.push(vote.value ? `投票上限 ${vote.value}` : '投票不设上限');
+  parts.push(submit.value ? `投稿上限 ${submit.value}` : '投稿不设上限');
+  return json({ ok: true, message: `已保存该班级的${parts.join('、')}` });
+}
+
+/**
+ * 暂停 / 恢复一个班级（2026-10-10 需求）。
+ * 暂停后该班用户仍能登录浏览，但投票与投稿会被拒绝
+ * （真正的闸门在 upvote.js / vote.js，前端只是提前置灰并提示）。
+ */
+async function setClassPaused(env, data) {
+  const id = parsePositiveInt(data.id, { field: '班级' });
+  if (!id.ok) return error(id.error, 400);
+
+  const paused = data.paused === true || data.paused === 1 || data.paused === '1';
+  try {
+    const result = await env.DB.prepare(
+      'UPDATE classes SET paused = ? WHERE id = ?'
+    ).bind(paused ? 1 : 0, id.value).run();
+    if (changedRows(result) === 0) return error('班级不存在', 404);
+  } catch (err) {
+    if (/no such column/i.test(String((err && err.message) || ''))) {
+      return error('数据库尚未执行 015 迁移（缺少 paused 列），请先执行 sql/015_access_passes_and_limits.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    paused,
+    message: paused ? '已暂停该班级：其用户不能投票与投稿' : '已恢复该班级',
+  });
+}
+
+/**
+ * 全站投稿总量上限（2026-10-10 需求）。
+ * 固定数字（100）或 x*比例（x=全站有效班级总人数）；空串 = 清空关闭。
+ * 只影响投稿；投票的上限逻辑一行不动。
+ */
+async function setSubmitCap(env, data) {
+  const cap = parseLimitExpr(data.cap, { field: '全站投稿上限' });
+  if (!cap.ok) return error(cap.error, 400);
+
+  try {
+    await setSetting(env, SETTING_SUBMIT_CAP, cap.value);
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    cap: cap.value,
+    message: cap.value
+      ? `已设置全站投稿总量上限为 ${cap.value}（达到后投稿入口自动关闭）`
+      : '已清空全站投稿总量上限（不再限制）',
+  });
 }
 
 async function deleteClass(env, session, data) {

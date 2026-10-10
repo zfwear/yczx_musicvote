@@ -43,15 +43,17 @@
 | POST | `/api/admin-reports` | 管理员（普通/高级） | 把某首歌的举报标记为已处理 |
 | POST | `/api/admin-update` | 管理员（普通/高级） | 改某首歌的分类 |
 | GET | `/api/admin-settings` | 管理员（普通/高级） | 读班级 / 黑名单 / 分类 / 开关等全部设置 |
-| POST | `/api/admin-settings` | 按 `action` 分：多数仅高级，3 个给普通 | 班级口令、黑名单、权重、投票上限、暂停投稿、举报阈值、改自己密码 |
+| POST | `/api/admin-settings` | 按 `action` 分：多数仅高级，3 个给普通 | 班级口令、黑名单、权重、投票上限、暂停投稿、举报阈值、班级投票/投稿上限、暂停班级、全站投稿上限、改自己密码 |
+| GET | `/api/admin-passes` | 管理员（普通/高级） | 测试口令 / 游客口令列表（配私有 AUTH_PEPPER 时附明文） |
+| POST | `/api/admin-passes` | 管理员（普通/高级） | 生成 / 作废 / 删除 测试口令、游客口令 |
 | POST | `/api/announcements` | 管理员（普通/高级） | 发 / 改 / 上下架 / 删公告 |
-| POST | `/api/schedule` | 管理员（普通/高级） | 排某一周 / 连续排多周 / 指定位置 / 清空 |
+| POST | `/api/schedule` | 管理员（普通/高级） | 排某一周 / 连续排多周 / 指定位置 / 清空 / 播放模式 / 每周数量 / 任意位置插入 / 时段内移动 |
 | GET | `/api/admin-accounts` | **仅高级管理员** | 管理员账号列表 |
 | POST | `/api/admin-accounts` | **仅高级管理员** | 删除管理员 / 重置他人密码 |
 | GET | `/api/admin-invites` | **仅高级管理员** | 动态口令（邀请码）列表 |
 | POST | `/api/admin-invites` | **仅高级管理员** | 生成 / 作废动态口令 |
 
-端点合计：`functions/api/` 下 22 个文件共导出 **30 个处理器**（GET/POST/PUT 分开计）。`/api/music` 一个处理器内含 5 种模式，本表按模式拆开列出。
+端点合计：`functions/api/` 下 23 个文件共导出 **32 个处理器**（GET/POST/PUT 分开计）。`/api/music` 一个处理器内含 5 种模式，本表按模式拆开列出。
 
 <!-- 出处：functions/api/admin-list.js:39, admin-register.js:25, admin-invites.js:35,66, admin-login.js:21, config.js:12, admin-action.js:28, announcements.js:32,41, admin-accounts.js:16,32, admin-reports.js:22,105, admin-update.js:7, vote.js:38, pow.js:37, admin-settings.js:58,173, upvote.js:32, logout.js:15, music.js:2171 (onRequestGet), me.js:21, schedule.js:58,122, report.js:17, suggest.js:25,52,108, login.js:27, rank.js:28, _routes.json:1-5 -->
 
@@ -177,7 +179,7 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 
 | Cookie 名 | 谁用 | 属性 | 有效期（`Max-Age`） |
 |---|---|---|---|
-| `yczx_class_session` | 学生 / 游客 / 调试身份 | `HttpOnly`、`SameSite=Lax`、`Path=/`、`Secure`（仅当请求是 https） | 学生与游客 **86400 秒（1 天）**；调试身份 **7200 秒（2 小时）** |
+| `yczx_class_session` | 学生 / 游客 / 调试身份 / 口令凭证 | `HttpOnly`、`SameSite=Lax`、`Path=/`、`Secure`（仅当请求是 https） | 学生与游客 **86400 秒（1 天）**；调试身份 **7200 秒（2 小时）**；**口令凭证会话 = `min(24h, 凭证剩余有效期)`，且不滑动续期** |
 | `yczx_admin_session` | 管理员 | 同上 | **43200 秒（12 小时）** |
 | `yczx_session` | 旧名字 | 只在下线登录时被**清空**，不再签发 | — |
 
@@ -209,17 +211,24 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 | 数据库还没跑安全迁移（`sessions` 表不存在） | `500` | `{"error":"数据库尚未执行安全升级迁移，请先在 D1 控制台执行 sql/001_security_upgrade.sql"}` | 这是部署问题，不是前端问题 |
 | D1 绑定缺失 | `500` | `{"error":"服务端数据库未绑定（缺少 D1 绑定 DB）"}` | 同上 |
 
-### 2.5 游客身份 vs 班级身份
+### 2.5 游客身份 vs 班级身份 vs 口令凭证
 
 游客**复用学生那一侧**的 Cookie（`yczx_class_session`）与整套会话机制，`subject_id` 恒为 `0`（与调试身份同义："不属于任何真实班级"）。区别只在 `role`：
 
-| | 班级学生 | 游客 | 调试身份 |
-|---|---|---|---|
-| `sessions.role` | `null`（`/api/me` 里回 `'class'`） | `'guest'` | `'debug'` |
-| `subject_id` | 真实班级 id | `0` | `0` |
-| `/api/me` 的 `role` | `'class'` | `'guest'` | `'debug'` |
-| `className` | 真实班级名 | `'游客模式'` | `'调试模式'` |
-| 怎么进来 | 输入班级口令 | 输入 `GUEST_PASSWORD`（环境变量） | 输入 `管理员账号:密码`（需 `DEBUG_LOGIN=1` 且该管理员是 `super`） |
+| | 班级学生 | 游客（环境变量） | **游客口令** | **测试口令** | 调试身份 |
+|---|---|---|---|---|---|
+| `sessions.role` | `null`（`/api/me` 里回 `'class'`） | `'guest'` | `'guest'` | `'test'` | `'debug'` |
+| `subject_id` | 真实班级 id | `0` | `0` | `0` | `0` |
+| `/api/me` 的 `role` | `'class'` | `'guest'` | `'guest'` | `'test'` | `'debug'` |
+| `className` | 真实班级名 | `'游客模式'` | `'游客模式'` | `'测试口令'` | `'调试模式'` |
+| 怎么进来 | 输入班级口令 | 输入 `GUEST_PASSWORD`（环境变量） | 后台「口令管理」生成，输入登录框 | 后台「口令管理」生成，输入登录框 | 输入 `管理员账号:密码`（需 `DEBUG_LOGIN=1` 且该管理员是 `super`） |
+
+口令凭证存放在 `access_passes` 表（015 迁移），登录判定顺序是
+「班级口令 → 口令凭证（`token_lookup` HMAC 索引）→ `GUEST_PASSWORD` → 调试登录」。
+凭证会话的有效期 = `min(24 小时, 凭证剩余有效期)`，且**不参与滑动续期**（到期即失效）；
+**作废 / 删除凭证会立即撤销它签发过的全部会话**（`sessions.pass_id` 精确反查）。
+测试口令拥有与班级学生完全相同的写权限（投票、投稿）；游客口令与 `GUEST_PASSWORD`
+游客走同一条 `denyGuest` 闸门。
 
 游客模式**默认关闭**：只有部署方配了非空 `GUEST_PASSWORD` 才存在。判定顺序是「班级口令 → 游客口令 → 调试登录」，所以班级口令永远优先于游客口令。
 
@@ -310,8 +319,11 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 ```jsonc
 // 普通班级
 { "ok": true, "class_id": 12, "class_name": "高一(3)班" }
-// 游客
+// 游客（环境变量口令）
 { "ok": true, "class_id": 0, "class_name": "游客模式", "guest": true, "role": "guest" }
+// 游客口令 / 测试口令（后台「口令管理」生成，v3.4.0）
+{ "ok": true, "class_id": 0, "class_name": "游客模式", "guest": true, "role": "guest" }
+{ "ok": true, "class_id": 0, "class_name": "测试口令", "test": true, "role": "test" }
 // 调试身份（管理员账号:密码换来）
 { "ok": true, "class_id": 0, "class_name": "调试模式", "debug": true }
 ```
@@ -473,15 +485,25 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 ```jsonc
 {
   "ok": true,
-  "role": "class" | "guest" | "debug",   // 普通学生是 "class"
+  "role": "class" | "guest" | "test" | "debug",  // 普通学生是 "class"；测试口令是 "test"
   "isGuest": false,
-  "className": "高一(3)班"                 // 游客是 "游客模式"，调试身份是 "调试模式"
+  "className": "高一(3)班",                 // 游客/游客口令是 "游客模式"，测试口令是 "测试口令"，调试身份是 "调试模式"
+  // 仅真实班级会话才带的拦截信息（游客/测试/调试为 null）：
+  "limits": {
+    "paused": false,        // 本班是否被管理员暂停（暂停 = 投稿投票都拦）
+    "voteLimit": 0,         // 0 = 不限；>0 = 本班投票达到该值后 upvote 403
+    "voteUsed": 3,          // 本班当前累计投票数
+    "submitLimit": 0,       // 0 = 不限；>0 = 本班投稿达到该值后 vote 403
+    "submitUsed": 1         // 本班当前累计投稿数
+  },
+  // 仅非游客非调试的会话下发（全站投稿总量上限的预判信息）：
+  "globalSubmit": { "cap": 100, "used": 42 }   // cap=0 表示未启用
 }
 ```
 
 **失败**：`401` `{"error":"登录已过期，请重新登录"}`。
 
-用途说明：**让前端"问一次"就知道自己是谁，而不是"试一次写操作看会不会 403"**。判断该不该置灰按钮请用这个接口的 `isGuest`，不要去试写操作。
+用途说明：**让前端"问一次"就知道自己是谁，而不是"试一次写操作看会不会 403"**。判断该不该置灰按钮请用这个接口的 `isGuest` 与 `limits`，不要去试写操作。
 
 <!-- 出处：functions/api/me.js:21-50 -->
 
@@ -595,6 +617,9 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 | `401` | `登录已过期，请重新登录` | 会话无效 |
 | `403` | `游客模式只能查看排行，不能投稿` | 游客 |
 | `403` | `广播站现在暂停接收投稿，请稍后再来` | 管理员按下了「暂停接收投稿」（调试身份同样被拦） |
+| `403` | `本班级已被暂停投稿与投票，请联系广播站管理员` | 班级管理页暂停了本班（调试身份不拦） |
+| `403` | `本班级投稿数量已达上限，暂时无法继续投稿` | 本班投稿数达到「班级投稿上限」（0/空 = 不限） |
+| `403` | `站点投稿总数量已达上限，暂无法提交投稿` | 全站累计投稿达到「全站投稿总量上限」。**双重校验先班级后全站**，先命中的先报 |
 | `400` | `请求格式不正确` | 非 JSON / body 不是对象 |
 | `429` | `提交过于频繁，请稍后再试` | 限流 |
 | `403` | `人机校验未通过，请刷新页面后重试` / `人机校验未通过（未取到校验令牌），请刷新页面重试` / `人机校验分数过低，请稍后再试` | reCAPTCHA |
@@ -655,6 +680,8 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 |---|---|
 | `401` | `登录已过期，请重新登录` |
 | `403` | `游客模式只能查看排行，不能投票` |
+| `403` | `本班级已被暂停投稿与投票，请联系广播站管理员`（班级管理页暂停了本班；调试身份不拦） |
+| `403` | `本班级投票数已达上限，暂时无法继续投票`（达到「班级投票上限」；0/空 = 不限。**投票没有全站上限**，只有班级维度） |
 | `400` | `请求格式不正确` |
 | `403` | `人机校验未通过，请刷新页面后重试` / `人机校验未通过（未取到校验令牌），请刷新页面重试` / `人机校验分数过低，请稍后再试` |
 | `403` | `人机校验未通过，请刷新页面重试` / `校验已过期，请刷新页面重试`（PoW） |
@@ -926,6 +953,9 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 | `set_submissions_paused` | super | `paused`（`true` / `1` / `'1'` 算暂停，其余算恢复） | `200 {ok:true, paused, message}`；`500 …尚未执行 007 迁移…` |
 | `set_report_threshold` | super | `threshold`（整数 2~20） | `200 {ok:true, threshold, message:"已设置：被 N 个以上班级举报的歌才会进入收件箱"}`；`400 举报阈值需要是 2 到 20 之间的整数` |
 | `update_class_info` | super | `id`、`grade`（可选，maxLength 20）、`member_count`（可选，整数 0~10000） | `200 {ok:true, message:"已保存该班级的年级与人数"}`；`404 班级不存在`；`500 …尚未执行 007 迁移（缺少 grade / member_count 列）…` |
+| `set_class_limits` | super | `id`、`vote_limit`（`''`=不限 / `^\d{1,7}$` / `x*系数`，系数 1~3 位小数）、`submit_limit`（同左） | `200 {ok:true, message:"已保存该班级的投票与投稿上限"}`。表达式 `x` = 本班人数。需要 015 迁移的 `vote_limit`/`submit_limit` 列 |
+| `set_class_paused` | super | `id`、`paused`（truthy=暂停） | `200 {ok:true, paused, message}`。暂停后该班投票投稿都是 403，**不杀已有会话**（前端用 `/api/me` 的 `limits.paused` 预判） |
+| `set_submit_cap` | super | `cap`（`''`=关闭 / 固定数字 / `x*系数`，x=全站有效班级总人数） | `200 {ok:true, message}`。写入 `system_settings.submit_cap`；全站累计投稿 ≥ 上限后 `/api/vote` 403 |
 | `change_admin_password` | **staff** | `current_password`（1~128）、`new_password`（8~128，不能与当前相同） | `200 {ok:true, message:"密码已更新，其它设备上的登录已失效"}`；`400 新密码不能与当前密码相同`；`401 当前密码不正确`；`404 账号不存在`。**只作用于会话本人**：函数内部用会话里的 id 定位账号，前端传什么 id 都没用 |
 
 `member_count` 的非法值统一回 `400 人数需要是 0 到 10000 之间的整数`。所有 `parsePositiveInt` 失败都回 `400 {"error":"<字段>不正确"}`。
@@ -969,7 +999,7 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 
 游客的专门文案：先跑 `requireStaff`，**再**认一次游客身份 —— 如果同时持有管理员 Cookie 的浏览器（一边登后台一边开着游客会话）仍然能正常排期，不会被误伤。如果确实是游客会话，返回 `403` `{"error":"游客模式只能查看排行，不能排期"}`；否则回 `requireStaff` 的标准 401/403。
 
-**请求 body**：`{action, …}`，`action` ∈ `autofill` / `set_slot` / `clear_slot` / `clear_week`，否则 `400 {"error":"未知操作"}`。
+**请求 body**：`{action, …}`，`action` ∈ `autofill` / `set_slot` / `clear_slot` / `clear_week` / `set_mode` / `set_block_count` / `insert_slot` / `move_slot`，否则 `400 {"error":"未知操作"}`。
 
 日期字段统一要求 `^\d{4}-\d{2}-\d{2}$` 且是**有效日期**（会做 `toISOString` 回读校验），失败文案 `周起始日格式应为 YYYY-MM-DD` / `周起始日不是有效日期`（`autofill` 用的是「起始周」）。日期会按 UTC 折算到**所在周的周一**。
 
@@ -979,8 +1009,14 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 | `set_slot` | `week_start`（也接受别名 `date`，必填）、`period`（必填，只认 `'noon'` / `'afternoon'`）、`position`（必填正整数，**最大 3**）、`song_id`（必填正整数，歌必须 `status='approved'`） | `200 {ok:true, message:"已排入该位置"}`；`400 只能排已通过审核的歌`；`400 时段不正确` / `位置不正确` / `歌曲不正确` |
 | `clear_slot` | `week_start`、`period`、`position`（同 `set_slot`） | `200 {ok:true, message:"已清空该位置"}`；`404 这个位置还不存在` |
 | `clear_week` | `week_start`（必填日期） | `200 {ok:true, deleted:<条数>, message:"已清空这一周"}` |
+| `set_mode` | `mode`（`'both'`=上下午 / `'noon'`=仅上午）、`week_start`（可选） | `200 {ok:true, mode, released}`。切到 `noon` 时把 **`week_start` 那一周**的下午排期整段退回待排（其它周保留，`released` = 退回条数）；公共接口随之只返回 `periods:["noon"]` |
+| `set_block_count` | `period`、`count`（1~12）、`week_start` | `200 {ok:true, count, released}`。**只减不增**：当前已排 > count 时从**末尾**退回（`released` 条），已排 ≤ count 时不补位 |
+| `insert_slot` | `week_start`、`period`、`position`、`song_id`（必须 approved，或排期自定义歌） | `200 {ok:true}`。插入到第 `position` 位，**其后曲目整体后移一位**；该时段已满（≥ 当前配置数量）时 `400 已排满`。实现是整段重写（batch 事务），不会出现半插状态 |
+| `move_slot` | `week_start`、`period`、`from`、`to` | `200 {ok:true}`。同一时段内把第 `from` 位移动到第 `to` 位，其余顺序相应让位 |
 
 `500 数据库尚未执行 012 迁移（缺少每周歌单表），请先在 D1 控制台执行 sql/012_weekly_schedule.sql` 覆盖整段。
+
+`GET /api/schedule` 的响应（5.13）新增：`schedule: {mode, noonCount, afternoonCount}`（播放模式与每周数量配置，缺省 both/3/3）；`periods` 与 `perWeek` 随模式变化（仅上午时 `periods:["noon"]`）。
 
 <!-- 出处：functions/api/schedule.js:122-152,160-313 -->
 
@@ -1164,6 +1200,36 @@ IP 兜底默认值是 `max(limit * 8, 600)`（可被调用方显式覆盖）。
 用它注册出来的账号固定是普通管理员（见 3.5）。
 
 <!-- 出处：functions/api/admin-invites.js:25-27,66-136, _lib/crypto.js:157-173, functions/api/admin-register.js:48-51,79-81 -->
+
+### 5.18 `GET /api/admin-passes` / `POST /api/admin-passes` —— 测试口令与游客口令（v3.4.0）
+
+**身份**：`requireStaff`（普通管理员及以上 —— 发临时口令是广播站日常工作，不必高级管理员亲自操作）。**限流**：代码里未找到限流。
+
+**GET 响应 `200`**：
+
+```jsonc
+{
+  "ok": true,
+  "canView": true,          // 配了私有 AUTH_PEPPER 才能解出明文
+  "passes": [
+    { "id": 3, "kind": "test", "label": "演示", "expires_at": "2026-10-18 00:00:00" | null,
+      "revoked": false, "created_at": "…", "last_used_at": "…" | null,
+      "token": "ABCD2345EFGH" }   // 仅 canView 时才有；长期凭证明文便于再次分发
+  ]                          // 最多 500 条，id 降序
+}
+```
+
+**POST `action: "create"`**：`kind`（必填，只认 `test` / `guest`）、`label`（可选，maxLength 40）、`expires_days`（可选，1~3650，留空 = 长期有效）。
+响应 `200`：`{ok:true, id, kind, label, expires_at, token, message}`。
+**`token` 是 12 位人类可读随机码（去 `0/O/1/I/L`），只在这一刻返回**；库里只有 PBKDF2 哈希 + HMAC 查找索引 + AES 密文。
+
+**POST `action: "revoke"`**：`id` 必填 → `200 {ok:true, revokedSessions, message}`。作废后口令不能再登录，**它签发过的全部会话立即失效**（`sessions.pass_id` 反查删除）。
+
+**POST `action: "delete"`**：`id` 必填 → 行与相关会话一起删除。
+
+失败：`400 口令类型只能是 test（测试口令）或 guest（游客口令）` / `有效天数需要是 1 到 3650 之间的整数，留空表示长期有效` / `凭证不正确`；`404 凭证不存在`；`500` 015 迁移提示（缺 access_passes 表）。
+
+学生侧怎么用：拿 `token` 在**首页班级口令输入框**直接登录（`POST /api/login`），响应带 `guest:true, role:'guest'`（游客口令）或 `test:true, role:'test'`（测试口令），`class_id` 为 `0`、`class_name` 为「游客模式」/「测试口令」。过期/作废的口令登录回 `401 口令错误`。
 
 ## 6. `/api/music` 专篇
 

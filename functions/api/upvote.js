@@ -2,6 +2,7 @@ import { readJson, error, json, clientIp } from '../../_lib/http.js';
 import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
+import { getClassLimits, countClassVotes } from '../../_lib/classconfig.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { verifyPow } from '../../_lib/pow.js';
 import { parseRequestId } from '../../_lib/idempotency.js';
@@ -41,6 +42,26 @@ export async function onRequestPost(context) {
   if (guestDenied) return guestDenied;
 
   const classId = auth.session.subject_id;
+
+  // ---- 班级暂停 / 班级投票上限（2026-10-10 需求）----
+  //
+  // 投票**不引入**全站总量上限：原有"票数封顶"（vote_cap，按全校人数算的
+  // 单首歌票数上限）一行不动，这里只加班级维度的两道闸 ——
+  // ① classes.paused = 1 的班级不能投票；② 班级累计投票达到 vote_limit 拦截。
+  // 与投稿那侧同一个位置（读请求体、限流与任何写入之前）；
+  // 测试口令/调试会话没有班级归属，不参与班级级限制。
+  if (auth.session.role !== 'debug') {
+    const limits = await getClassLimits(env, classId);
+    if (limits.paused) {
+      return error('本班级已被暂停投稿与投票，请联系广播站管理员', 403);
+    }
+    if (limits.voteLimit > 0) {
+      const used = await countClassVotes(env, classId);
+      if (used >= limits.voteLimit) {
+        return error('本班级投票数已达上限，暂时无法继续投票', 403);
+      }
+    }
+  }
 
   const ip = clientIp(request);
 
