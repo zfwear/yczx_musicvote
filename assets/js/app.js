@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 /* 版本一致性守卫：页面 HTML 与 app.js 必须同批次上传。
    只传一半（比如新页面配旧脚本、或反之）时，页面会"点了没反应"——
    这里直接把它变成一条看得懂的提示。 */
-const APP_VER = '3.6.0';
+const APP_VER = '3.6.1';
 {
   const pageVer = document.body && document.body.dataset ? document.body.dataset.appVer : '';
   if (pageVer && pageVer !== APP_VER) {
@@ -83,17 +83,66 @@ async function withVerification(task){beginVerification();try{return await task(
 let cachedFingerprint;
 async function fingerprint(){if(cachedFingerprint)return cachedFingerprint;const n=navigator,s=screen||{};let canvas='no-canvas',webgl='no-webgl';try{const c=document.createElement('canvas');c.width=220;c.height=44;const x=c.getContext('2d');if(x){x.font='14px Arial';x.fillText('radio vote2',2,4);x.arc(60,20,12,0,Math.PI*2);x.stroke();canvas=c.toDataURL();}}catch{}try{const gl=document.createElement('canvas').getContext('webgl');if(gl){const info=gl.getExtension('WEBGL_debug_renderer_info');webgl=String(info?gl.getParameter(info.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER));}}catch{}const raw=[n.userAgent||'',n.platform||'',n.language||'',(n.languages||[]).join(','),n.hardwareConcurrency||'',n.maxTouchPoints||'',`${s.width||0}x${s.height||0}x${s.colorDepth||0}`,devicePixelRatio||0,Intl.DateTimeFormat().resolvedOptions().timeZone||'',canvas,webgl].join('|');try{const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));cachedFingerprint=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');}catch{let out='';for(let seed=0;seed<4;seed++){let h=(0x811c9dc5^(seed*0x9e3779b1))>>>0;for(let i=0;i<raw.length;i++){h^=raw.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0;}out+=h.toString(16).padStart(8,'0');}cachedFingerprint=out;}return cachedFingerprint;}
 let recaptchaConfig,powConfig;
+/* ---------- 留存加载（SWR 缓存层，v3.6.1）----------
+   手机上"慢"的大头不是下载（JS/CSS 已 immutable 长缓存），而是每次进页面
+   都要等 1~2 轮 API 往返才出内容。榜单 / 公告 / 排期 / 站点配置这类
+   "读多写少"的数据，把上一次的响应留在 localStorage：
+     · get()   —— 直接取上次响应（不管多旧），用于"先直出、再刷新"；
+     · fresh() —— 只取 TTL 内的响应，命中就连网络都不发（省 D1 读取）；
+     · set()   —— 带时间戳写入。
+   管理员后台的数据一律**不进**这层（审核必须实时）。
+   键带 v1 前缀：以后响应形状变了换前缀即可，不会读出旧结构；
+   window.__swrHits 供 e2e 验证"缓存真的直出了"。 */
+const apiCache = (() => {
+  const P = 'yczxc_v1_';
+  const raw = (k) => { try { return JSON.parse(localStorage.getItem(P + k)); } catch { return null; } };
+  const hit = () => { window.__swrHits = (window.__swrHits || 0) + 1; };
+  return {
+    get(k) { const v = raw(k); if (v) { hit(); return v.d; } return null; },
+    fresh(k, ttl) { const v = raw(k); if (v && v._t && Date.now() - v._t < ttl) { hit(); return v.d; } return null; },
+    set(k, d) { try { localStorage.setItem(P + k, JSON.stringify({ _t: Date.now(), d })); } catch { /* 配额满就算了 */ } },
+  };
+})();
+
 /* /api/config 全页共享：一次会话内每个页面只发一次。
    原来首页/投稿页自己 fetch 一份、人机校验再 fetch 一份；现在统一走
-   siteConfig() 的单例 Promise，多处的调用合并成一次网络往返。 */
+   siteConfig() 的单例 Promise，多处的调用合并成一次网络往返。
+   v3.6.1 起带 60 秒本地缓存（留存加载）：二次打开零网络往返；
+   代价是管理员切主题后，老访客最迟 60 秒内跟进（首次访问即时生效）。 */
 let siteConfigPromise = null;
-const siteConfig = () => { if(!siteConfigPromise) siteConfigPromise = api('/api/config',{quiet401:true}).catch(()=>null); return siteConfigPromise; };
+const siteConfig = () => { if(siteConfigPromise) return siteConfigPromise;
+  const cached = apiCache.fresh('config', 60000);
+  siteConfigPromise = cached
+    ? Promise.resolve(cached)
+    : api('/api/config',{quiet401:true}).then(d=>{apiCache.set('config',d);return d;}).catch(()=>null);
+  return siteConfigPromise; };
 async function clientConfig(){if(!recaptchaConfig||!powConfig){const d=(await siteConfig())||{};recaptchaConfig=d.recaptcha||{enabled:false};powConfig=d.pow||{enabled:false};}return{recaptcha:recaptchaConfig,pow:powConfig};}
 /* 站点主题：后台「主题」页设置的全站外观，存服务端（system_settings 表）。
    先用 localStorage 缓存值即时上色（防刷新闪回默认），再用服务端真值纠正 ——
    管理员换主题后，所有访客下一次打开任何页面就是新主题。
    校徽（ico.svg）与公安备案徽标是独立图片，主题变量不作用于图片，黑白主题下保持原样。 */
 (async()=>{try{if(localStorage.getItem('site_theme')==='mono')document.documentElement.dataset.theme='mono';const d=await siteConfig();const mono=!!d&&d.theme==='mono';if(mono)document.documentElement.dataset.theme='mono';else delete document.documentElement.dataset.theme;localStorage.setItem('site_theme',mono?'mono':'');}catch{}})();
+/* 页面预取（v3.6.1）：进站空闲时把前台三个页面提前拉进 HTTP 缓存，
+   点导航时省一次整页下载（JS/CSS 早已长缓存，剩下的延迟主要就是文档本身）。
+   浏览器开了"省流"或 2G 类慢网时不做，别跟学生抢流量；后台页签切换不换页，无此需求。 */
+try{
+  const conn=navigator.connection;
+  if(!(conn&&(conn.saveData||/^(slow-)?2g$/.test(conn.effectiveType||'')))){
+    /* Chromium 系用 Speculation Rules（预取优先级更高、保留更久）；其它浏览器忽略不报错 */
+    const sr=document.createElement('script');sr.type='speculationrules';
+    sr.textContent=JSON.stringify({prefetch:[{source:'list',urls:['/vote','/schedule','/suggest'],eagerness:'moderate'}]});
+    document.head.append(sr);
+    const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,1500));
+    idle(()=>{for(const u of ['/vote','/schedule','/suggest']){const l=document.createElement('link');l.rel='prefetch';l.href=u;document.head.append(l);}});
+  }
+}catch{}
+/* 人机校验的两个外域提前握手（DNS+TLS）：真到投稿/投票提交那一刻，
+   recaptcha 脚本不用再从零建连接 —— 第一次提交能快好几秒。 */
+(async()=>{try{const c=await siteConfig();if(c&&c.recaptcha&&c.recaptcha.enabled){
+  for(const h of [c.recaptcha.base||'https://www.recaptcha.net','https://www.gstatic.cn']){
+    const l=document.createElement('link');l.rel='preconnect';l.href=h;l.crossOrigin='';document.head.append(l);
+  }
+}}catch{}})();
 async function recaptchaToken(action){return withVerification(async()=>{const{recaptcha:c}=await clientConfig();if(!c.enabled||!c.siteKey)return'';try{if(!window.grecaptcha)await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=(c.base||'https://www.recaptcha.net')+'/recaptcha/api.js?render='+encodeURIComponent(c.siteKey);s.onload=resolve;s.onerror=reject;document.head.append(s);setTimeout(()=>reject(Error('timeout')),6000);});return await Promise.race([new Promise(resolve=>grecaptcha.ready(()=>grecaptcha.execute(c.siteKey,{action}).then(resolve))),new Promise(resolve=>setTimeout(()=>resolve(''),5000))])||'';}catch{return'';}});}
 async function powProof(action){return withVerification(async()=>{const{pow:p}=await clientConfig();if(!p.enabled||!crypto.subtle)return null;try{let cid=localStorage.getItem('vote2_pow_cid');if(!cid||!/^[A-Za-z0-9_-]{8,64}$/.test(cid)){cid=crypto.randomUUID().replaceAll('-','');localStorage.setItem('vote2_pow_cid',cid);}const r=await api(`/api/pow?action=${encodeURIComponent(action)}&cid=${encodeURIComponent(cid)}`);if(!r.enabled||!r.challenge)return null;const work=r.challenge.split('.')[4];if(!work)return null;const enc=new TextEncoder(),target='0'.repeat(Number(r.difficulty)||0),until=Date.now()+10000;for(let nonce=0;Date.now()<until;nonce++){const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(`${work}:${nonce}`)));let hex='';for(const b of hash){hex+=b.toString(16).padStart(2,'0');if(hex.length>=target.length)break;}if(hex.startsWith(target))return{challenge:r.challenge,nonce:String(nonce)};if(nonce%1500===0)await new Promise(resolve=>setTimeout(resolve,0));}return null;}catch{return null;}});}
 
@@ -146,15 +195,21 @@ async function home(){
      2026-10-10 曾把手机端的这两个折叠块搬进抽屉菜单，但用户反馈在抽屉里
      点开后再点别的就"消失"了（节点跟着抽屉收起）—— 2026-10-11 按用户要求
      撤销搬动，恢复为页面最底部的静态折叠块，任何视口都不再挪动。 */
-  /* 站点配置与公告互不依赖，并发取（原来是两次串行往返，各等一次网络）。 */
-  const [cfg,ads]=await Promise.all([siteConfig().then(x=>x||{}),api('/api/announcements').catch(()=>({announcements:[],popups:[]}))]);if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
-  const adList=ads.announcements||[];$('#announcements').innerHTML=adList.length?('<div class="section-title"><h2>广播站公告</h2></div>'+adList.map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('')):'';for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await loadRanks();reveal($$('.panel,.hero,.announcement'));
+  /* v3.6.1 留存加载：榜单缓存先直出（不 await、不等网络），公告/配置并发取，
+     全部完成后再做入场动效。弹窗公告也不再挡住榜单 —— 原来要点完「知道了」才渲染列表。 */
+  const ranksDone=loadRanks();
+  const annJob=(async()=>{const c=apiCache.fresh('ann_app',300000);if(c)return c;try{const d=await api('/api/announcements');apiCache.set('ann_app',d);return d;}catch{return{announcements:[],popups:[]};}})();
+  const [cfg,ads]=await Promise.all([siteConfig().then(x=>x||{}),annJob]);if(cfg.submit?.paused){$('#pausedNotice').hidden=false;}
+  const adList=ads.announcements||[];$('#announcements').innerHTML=adList.length?('<div class="section-title"><h2>广播站公告</h2></div>'+adList.map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('')):'';for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await ranksDone;reveal($$('.panel,.hero,.announcement'));
 }
 async function loadGateAnnouncements(){try{const d=await api('/api/announcements?scope=gate');$('#gateAnnouncements').innerHTML=(d.announcements||[]).map(a=>`<article class="announcement"><b>${esc(a.title)}</b><p>${esc(a.content)}</p></article>`).join('');}catch{}}
-async function loadRanks(){/* 两张榜单并发取（原来是串行两次网络往返）；渲染与事件绑定保持原样。 */
-  const fetched=await Promise.all(['pending','approved'].map(async status=>{try{const d=await api(`/api/rank?status=${status}`);return{status,rows:Array.isArray(d)?d:[]};}catch(e){return{status,err:e};}}));
+async function loadRanks(){/* 留存加载（v3.6.1）：上一次的榜单先直出（零等待），再并发取最新替换；绑定保持原样。 */
   const guestMode=document.body.classList.contains('guest-mode');const voteBlock=window.__voteBlockReason||classBlockReason('vote');const voteAttr=guestMode?'disabled title="游客状态：只能浏览与试听"':(voteBlock?`disabled title="${esc(voteBlock)}"`:'');
-  for(const f of fetched){const box=$(`#${f.status}List`);if(f.err){box.innerHTML=`<p class="message">${esc(f.err.message)}</p>`;continue;}const rows=f.rows,status=f.status;box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${voteAttr}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${guestMode?'disabled title="游客状态：只能浏览与试听"':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
+  const renderBox=(status,rows)=>{const box=$(`#${status}List`);if(!box)return;box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${voteAttr}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${guestMode?'disabled title="游客状态：只能浏览与试听"':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';};
+  const cached={pending:apiCache.get('rank_pending'),approved:apiCache.get('rank_approved')};
+  for(const s of ['pending','approved'])if(cached[s])renderBox(s,cached[s]);
+  const fetched=await Promise.all(['pending','approved'].map(async status=>{try{const d=await api(`/api/rank?status=${status}`);const rows=Array.isArray(d)?d:[];apiCache.set('rank_'+status,rows);return{status,rows,err:null};}catch(e){return{status,rows:null,err:e};}}));
+  for(const f of fetched){if(f.rows){renderBox(f.status,f.rows);continue;}if(!cached[f.status]){const box=$(`#${f.status}List`);if(box)box.innerHTML=`<p class="message">${esc(f.err.message)}</p>`;}}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
 async function reportSong(id){if(!await uiConfirm('确认举报这首歌曲？',{title:'举报歌曲',ok:'确认举报'}))return;try{const[fp,recaptcha_token]=await Promise.all([fingerprint(),recaptchaToken('report')]);await api('/api/report',{method:'POST',body:JSON.stringify({id:Number(id),reason:'',fingerprint:fp,client_id:fp,recaptcha_token})});toast('举报已提交');}catch(e){toast(e.message);}}
 async function preview(track,title,artist,container){if(!container)return;stopAllPlayers();container.innerHTML='<span class="muted">正在准备试听…</span>';try{let id=track;if(!id){const d=await api(`/api/music?q=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);id=(d.results||[]).find(x=>x.id)?.id;}if(!id){container.innerHTML='<span class="muted">没有可试听的音源</span>';return;}const check=await api(`/api/music?check=${encodeURIComponent(id)}`);if(check.playable===false){container.innerHTML='<span class="muted">该版本暂时无法试听</span>';return;}container.innerHTML=`<audio controls autoplay preload="none" src="/api/music?play=${encodeURIComponent(id)}"></audio>`;registerPlayer(container.querySelector('audio'));}catch(e){container.innerHTML=`<span class="message">${esc(e.message)} <button class="btn" data-retry>重试</button></span>`;container.querySelector('[data-retry]').onclick=()=>preview(track,title,artist,container);}}
 async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks();}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
@@ -184,23 +239,38 @@ async function suggestionsPage(){const me=await session();if(!me){location.href=
    原始日期与"该周"这类说法不好懂 —— 前台与后台的周标题统一在这里生成。 */
 const cnDay=(iso)=>{const d=new Date(iso+'T00:00:00Z');return (d.getUTCMonth()+1)+'月'+d.getUTCDate()+'日';};
 const cnRange=(w)=>cnDay(w.weekStart)+'至'+cnDay(w.weekEnd);
-async function schedule(){ $('#nav').innerHTML=nav('schedule'); $('[data-logout]').onclick=logout; const box=$('#weeks'); try{
-  /* "今天"按中国时区（UTC+8）的日历日算，与后端 chinaToday 同一口径 ——
-     按 UTC 直取的话，北京周一 0~8 点之间会把本周算成上周。 */
-  const cn=new Date(Date.now()+8*3600*1000),day=cn.getUTCDay(),thisWeek=new Date(cn);thisWeek.setUTCDate(cn.getUTCDate()-(day===0?6:day-1));
-  const from=new Date(thisWeek);from.setUTCDate(from.getUTCDate()-7);
-  const d=await api('/api/schedule?week_start='+from.toISOString().slice(0,10)+'&weeks=3');
-  /* 排期现在是可配置的：模式（上下午都有/仅上午）+ 每时段数量。
-     接口没带 schedule（老部署）时回落 3+3，与旧行为一字不差。 */
-  const sc=d.schedule||{mode:'both',noonCount:3,afternoonCount:3};
-  const active=sc.mode==='noon'?['noon']:['noon','afternoon'];
-  const countOf=p=>Number(p==='noon'?sc.noonCount:sc.afternoonCount)||3;
-  const needs=d.needsMigration?`<p class="notice">排期数据尚未初始化：${esc(d.hint||'请在数据库执行 012 迁移')}（页面先按空排期显示）</p>`:'';
-  const summary=sc.mode==='noon'
-    ?`广播站周一到周五中午播出 ${countOf('noon')} 首有歌词的歌（当前是「仅上午」模式，下午不播）。同一批歌一整周循环，下周一换一批新的。`
-    :`广播站周一到周五播出：中午 ${countOf('noon')} 首有歌词的歌、下午 ${countOf('afternoon')} 首纯音乐，一周共 ${countOf('noon')+countOf('afternoon')} 首。同一批歌一整周循环，下周一换一批新的。`;
-  const guide=`今天是 ${cnDay(cn.toISOString().slice(0,10))}（周${'日一二三四五六'[day]}）。下面从上到下：上周（已播完）、本周（正在播放）、下周（还没到）。`;
-  box.innerHTML=`<p class="notice schedule-notice">${summary}${guide}</p>`+needs+(d.weeklies||[]).map((w,i)=>{const tag=i===1?'本周':i===0?'上周':'下周';const note=i===1?'正在播放':i===0?'已播完':'还没到';return `<article class="week ${i===1?'current':''}"><h2>${tag}（${esc(cnRange(w))}）<span class="muted">${note}</span></h2>${active.map(p=>`<div class="slot-title">${p==='noon'?'中午放学 · 含歌词':'下午上学 · 纯音乐'}</div>${Array.from({length:countOf(p)},(_,k)=>slot(w,p,k+1)).join('')}`).join('')}</article>`;}).join(''); reveal($$('.week'));}catch(e){box.innerHTML=`<p class="message">加载排期失败：${esc(e.message)}</p>`;} }
+async function schedule(){ $('#nav').innerHTML=nav('schedule'); $('[data-logout]').onclick=logout; const box=$('#weeks');
+  /* 渲染抽成 paint()：留存加载（v3.6.1）先画缓存里上一次的排期（零等待、不做动画），
+     网络回来再画最新的；任何一处出错都保持与旧行为一致的报错文案。 */
+  const paint=(d,revealNow)=>{ try{
+    /* "今天"按中国时区（UTC+8）的日历日算，与后端 chinaToday 同一口径 ——
+       按 UTC 直取的话，北京周一 0~8 点之间会把本周算成上周。 */
+    const cn=new Date(Date.now()+8*3600*1000),day=cn.getUTCDay(),thisWeek=new Date(cn);thisWeek.setUTCDate(cn.getUTCDate()-(day===0?6:day-1));
+    /* 排期现在是可配置的：模式（上下午都有/仅上午）+ 每时段数量。
+       接口没带 schedule（老部署）时回落 3+3，与旧行为一字不差。 */
+    const sc=d.schedule||{mode:'both',noonCount:3,afternoonCount:3};
+    const active=sc.mode==='noon'?['noon']:['noon','afternoon'];
+    const countOf=p=>Number(p==='noon'?sc.noonCount:sc.afternoonCount)||3;
+    const needs=d.needsMigration?`<p class="notice">排期数据尚未初始化：${esc(d.hint||'请在数据库执行 012 迁移')}（页面先按空排期显示）</p>`:'';
+    const summary=sc.mode==='noon'
+      ?`广播站周一到周五中午播出 ${countOf('noon')} 首有歌词的歌（当前是「仅上午」模式，下午不播）。同一批歌一整周循环，下周一换一批新的。`
+      :`广播站周一到周五播出：中午 ${countOf('noon')} 首有歌词的歌、下午 ${countOf('afternoon')} 首纯音乐，一周共 ${countOf('noon')+countOf('afternoon')} 首。同一批歌一整周循环，下周一换一批新的。`;
+    const guide=`今天是 ${cnDay(cn.toISOString().slice(0,10))}（周${'日一二三四五六'[day]}）。下面从上到下：上周（已播完）、本周（正在播放）、下周（还没到）。`;
+    box.innerHTML=`<p class="notice schedule-notice">${summary}${guide}</p>`+needs+(d.weeklies||[]).map((w,i)=>{const tag=i===1?'本周':i===0?'上周':'下周';const note=i===1?'正在播放':i===0?'已播完':'还没到';return `<article class="week ${i===1?'current':''}"><h2>${tag}（${esc(cnRange(w))}）<span class="muted">${note}</span></h2>${active.map(p=>`<div class="slot-title">${p==='noon'?'中午放学 · 含歌词':'下午上学 · 纯音乐'}</div>${Array.from({length:countOf(p)},(_,k)=>slot(w,p,k+1)).join('')}`).join('')}</article>`;}).join('');
+    if(revealNow)reveal($$('.week'));
+  }catch(e){ box.innerHTML=`<p class="message">加载排期失败：${esc(e.message)}</p>`; } };
+  let ck=null;
+  try{
+    const cn=new Date(Date.now()+8*3600*1000),day=cn.getUTCDay(),thisWeek=new Date(cn);thisWeek.setUTCDate(cn.getUTCDate()-(day===0?6:day-1));
+    const from=new Date(thisWeek);from.setUTCDate(from.getUTCDate()-7);
+    ck='sched_'+from.toISOString().slice(0,10)+'_3';
+    const cached=apiCache.get(ck);
+    if(cached)paint(cached,false);/* 留存直出 */
+    if(!cached||!apiCache.fresh(ck,90000)){/* 90 秒内视为新鲜：连网络都不发；过期则后台刷新替换 */
+      const d=await api('/api/schedule?week_start='+from.toISOString().slice(0,10)+'&weeks=3');
+      apiCache.set(ck,d);paint(d,true);
+    }
+  }catch(e){ if(!ck||!apiCache.get(ck))box.innerHTML=`<p class="message">加载排期失败：${esc(e.message)}</p>`; } }
 function slot(w,p,n){const x=(w.slots||[]).find(s=>s.period===p&&Number(s.position)===n); return `<div class="slot"><b>${n}</b><div>${x?esc(x.title):'待排歌曲'}<span>${x?esc(x.artist||''):'等待管理员安排'}</span></div></div>`;}
 async function admin(){ $('#nav').innerHTML=nav('admin'); document.body.classList.add('admin-page'); $$('[data-logout]').forEach(b=>b.onclick=logout); const form=$('#adminLogin'), msg=$('#adminMessage');
   /* 后台侧边栏（视口宽度判定，不看设备型号）：
@@ -244,11 +314,57 @@ async function adminView(view){const titles={pending:'待审核歌曲',approved:
      覆盖新页面"，拦不住"旧数据还没回来时旧内容一直挂着"——必须在这里清。 */
   $('#adminRows').innerHTML='<div class="admin-skeleton" aria-hidden="true"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   if(['pending','approved','rejected'].includes(view))return adminList(view);if(view==='schedule')return adminSchedule();if(view==='classes')return adminClasses();if(view==='passes')return adminPasses();if(view==='banned')return adminBanned();if(view==='reports')return adminReports();if(view==='announcements')return adminAnnouncements();if(view==='suggestions')return adminSuggestions();if(view==='accounts')return adminAccounts();if(view==='invites')return adminInvites();if(view==='theme')return adminTheme();return adminSettings();}
-async function adminList(status){const box=$('#adminRows');try{/* 列表与分类配置互不依赖，并发取（原来是串行两次往返，审核页打开速度直接翻倍）。 */const [rows,cfg]=await Promise.all([api('/api/admin-list?status='+status),api('/api/admin-settings').catch(()=>({categories:[]}))]);const cats=cfg.categories||[];/* 慢响应守卫：用户已切到别的页签时，这次迟到的旧列表不许覆盖新视图（登录后立刻点页签时必现） */if(($('#adminTabs .active')?.dataset.view||'pending')!==status)return;/* 回收站顶部的一键清空：接口（admin-action 的 empty_recycle）本来就有，
-   旧后台（admin7318434 之前的 admin.html 时代）也有入口，新前端一直没接上。
-   2026-10-11 用户要求补回。清空前必须确认 —— 不可恢复。 */
-const recycleBar=status==='rejected'&&rows.length?`<div class="toolbar"><button class="btn danger" id="emptyRecycle" type="button">一键清空回收站</button><span class="muted">回收站共 ${rows.length} 首；清空会连同投票、举报与建议记录一起永久删除，不可恢复。</span></div>`:'';
-box.innerHTML=recycleBar+(rows.length?rows.map(x=>`<article class="admin-row admin-song"><div class="admin-song-info"><b>${esc(x.title)}</b><div class="muted">${esc(x.artist)} · ${esc(x.category_name||'')} · ${Number(x.votes||0)} 票 ${x.is_reported?'· 被举报':''} ${x.playable===false?'· 当前版本无音频':''} ${x.is_debug?'· 调试投稿':''}</div><div class="song-actions"><button class="btn quiet" data-preview="${esc(x.track_id||'')}" data-song="${x.id}" data-title="${esc(x.title)}" data-artist="${esc(x.artist||'')}">试听已选版本</button>${status!=='rejected'?`<select class="input category-select" data-category-song="${x.id}">${cats.map(c=>`<option value="${c.id}" ${Number(c.id)===Number(x.category_id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><button class="btn quiet" data-update-category="${x.id}">改分类</button><button class="btn quiet" data-suggest="${x.id}">查看建议</button>`:''}</div><div class="inline-player" id="admin-player-${x.id}"></div></div><div class="actions">${status==='pending'?`<button class="btn primary" data-action="approve" data-id="${x.id}">通过</button><button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn quiet" data-clear-report="${x.id}">清除举报标记</button>`:status==='rejected'?`<button class="btn" data-action="restore" data-id="${x.id}">恢复</button><button class="btn danger" data-delete-song="${x.id}">彻底删除</button>`:''}${status==='approved'?`<button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn" data-add-song="${x.id}">加入排期</button>`:''}</div></article>`).join(''):'<p class="muted">这里暂时没有歌曲。</p>');if(status==='pending')await renderReportInbox();const emptyBtn=$('#emptyRecycle');if(emptyBtn)emptyBtn.onclick=async()=>{if(!await uiConfirm(`清空回收站？将永久删除全部 ${rows.length} 首歌，及其投票、举报与建议记录。此操作不可恢复。`,{title:'清空回收站',ok:'全部清空',danger:true}))return;try{const r=await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'empty_recycle'})});toast(r.deleted!=null?`回收站已清空，共删除 ${r.deleted} 首`:'回收站已清空');adminList(status);}catch(e){toast(e.message);}};$$('#adminRows [data-action]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:b.dataset.action,id:Number(b.dataset.id)})});toast('操作已完成');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-add-song]').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'add_song',song_id:Number(b.dataset.addSong)})});toast(d.message||'已加入排期');}catch(e){toast(e.message);}});$$('#adminRows [data-delete-song]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm('永久删除这首歌及其相关记录？',{title:'彻底删除',ok:'永久删除',danger:true}))return;try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'delete',id:Number(b.dataset.deleteSong)})});toast('歌曲已永久删除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-clear-report]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'clear_report',id:Number(b.dataset.clearReport)})});toast('举报标记已清除');adminList(status);}catch(e){toast(e.message);}});$$('#adminRows [data-update-category]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-update',{method:'POST',body:JSON.stringify({id:Number(b.dataset.updateCategory),category_id:Number($(`[data-category-song="${b.dataset.updateCategory}"]`).value)})});toast('分类已更新');}catch(e){toast(e.message);}});$$('#adminRows [data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#admin-player-${b.dataset.song}`)));$$('#adminRows [data-suggest]').forEach(b=>b.onclick=()=>showSuggestions(b.dataset.suggest));}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;} }
+/* 三个审核页签共享的内存缓存（v3.6.1 管理员提速）：
+   待审核 / 已通过 / 回收站互切时先直出上一次的数据（零等待），再拉最新替换；
+   第一次渲染完顺手把另外两个页签的数据预热好。审核动作成功后同步改缓存、
+   把那一行就地移除，不再整列表重拉重绘 —— 审核一首歌就是一次接口往返的时间。 */
+const adminRowsCache = {};
+async function adminList(status){const box=$('#adminRows');
+  const renderRows=(rows,cats)=>{
+    /* 回收站顶部的一键清空：接口（admin-action 的 empty_recycle）本来就有，
+       旧后台（admin7318434 之前的 admin.html 时代）也有入口，新前端一直没接上。
+       2026-10-11 用户要求补回。清空前必须确认 —— 不可恢复。 */
+    const recycleBar=status==='rejected'&&rows.length?`<div class="toolbar"><button class="btn danger" id="emptyRecycle" type="button">一键清空回收站</button><span class="muted" id="recycleCountText">回收站共 ${rows.length} 首；清空会连同投票、举报与建议记录一起永久删除，不可恢复。</span></div>`:'';
+    box.innerHTML=recycleBar+(rows.length?rows.map(x=>`<article class="admin-row admin-song"><div class="admin-song-info"><b>${esc(x.title)}</b><div class="muted">${esc(x.artist)} · ${esc(x.category_name||'')} · ${Number(x.votes||0)} 票 ${x.is_reported?'· 被举报':''} ${x.playable===false?'· 当前版本无音频':''} ${x.is_debug?'· 调试投稿':''}</div><div class="song-actions"><button class="btn quiet" data-preview="${esc(x.track_id||'')}" data-song="${x.id}" data-title="${esc(x.title)}" data-artist="${esc(x.artist||'')}">试听已选版本</button>${status!=='rejected'?`<select class="input category-select" data-category-song="${x.id}">${cats.map(c=>`<option value="${c.id}" ${Number(c.id)===Number(x.category_id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><button class="btn quiet" data-update-category="${x.id}">改分类</button><button class="btn quiet" data-suggest="${x.id}">查看建议</button>`:''}</div><div class="inline-player" id="admin-player-${x.id}"></div></div><div class="actions">${status==='pending'?`<button class="btn primary" data-action="approve" data-id="${x.id}">通过</button><button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn quiet" data-clear-report="${x.id}">清除举报标记</button>`:status==='rejected'?`<button class="btn" data-action="restore" data-id="${x.id}">恢复</button><button class="btn danger" data-delete-song="${x.id}">彻底删除</button>`:''}${status==='approved'?`<button class="btn" data-action="reject" data-id="${x.id}">移入回收站</button><button class="btn" data-add-song="${x.id}">加入排期</button>`:''}</div></article>`).join(''):'<p class="muted">这里暂时没有歌曲。</p>');
+    bindAll();
+  };
+  /* 就地移除：按钮立刻置灰（防连点）→ 缓存同步增删 → 行淡出消失 → 更新回收站计数与空态 */
+  const removeRowLive=(btn,dest)=>{const row=btn.closest('.admin-row');if(!row)return;const id=Number(btn.dataset.id);
+    row.querySelectorAll('button,select').forEach(x=>{x.disabled=true;});
+    const rowData=(adminRowsCache[status]||{rows:[]}).rows.find(x=>Number(x.id)===id);
+    for(const s of ['pending','approved','rejected']){const c=adminRowsCache[s];if(c)c.rows=c.rows.filter(x=>Number(x.id)!==id);}
+    if(dest&&rowData){const dc=adminRowsCache[dest];if(dc)dc.rows.unshift(rowData);}
+    const done=()=>{try{stopPlayersIn(row);}catch{}row.remove();const n=$('#adminRows').querySelectorAll('.admin-row').length;const rcT=$('#recycleCountText');if(rcT)rcT.textContent=`回收站共 ${n} 首；清空会连同投票、举报与建议记录一起永久删除，不可恢复。`;if(!n&&$('#emptyRecycle'))$('#emptyRecycle').remove();if(!n)box.insertAdjacentHTML('beforeend','<p class="muted">这里暂时没有歌曲。</p>');};
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches)done();else{row.classList.add('leaving');setTimeout(done,190);}
+  };
+  const bindAll=()=>{
+    const emptyBtn=$('#emptyRecycle');
+    if(emptyBtn)emptyBtn.onclick=async()=>{const n=adminRowsCache[status]?adminRowsCache[status].rows.length:0;if(!await uiConfirm(`清空回收站？将永久删除全部 ${n} 首歌，及其投票、举报与建议记录。此操作不可恢复。`,{title:'清空回收站',ok:'全部清空',danger:true}))return;try{const r=await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'empty_recycle'})});toast(r.deleted!=null?`回收站已清空，共删除 ${r.deleted} 首`:'回收站已清空');delete adminRowsCache[status];adminList(status);}catch(e){toast(e.message);}};
+    $$('#adminRows [data-action]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:b.dataset.action,id:Number(b.dataset.id)})});toast('操作已完成');/* 通过/移入回收站/恢复：那一行就地消失（去往的目标页签缓存同步补上），不再整列表重拉 */const dest=b.dataset.action==='approve'?'approved':b.dataset.action==='reject'?'rejected':b.dataset.action==='restore'?'pending':null;removeRowLive(b,dest);/* 待审核页的举报收件箱跟着后台刷新，不挡列表 */if(status==='pending'&&b.dataset.action!=='clear_report')renderReportInbox();}catch(e){toast(e.message);}});
+    $$('#adminRows [data-add-song]').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/schedule',{method:'POST',body:JSON.stringify({action:'add_song',song_id:Number(b.dataset.addSong)})});toast(d.message||'已加入排期');}catch(e){toast(e.message);}});
+    $$('#adminRows [data-delete-song]').forEach(b=>b.onclick=async()=>{if(!await uiConfirm('永久删除这首歌及其相关记录？',{title:'彻底删除',ok:'永久删除',danger:true}))return;try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'delete',id:Number(b.dataset.deleteSong)})});toast('歌曲已永久删除');removeRowLive(b,null);}catch(e){toast(e.message);}});
+    $$('#adminRows [data-clear-report]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-action',{method:'POST',body:JSON.stringify({type:'clear_report',id:Number(b.dataset.clearReport)})});toast('举报标记已清除');delete adminRowsCache[status];adminList(status);}catch(e){toast(e.message);}});
+    $$('#adminRows [data-update-category]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-update',{method:'POST',body:JSON.stringify({id:Number(b.dataset.updateCategory),category_id:Number($(`[data-category-song="${b.dataset.updateCategory}"]`).value)})});toast('分类已更新');}catch(e){toast(e.message);}});
+    $$('#adminRows [data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#admin-player-${b.dataset.song}`)));
+    $$('#adminRows [data-suggest]').forEach(b=>b.onclick=()=>showSuggestions(b.dataset.suggest));
+  };
+  try{
+    /* 留存：互切页签先直出上一次的数据（零等待） */
+    const cachedEntry=adminRowsCache[status];
+    if(cachedEntry)renderRows(cachedEntry.rows,cachedEntry.cats||[]);
+    /* 列表与分类配置互不依赖，并发取 */
+    const [rows,cfg]=await Promise.all([api('/api/admin-list?status='+status),api('/api/admin-settings').catch(()=>({categories:[]}))]);
+    const cats=cfg.categories||[];
+    /* 慢响应守卫：用户已切到别的页签时，这次迟到的旧列表不许覆盖新视图（登录后立刻点页签时必现） */
+    if(($('#adminTabs .active')?.dataset.view||'pending')!==status)return;
+    adminRowsCache[status]={t:Date.now(),rows,cats};
+    renderRows(rows,cats);
+    if(status==='pending')renderReportInbox();
+    /* 预热：首次进审核区时，把另外两个页签的数据提前拉好 */
+    if(!window.__adminWarm){window.__adminWarm=true;
+      ['pending','approved','rejected'].filter(s=>s!==status).forEach(s=>{api('/api/admin-list?status='+s).then(d=>{adminRowsCache[s]={t:Date.now(),rows:Array.isArray(d)?d:[]};}).catch(()=>{});});
+    }
+  }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;} }
 async function adminSchedule(){const box=$('#adminRows');try{
   /* 排期窗口固定三周：上周 / 本周 / 下周（2026-10-11 用户要求「有且只有」）。
      上周已播完只作展示；「自动安排」只排本周与下周，不会改动上周。
@@ -514,9 +630,9 @@ box.innerHTML=`<p class="muted">主题对全站生效：学生端、后台与发
     </button>
   </div>`;
 $$('[data-set-theme]',box).forEach(b=>b.onclick=async()=>{const theme=b.dataset.setTheme;try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_theme',theme})});toast(r.message||'主题已更新');if(theme==='mono')document.documentElement.dataset.theme='mono';else delete document.documentElement.dataset.theme;try{localStorage.setItem('site_theme',theme==='mono'?'mono':'');}catch{}
-/* 站点配置的单例缓存里还是切换前的旧主题 —— 作废它，让下面的重渲染
-   与本次会话后续的 siteConfig() 都拿到服务端真值，卡片「当前使用」才标得对。 */
-siteConfigPromise=null;adminTheme();}catch(e){toast(e.message);}});
+/* 配置有 60 秒本地缓存（留存加载）—— 把缓存里的 theme 同步改掉并作废单例，
+   下面的重渲染与后续 siteConfig() 才能拿到新主题，卡片「当前使用」才标得对。 */
+const cc=apiCache.get('config');if(cc)apiCache.set('config',{...cc,theme:theme==='mono'?'mono':''});siteConfigPromise=null;adminTheme();}catch(e){toast(e.message);}});
 }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
 
 async function adminBanned(){const box=$('#adminRows');try{const d=await api('/api/admin-settings');if(($('#adminTabs .active')?.dataset.view||'banned')!=='banned')return;/* 迟到的旧响应不许覆盖已切换的视图 */box.innerHTML=`<form id="bannedForm" class="toolbar"><label class="field">违禁词<input class="input" id="bannedWord" maxlength="12" required></label><label class="field">原因<input class="input" id="bannedReason" maxlength="60" placeholder="管理员封禁"></label><label class="field">失效时间<input class="input" type="date" id="bannedExpiry"></label><button class="btn primary">加入词库</button></form><p class="muted">命中规则会拦截包含该词的歌名或歌手；未设置日期时默认长期有效。</p><div>${(d.banned||[]).map(x=>`<div class="admin-row"><div><b>${esc(x.keyword)}</b><div class="muted">${esc(x.reason||'管理员封禁')} · 至 ${esc(x.expire_at||'长期')}</div></div><button class="btn" data-remove-ban="${x.id}">移除</button></div>`).join('')||'<p class="muted">词库目前为空。</p>'}</div>`;$('#bannedForm').onsubmit=async e=>{e.preventDefault();try{const expiry=$('#bannedExpiry').value;const body={action:'add_banned',keyword:$('#bannedWord').value,reason:$('#bannedReason').value};if(expiry)body.expire_at=expiry+' 23:59:59';await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast('违禁词已加入');adminBanned();}catch(err){toast(err.message);}};$$('[data-remove-ban]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_banned',id:Number(b.dataset.removeBan)})});adminBanned();}catch(e){toast(e.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}

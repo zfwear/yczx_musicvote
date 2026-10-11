@@ -1010,3 +1010,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .reveal-in { animation: none; }
   .admin-skeleton .skel { animation: none; opacity: .8; }
 }
+
+/* 审核操作的就地移除（v3.6.1）：点「通过 / 移入回收站 / 恢复 / 彻底删除」后
+   该行淡出消失，不再整列表重拉重绘；管理员连续审核的节奏快一个量级。 */
+.admin-row.leaving { opacity: 0; transform: translateY(-6px); transition: opacity .18s ease, transform .18s ease; }
