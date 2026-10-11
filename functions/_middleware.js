@@ -25,6 +25,9 @@ import { resolveRootPage } from '../_lib/rootpage.js';
  *   ALLOW_PREVIEWS  设成 `1` 时额外放行 `*.pages.dev`（含预览部署）。
  *                   默认**不放行** —— 但协作时如果想给同事看预览，就设它，
  *                   或者把具体那个预览域名加进 ALLOWED_HOSTS。
+ *   GEO_ALLOWED_COUNTRIES 允许访问的国家/地区代码（逗号分隔）。默认 `CN`，
+ *                   即只放行中国大陆（geoGate，见下面的说明）。
+ *                   设成 `*` 关闭地理封禁。
  *
  * 两类请求的处理刻意不同：
  *   · **页面导航**（浏览器直接打开）→ 302 跳到正确域名。
@@ -239,7 +242,64 @@ export async function onRequest(context) {
     return next();
   };
 
-  return hostGate({ ...context, next: nextWithRootRouting });
+  // 域名闸放行之后、真正进到页面/接口之前，再过一道地理闸（见 geoGate 的说明）。
+  return hostGate({ ...context, next: async () => {
+    const blocked = geoGate(request, env);
+    if (blocked) return blocked;
+    return nextWithRootRouting();
+  } });
+}
+
+/**
+ * 地理封禁：只允许**中国大陆**访问（2026-10-11 用户要求"禁用所有江苏以外的 IP"）。
+ *
+ * ⚠️ 这一层的正确预期（必须先想清楚再看代码）：
+ *   请求到达 Cloudflare 时，TCP 对端是**阿里云 ESA 的边缘节点**（回源）——
+ *   `request.cf` 描述的是**这个节点**的地理位置，不是学生的。
+ *   所以：
+ *   · 这里只做**国家级**（cf.country）：ESA 的回源节点全在中国大陆（country=CN），
+ *     正常流量不受影响；境外访客无论从 vote.yzstu.top 还是直连 pages.dev
+ *     都会被 403。这是"境外进不来"的兜底闸。
+ *   · **省级（只允许江苏省）在代码层做不了** —— 源站看不见学生的真实 IP，
+ *     只有 ESA 看得见。省级封禁要在**阿里云 ESA 控制台**配"地域访问控制"
+ *     （允许省份=江苏，封禁其余），两边是互补的两道闸，不是重复。
+ *
+ * `request.cf` 在本地（wrangler / 自建 server.mjs / 测试）不存在 ——
+ * 拿不到就不判，放行。所以这个功能只在 Cloudflare 上自然生效，
+ * 本地开发与整套测试不受影响。
+ *
+ * 环境变量：GEO_ALLOWED_COUNTRIES —— 允许的国家/地区代码，逗号分隔，
+ * 默认 `CN`。设成 `*` 表示关闭这道闸（应急开关）。
+ */
+function geoAllowedCountries(env) {
+  const raw = String((env && env.GEO_ALLOWED_COUNTRIES) || '').trim();
+  if (raw === '*') return null;
+  const list = raw
+    ? raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+    : ['CN'];
+  return list.length ? list : ['CN'];
+}
+
+function geoGate(request, env) {
+  const allowed = geoAllowedCountries(env);
+  if (!allowed) return null;                                  // 应急开关：关闭
+  // 健康检查与域名闸同一待遇：任何地域都必须能探活（只有版本号与时间，无敏感信息）
+  let geoPath = '';
+  try { geoPath = new URL(request.url).pathname; } catch { /* 拿不到就算了 */ }
+  if (geoPath === '/api/health' || geoPath === '/api/health/') return null;
+  const cf = request.cf;
+  const country = cf && typeof cf.country === 'string' ? cf.country.trim().toUpperCase() : '';
+  if (!country) return null;                                  // 拿不到地理位置：放行（本地/自建）
+  if (allowed.includes(country)) return null;
+  const message = '本站仅限中国大陆境内访问。如果你在校内或江苏省内看到这句话，'
+    + '请稍后重试，或联系盐中之声广播站。';
+  if (isNavigation(request)) {
+    return new Response(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>无法访问</title></head><body style="font-family:system-ui,'Microsoft YaHei',sans-serif;max-width:560px;margin:12vh auto;padding:0 20px;line-height:1.8;color:#1f2937;"><h1 style="font-size:20px;">无法访问盐中之声</h1><p>${message}</p></body></html>`, {
+      status: 403,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  return error(message, 403);
 }
 
 async function hostGate(context) {

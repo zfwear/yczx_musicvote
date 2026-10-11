@@ -49,6 +49,16 @@ export const SCHEDULE_SLOT_MAX = 12;
  */
 export const SETTING_SUBMISSIONS_PAUSED = 'submissions_paused';
 
+/**
+ * 站点主题（2026-10-12 用户要求）：全站外观，后台「主题」页切换。
+ *
+ * 取值：'mono' = 黑白主题（白纸黑字的单色观感）；其它/没配过 = 默认主题
+ * （冷调蓝，跟随系统深浅色）。app.js 启动时经 /api/config 拿到它并给
+ * <html> 挂 data-theme；颜色映射全部在 app.css 的
+ * :root[data-theme="mono"] 里，布局与图片（校徽）不受影响。
+ */
+export const SETTING_SITE_THEME = 'site_theme';
+
 /** 举报进入收件箱所需的"被举报次数"阈值。默认 3，可后台调整。 */
 export const DEFAULT_REPORT_THRESHOLD = 3;
 
@@ -155,4 +165,17 @@ export async function getScheduleConfig(env) {
     noonCount: clampCount(noon, SCHEDULE_DEFAULTS.noonCount),
     afternoonCount: clampCount(afternoon, SCHEDULE_DEFAULTS.afternoonCount),
   };
+}
+
+/* --------------------- 站点主题 --------------------- */
+
+/** 读站点主题；只有 'mono' 是特殊值，其它一律归一成 ''（默认主题）。 */
+export async function getSiteTheme(env) {
+  const raw = await getSetting(env, SETTING_SITE_THEME, '');
+  return String(raw).trim() === 'mono' ? 'mono' : '';
+}
+
+/** 写站点主题；只接受 'mono' 与 ''（默认）。表不存在时原样抛给调用方处理。 */
+export async function setSiteTheme(env, theme) {
+  await setSetting(env, SETTING_SITE_THEME, theme === 'mono' ? 'mono' : '');
 }

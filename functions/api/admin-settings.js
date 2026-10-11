@@ -10,6 +10,7 @@ import {
   getVoteCap, setSetting, SETTING_VOTE_CAP, getSetting,
   getReportThreshold, SETTING_REPORT_THRESHOLD, DEFAULT_REPORT_THRESHOLD,
   isSubmissionsPaused, SETTING_SUBMISSIONS_PAUSED, SETTING_SUBMIT_CAP,
+  getSiteTheme, setSiteTheme,
 } from '../../_lib/settings.js';
 import { getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
@@ -180,6 +181,9 @@ export async function onRequestGet(context) {
       used: submitUsed,
       totalMembers: submitCapInfo.totalMembers,
     },
+    // 站点主题（2026-10-12）：'mono' = 黑白主题，'' = 默认主题。
+    // 「主题」页用它显示当前选中项；公开配置 /api/config 也带同一份。
+    theme: await getSiteTheme(env),
     security: {
       // 是否配置了私有的 AUTH_PEPPER。
       pepperConfigured: pepper !== DEFAULT_PEPPER,
@@ -253,6 +257,8 @@ export async function onRequestPost(context) {
       return setClassPaused(env, data);
     case 'set_submit_cap':
       return setSubmitCap(env, data);
+    case 'set_theme':
+      return setTheme(env, data);
     case 'change_admin_password':
       return changeAdminPassword(env, auth.session, data);
     default:
@@ -434,6 +440,34 @@ async function setVoteCap(env, data) {
     message: raw > 0
       ? `已设置投票上限为 ${raw} 票，超出部分不计入票数`
       : '已取消投票上限（票数不再封顶）',
+  });
+}
+
+/**
+ * 站点主题（2026-10-12 需求）：后台「主题」页切换全站外观。
+ * 只接受 'mono'（黑白）与 ''/'default'（默认）两种取值，其它一律归一成默认 ——
+ * 主题是外观开关，不是自由文本，乱值没有意义。
+ * 只写一个 system_settings 键，**不需要任何数据库迁移**；
+ * 前端生效路径：/api/config 下发 → app.js 启动时给 <html> 挂 data-theme
+ * → app.css 的 :root[data-theme="mono"] 变量组接管颜色。
+ */
+async function setTheme(env, data) {
+  const theme = data.theme === 'mono' ? 'mono' : '';
+  try {
+    await setSiteTheme(env, theme);
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return error('数据库尚未执行 007 迁移（缺少 system_settings 表），请先执行 sql/007_class_grade_and_vote_cap.sql', 500);
+    }
+    throw err;
+  }
+
+  return json({
+    ok: true,
+    theme,
+    message: theme === 'mono'
+      ? '已切换到黑白主题：所有访客下一次打开页面生效（校徽保持原样）'
+      : '已恢复默认主题：所有访客下一次打开页面生效',
   });
 }
 

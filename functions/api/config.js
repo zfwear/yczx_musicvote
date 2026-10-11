@@ -2,6 +2,7 @@ import { json } from '../../_lib/http.js';
 import { recaptchaEnabled, recaptchaBase } from '../../_lib/recaptcha.js';
 import { powEnabled, powDifficulty, powSecret } from '../../_lib/pow.js';
 import { isSubmissionsPaused } from '../../_lib/settings.js';
+import { getSiteTheme } from '../../_lib/settings.js';
 
 /**
  * 公开的前端配置。**不需要登录** —— 登录页也要用。
@@ -64,6 +65,14 @@ export async function onRequestGet(context) {
     submit: {
       paused: await isSubmissionsPaused(env),
     },
+
+    /**
+     * 站点主题（2026-10-12）：后台「主题」页里选的全站外观。
+     * 'mono' = 黑白主题；'' = 默认主题（跟随系统深浅色）。
+     * 公开信息、不敏感 —— 访客的浏览器要在渲染前知道用哪套颜色。
+     * app.js 启动时读这里并给 <html> 挂 data-theme。
+     */
+    theme: await getSiteTheme(env),
     categories: categories.results || [],
   });
 }

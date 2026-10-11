@@ -149,9 +149,21 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-/** 本周一（按 UTC 算，与 mondayOf 同一套口径）。 */
+/**
+ * 中国时区（UTC+8）的"今天"。
+ *
+ * 之前直接用 `new Date().toISOString()` 取 UTC 日期：北京时间周一 0 点到
+ * 8 点之间 UTC 还停在周日，整站会把"本周"算成上一周 —— 学生周一早上
+ * 打开排期页看到的是上周的歌单，"加入排期"也会排进上周。换日、周一
+ * 边界一律以学生实际经历的中国日历为准（服务器在哪个时区都成立）。
+ */
+function chinaToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** 本周一（按中国日历算，与 mondayOf 同一套口径）。 */
 function thisMonday() {
-  return mondayOf(new Date().toISOString().slice(0, 10));
+  return mondayOf(chinaToday());
 }
 
 /** 「本周 / 下周 / 再下一周 / N 周后」——给人看的相对说法。 */
@@ -170,7 +182,7 @@ export async function onRequestGet(context) {
 
   const url = new URL(request.url);
   const from = parseDate(
-    url.searchParams.get('week_start') || new Date().toISOString().slice(0, 10),
+    url.searchParams.get('week_start') || chinaToday(),
     '起始周'
   );
   if (!from.ok) return error(from.error, 400);

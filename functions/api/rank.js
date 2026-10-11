@@ -132,7 +132,7 @@ export async function onRequestGet(context) {
   let results;
   try {
     ({ results } = await env.DB.prepare(`${baseSql}${playedClause} ${orderSql}`)
-      .bind(mondayOf(new Date().toISOString().slice(0, 10))).all());
+      .bind(mondayOf(chinaToday())).all());
   } catch (err) {
     if (!isMissingTable(err)) throw err;
     // 012 还没执行：没有排期表，也就谈不上"播过的歌"，退回原查询
@@ -143,15 +143,21 @@ export async function onRequestGet(context) {
 }
 
 /**
- * 某天所在那一周的周一（UTC），YYYY-MM-DD。
+ * 某天所在那一周的周一，YYYY-MM-DD。
  *
  * 与 `functions/api/schedule.js` 里的同名函数口径**必须一致** ——
  * 两边算出来的周一差一天，"上周的歌退出正式榜"就会提前或推迟一天生效。
- * 都用 UTC 是为了不受运行时区影响（Worker 跑在什么时区不由我们决定）。
+ * "今天"用中国时区（UTC+8）的日历日（chinaToday，见 schedule.js 同名注释）：
+ * 按 UTC 直取会让北京周一 0~8 点之间把本周算成上周，榜单上的歌提前一天被移出。
  */
 function mondayOf(dateStr) {
   const d = new Date(`${dateStr}T00:00:00Z`);
   const dow = d.getUTCDay();               // 0 = 周日
   d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
   return d.toISOString().slice(0, 10);
+}
+
+/** 中国时区（UTC+8）的"今天"，与 schedule.js 的 chinaToday 保持同一口径。 */
+function chinaToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 }

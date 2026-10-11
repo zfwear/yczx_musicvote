@@ -900,3 +900,113 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .admin-page .topbar .actions #adminTabs.in-drawer { order: -2; }
   .admin-page .topbar .actions .nav-links { order: -1; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 }
+
+/* ==========================================================================
+   v3.6.0 性能与主题
+   ========================================================================== */
+
+/* ---------- 入场动效：纯 CSS 实现（原 gsap 版本的等价替代） ----------
+   原来 home/排期页用 gsap.fromTo 做淡入上移 + 每元素错开 50ms；
+   为这一处动效每个页面都要下载并解析 72KB 的 gsap.min.js，不值。
+   改成 .reveal-in 类 + keyframes，观感一致，JS 里只负责加类和算延迟。 */
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.reveal-in {
+  animation: revealUp .5s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+/* ---------- 后台页签切换的骨架占位 ----------
+   adminView 在发起请求前先把列表区清成骨架条：上一页的内容立刻消失，
+   接口慢时管理员看到的是"正在加载"而不是旧页面的残影（用户反馈的
+   "切换时短暂残留上一页内容"）。 */
+.admin-skeleton { display: grid; gap: 10px; padding: 4px 0; }
+.admin-skeleton .skel {
+  height: 44px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+  animation: skelPulse 1.1s ease-in-out infinite;
+}
+.admin-skeleton .skel:nth-child(2n) { width: 88%; }
+.admin-skeleton .skel:nth-child(3n) { width: 94%; }
+@keyframes skelPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ---------- 长列表渲染优化 ----------
+   视口外的行跳过排版与绘制：审核页/榜单几百行时，innerHTML 写入后
+   浏览器只需真正排版屏幕内的几十行。auto 会记住真实高度，滚动不跳。 */
+.admin-row,
+.song { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+
+/* ---------- 后台「主题」页 ---------- */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin-top: 12px; }
+.theme-card {
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+  padding: 16px; text-align: left; cursor: pointer;
+  border: 2px solid var(--line); border-radius: var(--radius-card);
+  background: var(--card); color: var(--body); font: inherit; line-height: 1.6;
+}
+.theme-card:hover { border-color: var(--secondary); box-shadow: var(--shadow-hover); }
+.theme-card.active { border-color: var(--title); box-shadow: var(--shadow-card); }
+.theme-card b { color: var(--title); font-size: 15px; }
+.theme-card .swatch { display: flex; gap: 6px; }
+.theme-card .swatch span { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }
+.theme-card .now { font-size: 12px; color: var(--title); border: 1px solid var(--title); border-radius: 999px; padding: 1px 10px; }
+
+/* ---------- 黑白主题 ----------
+   后台「主题」页可切（存 system_settings.site_theme，007 已有的表，无需新迁移）。
+   只覆盖颜色变量：布局、圆角、字号全部不动；校徽（ico.svg）与公安备案徽标
+   是独立图片文件，不参与变量换色，黑白主题下保持原貌。
+   选择器特异性高于深色媒体查询里的 :root，所以无论系统深浅色都用这一套；
+   color-scheme 固定 light（黑白主题就是"白纸黑字"，不随系统翻黑）。 */
+:root[data-theme="mono"] {
+  color-scheme: light;
+  --page: #FFFFFF;
+  --card: #FAFAFA;
+  --line: #E4E4E4;
+  --line-soft: #F2F2F2;
+  --fill: #F2F2F2;
+  --fill-strong: #E4E4E4;
+  --primary: #141414;
+  --primary-hover: #000000;
+  --primary-soft: #F0F0F0;
+  --title: #0A0A0A;
+  --body: #262626;
+  --secondary: #595959;
+  --muted: #8C8C8C;
+  --danger: #141414;
+  --danger-hover: #000000;
+  --on-primary: #FFFFFF;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .06);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, .10), 0 1px 3px rgba(0, 0, 0, .06);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .16), 0 2px 8px rgba(0, 0, 0, .08);
+
+  --glass-bg: rgba(255, 255, 255, .85);
+  --chip: rgba(242, 242, 242, .7);
+  --chip-hover: rgba(228, 228, 228, .88);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(0, 0, 0, .07);
+  --glass-line: rgba(0, 0, 0, .08);
+  --backdrop: rgba(0, 0, 0, .45);
+  --track: #F2F2F2;
+  --seg-active: #FFFFFF;
+  --nav-active: #EFEFEF;
+  --focus-ring: 0 0 0 3px rgba(20, 20, 20, .14);
+}
+/* 黑白主题下的危险按钮：全部黑白后"黑底填充"会和主要按钮混在一起，
+   改为描边样式 —— 依然醒目、依然严肃，但一眼能和「通过」区分开。 */
+:root[data-theme="mono"] .btn.danger {
+  background: var(--card);
+  color: var(--title);
+  border: 1.5px solid var(--title);
+  box-shadow: none;
+}
+:root[data-theme="mono"] .btn.danger:hover { background: var(--title); color: #FFFFFF; border-color: var(--title); }
+
+/* ---------- 动效收敛 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .reveal-in { animation: none; }
+  .admin-skeleton .skel { animation: none; opacity: .8; }
+}

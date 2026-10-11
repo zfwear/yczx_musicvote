@@ -103,6 +103,20 @@ async function createPass(env, data) {
     label = parsed.value;
   }
 
+  // 自定义口令（2026-10-12 用户要求"口令可自定义"）：给了就用管理员指定的
+  // 字符串，不给则随机生成。字符集刻意收窄为字母/数字/短横线/下划线（6~32 位）
+  // —— 口令要学生自己在登录框手打，太怪或太长都发不出去；区分大小写。
+  // 与班级口令分属两张表：就算自定义口令恰好和某个班级口令相同，登录时
+  // 也只会先命中班级口令那一个身份，不会串权限。
+  let customToken = null;
+  if (typeof data.token === 'string' && data.token.trim()) {
+    const value = data.token.trim();
+    if (!/^[A-Za-z0-9_-]{6,32}$/.test(value)) {
+      return error('自定义口令需要是 6 到 32 位的字母、数字、短横线或下划线', 400);
+    }
+    customToken = value;
+  }
+
   // 有效期：空 = 长期有效；给了就是 1 ~ 3650 天。
   // 测试口令前端默认填 7 天；这里不强制 —— 长期测试口令是管理员的自由。
   let expiresAt = null;
@@ -120,9 +134,11 @@ async function createPass(env, data) {
 
   // 生成 → 哈希 → 入库。查找索引是唯一索引：万一随机码撞上已有口令
   // （概率约等于零）就换一个再试，而不是把"内部错误"甩给管理员。
+  // 自定义口令撞上时**不能**偷偷换码 —— 那是管理员点名要的字符串，
+  // 必须原样告诉他"已被占用，换一个"。
   let lastErr = null;
   for (let attempt = 0; attempt < MAX_INSERT_RETRY; attempt++) {
-    const token = generatePassToken();
+    const token = customToken || generatePassToken();
     const lookup = await classPasswordLookup(env, token);
     const hashed = await hashPassword(token);
     const encrypted = await encryptSecret(authPepper(env), token);
@@ -149,6 +165,9 @@ async function createPass(env, data) {
       });
     } catch (err) {
       if (!/unique|constraint/i.test(String((err && err.message) || ''))) throw err;
+      if (customToken) {
+        return error('这个自定义口令已被占用，请换一个再试', 409);
+      }
       lastErr = err;
     }
   }
