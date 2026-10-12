@@ -1,5 +1,5 @@
 import { error, json } from '../../_lib/http.js';
-import { requireSession } from '../../_lib/auth.js';
+import { requireSession, gatedCache } from '../../_lib/auth.js';
 import { parseEnum } from '../../_lib/validate.js';
 import { getVoteCap, applyVoteCap, effectiveVotesExpr } from '../../_lib/settings.js';
 import { isMissingColumn, isMissingTable } from '../../_lib/db.js';
@@ -99,7 +99,11 @@ export async function onRequestGet(context) {
     // 显示层仍然走 applyVoteCap：票数封顶后还要带出 votes_raw / votes_capped
     // 供后台与学生端排查（前端依赖这两个字段）。排序已经在 SQL 里用掉了
     // 有效票数，这里只是把"超限"这件事如实标注出来。
-    return json(applyVoteCap(results || [], cap));
+    //
+    // 边缘缓存 20 秒（2026-10-12 流畅度专项）：**需要登录通行证 `_k`**
+    // （gatedCache，见 _lib/auth.js）——没登录的人拿不到通行证、读不到缓存，
+    // 而登录学生共享同一份缓存，照样是 20ms 级；投票后前端带 `?_=` 强制新鲜。
+    return json(applyVoteCap(results || [], cap), 200, await gatedCache(request, env, 20, 60));
   }
 
   // 正式榜：不含 votes。
@@ -139,7 +143,7 @@ export async function onRequestGet(context) {
     ({ results } = await env.DB.prepare(`${baseSql} ${orderSql}`).all());
   }
 
-  return json(results || []);
+  return json(results || [], 200, await gatedCache(request, env, 20, 60));
 }
 
 /**

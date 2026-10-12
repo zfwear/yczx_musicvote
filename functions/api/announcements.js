@@ -1,5 +1,5 @@
-import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession, requireAdmin } from '../../_lib/auth.js';
+import { readJson, error, json, publicCache } from '../../_lib/http.js';
+import { requireSession, requireAdmin, gatedCache } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum, sanitizeText, sanitizeMultiline } from '../../_lib/validate.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
 
@@ -63,7 +63,7 @@ async function handleGet(context) {
         ORDER BY id DESC
         LIMIT ${MAX_GATE_LIST}`
     ).all();
-    return json({ announcements: results || [], scope: 'gate' });
+    return json({ announcements: results || [], scope: 'gate' }, 200, publicCache(request, 30, 120));
   }
 
   // all=1 是后台管理用的（要看到已下架的公告）。
@@ -131,7 +131,10 @@ async function handleGet(context) {
     if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
   }
 
-  return json({ announcements: results || [], popups });
+  // 边缘缓存 30 秒（2026-10-12 流畅度专项）：**需要登录通行证 `_k`**
+  // （gatedCache，见 _lib/auth.js）：未登录读不到（先过 requireSession），
+  // 登录学生共享缓存；管理员发完公告立即刷新走 `?_=` 强制新鲜。
+  return json({ announcements: results || [], popups }, 200, await gatedCache(request, env, 30, 120));
 }
 
 async function handlePost(context) {

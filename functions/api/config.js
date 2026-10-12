@@ -1,4 +1,4 @@
-import { json } from '../../_lib/http.js';
+import { json, publicCache } from '../../_lib/http.js';
 import { recaptchaEnabled, recaptchaBase } from '../../_lib/recaptcha.js';
 import { powEnabled, powDifficulty, powSecret } from '../../_lib/pow.js';
 import { isSubmissionsPaused } from '../../_lib/settings.js';
@@ -11,7 +11,7 @@ import { getSiteTheme } from '../../_lib/settings.js';
  * 密钥（RECAPTCHA_SECRET）永远不会出现在这里。
  */
 export async function onRequestGet(context) {
-  const { env } = context;
+  const { env, request } = context;
   const categories = await env.DB.prepare(
     'SELECT id, name FROM categories ORDER BY weight DESC, id ASC'
   ).all().catch(() => ({ results: [] }));
@@ -74,5 +74,7 @@ export async function onRequestGet(context) {
      */
     theme: await getSiteTheme(env),
     categories: categories.results || [],
-  });
+    // 边缘缓存 60 秒（2026-10-12 流畅度专项）：全校公共配置，ESA 命中后免回源；
+    // `?_=` 暗号（改设置后立即验证）会退回 no-store。
+  }, 200, publicCache(request, 60, 300));
 }

@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 /* 版本一致性守卫：页面 HTML 与 app.js 必须同批次上传。
    只传一半（比如新页面配旧脚本、或反之）时，页面会"点了没反应"——
    这里直接把它变成一条看得懂的提示。 */
-const APP_VER = '3.6.1';
+const APP_VER = '3.6.3';
 {
   const pageVer = document.body && document.body.dataset ? document.body.dataset.appVer : '';
   if (pageVer && pageVer !== APP_VER) {
@@ -17,7 +17,18 @@ const APP_VER = '3.6.1';
   }
 }
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api = async (url, options={}) => { const {quiet401=false,...init}=options; let r; try{ r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(init.headers||{})},...init}); }catch(err){ throw new Error('连不上后台服务——若你是"直接双击打开页面"预览的，请改用 server.mjs 启动本地服务器（见交付说明）'); } let d={}; try{d=await r.json();}catch{} if(r.status===401){if(!quiet401&&!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){/* 先把服务端会话与两种身份的 Cookie 一起清掉（logout 幂等，永远 200）——
+/* 边缘缓存通行证（v3.6.2，见后端 _lib/auth.js 的 gatedCache）：
+   登录后服务端通过 X-Cache-Key 响应头下发一个当天有效的签名（_k），存在本地；
+   之后所有 GET 请求自动带上它 —— 带通行证才允许进 ESA 共享缓存（20ms 级），
+   没登录的人拿不到它，也就读不到缓存里的榜单/公告/排期。速度与门槛两头都要。 */
+const edgeKeyGet = () => { try { return localStorage.getItem('edge_k') || ''; } catch { return ''; } };
+const edgeKeySave = (v) => { try { if (v) localStorage.setItem('edge_k', v); } catch { /* 存不下就算了 */ } };
+const api = async (url, options={}) => { const {quiet401=false,...init}=options;
+  let target=url;
+  try{ if(url.startsWith('/api/')&&(!init.method||init.method==='GET')){const k=edgeKeyGet();if(k)target=url+(url.includes('?')?'&':'?')+'_k='+encodeURIComponent(k);} }catch{}
+  let r; try{ r=await fetch(target,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(init.headers||{})},...init}); }catch(err){ throw new Error('连不上后台服务——若你是"直接双击打开页面"预览的，请改用 server.mjs 启动本地服务器（见交付说明）'); }
+  try{const nk=r.headers.get('X-Cache-Key');if(nk)edgeKeySave(nk);}catch{/* 读不到头就算了 */}
+  let d={}; try{d=await r.json();}catch{} if(r.status===401){if(!quiet401&&!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){/* 先把服务端会话与两种身份的 Cookie 一起清掉（logout 幂等，永远 200）——
    这一步就是"登出后再登录提示会话过期、只能手动清 Cookie"那类死锁的解药：
    回到登录页之前凭证已经被主动作废，不会留着一份过期的旧会话继续捣乱。 */
     try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});}catch{}try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/login';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）')); return d; };
@@ -151,7 +162,14 @@ async function bootGate(){
   $('#guestLogin').onclick=()=>{const input=$('#gatePassword');input.placeholder='请输入游客口令';input.focus();msg.textContent='请输入广播站提供的游客口令';};
   form.addEventListener('submit',async e=>{e.preventDefault(); const b=$('button[type=submit]',form); b.disabled=true; msg.textContent='正在验证…'; try{const recaptcha_token=await recaptchaToken('login');const d=await api('/api/login',{method:'POST',body:JSON.stringify({password:$('#gatePassword').value,recaptcha_token})}); sessionStorage.setItem('className',d.class_name||''); location.href='/';}catch(err){msg.textContent=err.message;}finally{b.disabled=false;}});
 }
-async function session(){ try{const me=await api('/api/me',{quiet401:true});window.__me=me;return me;}catch{return null;} }
+async function session(){ /* v3.6.2 me 直出：成功的身份存本地，下次打开先按它渲染、再后台校正
+  （未登录/会话失效时 api 层的 401 流程照旧弹"登录已过期"；直出只是省掉"等 me 回来才敢画页面"的空白）。
+  拿到 401 时把缓存清成 null：否则每次打开都会先闪一下已登录界面、再弹一次过期框。 */
+  try{const me=await api('/api/me',{quiet401:true});window.__me=me;apiCache.set('me',me);return me;}catch{try{apiCache.set('me',null);}catch{}return null;} }
+/** 上次成功拿到、且不太旧（24 小时）的身份 —— 用于首屏直出，不发给服务端。 */
+function sessionCached(){return apiCache.fresh('me',24*3600*1000);}
+/* 首屏直出：有缓存身份就先按它画（零等待），返回 true；没有就让调用方照旧 await。 */
+function paintNavFromCachedMe(){const me=sessionCached();if(!me)return null;window.__me=me;return me;}
 /* 班级/全站上限的**体验层**预判：打开页面就知道还能不能投/能不能投稿。
    服务端在 vote / upvote 接口里有同样的闸门 —— 这里只是为了别让学生
    填完表单才吃一个 403。kind='vote' 看投票侧，kind='submit' 看投稿侧。 */
@@ -171,8 +189,20 @@ function nav(name){const guest=document.body.classList.contains('guest-mode');co
   /* 移动端（≤768px）：汉堡按钮 + 抽屉式侧边导航（.actions 整块变成抽屉，遮罩在其下）。
      桌面端这三个新元素全部 display:none，DOM 多了几项、画面一字不变。 */
   return `<header class="topbar"><button class="nav-burger" type="button" data-burger aria-label="打开导航" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button><a class="brand" href="/"><img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标"><div><strong>盐中之声</strong><small>Radio Light</small></div></a><div class="actions"><button class="btn quiet nav-drawer-close" type="button" data-nav-close aria-label="收起导航">关闭</button><nav class="nav-links">${links}</nav><button class="btn quiet" data-logout>退出</button></div><div class="nav-backdrop" data-nav-backdrop aria-hidden="true"></div></header>`;}
+/** 身份行的统一画法（me 直出与真值共用；游客要一眼看出、暂停要当场说明）。 */
+function paintIdentity(me){let t=me.className||'已登录';if(me.isGuest)t='【游客状态】游客模式 · 只能浏览与试听';else if(me.limits&&me.limits.paused)t=t+'（班级已暂停投稿与投票）';$('#identity').textContent=t;if(me.isGuest){$('#guest').hidden=false;$('#guest').textContent='【游客状态】可以浏览榜单和试听，但不能投稿、投票或举报。';}}
 async function home(){
-  const root=$('#app');const me=await session();
+  const root=$('#app');
+  /* v3.6.2 me 直出：上次成功登录过的话，先按缓存身份把外壳画出来（零等待），
+     真正的 /api/me 在后台跑 —— 网络慢时学生也是"立刻看到页面"而不是干等。
+     me 回来后重画一遍校正（身份基本不变，等于无感）；未登录/过期时照旧跳发布页/弹续登。 */
+  const cached=paintNavFromCachedMe();
+  const mePromise=session();
+  if(cached){
+    root.hidden=false;document.body.classList.toggle('guest-mode',cached.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;
+    paintIdentity(cached);
+  }
+  const me=await mePromise;
   if(!me){
     // 未登录：送去发布页；若站点是"分文件没传全"的状态（缺 landing/login），
     // 也要给出看得懂的提示，而不是白屏或点了没反应。
@@ -183,13 +213,7 @@ async function home(){
     return;
   }
   root.hidden=false;document.body.classList.toggle('guest-mode',me.isGuest);$('#nav').innerHTML=nav('home');$('[data-logout]').onclick=logout;
-  /* 身份行：游客要一眼看出是【游客状态】；班级被暂停也要当场说明（否则
-     学生只会看到按钮全灰，不知道为什么）。 */
-  let identityText=me.className||'已登录';
-  if(me.isGuest)identityText='【游客状态】游客模式 · 只能浏览与试听';
-  else if(me.limits&&me.limits.paused)identityText=identityText+'（班级已暂停投稿与投票）';
-  $('#identity').textContent=identityText;
-  if(me.isGuest){$('#guest').hidden=false;$('#guest').textContent='【游客状态】可以浏览榜单和试听，但不能投稿、投票或举报。';}
+  paintIdentity(me);
   const voteBlock=classBlockReason('vote');if(voteBlock)window.__voteBlockReason=voteBlock;
   /* 投稿须知与免责声明固定在页面底部（与电脑端同一份 DOM、同一个位置）。
      2026-10-10 曾把手机端的这两个折叠块搬进抽屉菜单，但用户反馈在抽屉里
@@ -203,17 +227,20 @@ async function home(){
   const adList=ads.announcements||[];$('#announcements').innerHTML=adList.length?('<div class="section-title"><h2>广播站公告</h2></div>'+adList.map(a=>`<article class="announcement"><p class="kicker">广播站公告</p><h3>${esc(a.title)}</h3><p>${esc(a.content)}</p></article>`).join('')):'';for(const a of ads.popups||[]){if(sessionStorage.getItem('popup_'+a.id))continue;await announceDialog(a.title,a.content);sessionStorage.setItem('popup_'+a.id,'1');}await ranksDone;reveal($$('.panel,.hero,.announcement'));
 }
 async function loadGateAnnouncements(){try{const d=await api('/api/announcements?scope=gate');$('#gateAnnouncements').innerHTML=(d.announcements||[]).map(a=>`<article class="announcement"><b>${esc(a.title)}</b><p>${esc(a.content)}</p></article>`).join('');}catch{}}
-async function loadRanks(){/* 留存加载（v3.6.1）：上一次的榜单先直出（零等待），再并发取最新替换；绑定保持原样。 */
+async function loadRanks(fresh){/* 留存加载（v3.6.1）：上一次的榜单先直出（零等待），再并发取最新替换；绑定保持原样。
+  v3.6.2：接口在边缘有 20 秒缓存，投票/举报后的重拉带 fresh=true 追加 `?_=时间戳`
+  —— publicCache 见到 `_` 会退回 no-store，票数即时可见（平时的浏览走缓存，20ms 级）。 */
+  const bust=fresh?('&_='+Date.now()):'';
   const guestMode=document.body.classList.contains('guest-mode');const voteBlock=window.__voteBlockReason||classBlockReason('vote');const voteAttr=guestMode?'disabled title="游客状态：只能浏览与试听"':(voteBlock?`disabled title="${esc(voteBlock)}"`:'');
   const renderBox=(status,rows)=>{const box=$(`#${status}List`);if(!box)return;box.innerHTML=rows.length?rows.map(song=>`<article class="song"><div><h3>${esc(song.title)}</h3><p>${esc(song.artist)} · ${esc(song.category_name||'音乐')}</p><div class="song-actions">${status==='pending'?`<button class="btn" data-vote="${song.id}" ${voteAttr}><span data-vote-label>支持这首</span></button><button class="btn" data-report="${song.id}" ${guestMode?'disabled title="游客状态：只能浏览与试听"':''}>举报</button>`:''}<button class="btn quiet" data-preview="${esc(song.track_id||'')}" data-song="${song.id}" data-title="${esc(song.title)}" data-artist="${esc(song.artist||'')}">试听</button></div><div class="inline-player" id="player-${song.id}"></div></div><div class="song-side">${status==='pending'?`<span class="votes">${Number(song.votes||0)} 票</span>`:'<span class="muted">正式曲库</span>'}</div></article>`).join(''):'<p class="muted">目前还没有曲目，等你来点亮榜单。</p>';};
   const cached={pending:apiCache.get('rank_pending'),approved:apiCache.get('rank_approved')};
   for(const s of ['pending','approved'])if(cached[s])renderBox(s,cached[s]);
-  const fetched=await Promise.all(['pending','approved'].map(async status=>{try{const d=await api(`/api/rank?status=${status}`);const rows=Array.isArray(d)?d:[];apiCache.set('rank_'+status,rows);return{status,rows,err:null};}catch(e){return{status,rows:null,err:e};}}));
+  const fetched=await Promise.all(['pending','approved'].map(async status=>{try{const d=await api(`/api/rank?status=${status}${bust}`);const rows=Array.isArray(d)?d:[];apiCache.set('rank_'+status,rows);return{status,rows,err:null};}catch(e){return{status,rows:null,err:e};}}));
   for(const f of fetched){if(f.rows){renderBox(f.status,f.rows);continue;}if(!cached[f.status]){const box=$(`#${f.status}List`);if(box)box.innerHTML=`<p class="message">${esc(f.err.message)}</p>`;}}$$('[data-vote]').forEach(b=>b.onclick=()=>vote(b.dataset.vote));$$('[data-report]').forEach(b=>b.onclick=()=>reportSong(b.dataset.report));$$('[data-preview]').forEach(b=>b.onclick=()=>preview(b.dataset.preview,b.dataset.title,b.dataset.artist,$(`#player-${b.dataset.song}`)));$$('[data-rank-tab]').forEach(b=>b.onclick=()=>{$$('[data-rank-tab]').forEach(t=>t.classList.toggle('active',t===b));$$('[data-rank-panel]').forEach(p=>p.hidden=p.dataset.rankPanel!==b.dataset.rankTab);});}
 async function reportSong(id){if(!await uiConfirm('确认举报这首歌曲？',{title:'举报歌曲',ok:'确认举报'}))return;try{const[fp,recaptcha_token]=await Promise.all([fingerprint(),recaptchaToken('report')]);await api('/api/report',{method:'POST',body:JSON.stringify({id:Number(id),reason:'',fingerprint:fp,client_id:fp,recaptcha_token})});toast('举报已提交');}catch(e){toast(e.message);}}
 async function preview(track,title,artist,container){if(!container)return;stopAllPlayers();container.innerHTML='<span class="muted">正在准备试听…</span>';try{let id=track;if(!id){const d=await api(`/api/music?q=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);id=(d.results||[]).find(x=>x.id)?.id;}if(!id){container.innerHTML='<span class="muted">没有可试听的音源</span>';return;}const check=await api(`/api/music?check=${encodeURIComponent(id)}`);if(check.playable===false){container.innerHTML='<span class="muted">该版本暂时无法试听</span>';return;}container.innerHTML=`<audio controls autoplay preload="none" src="/api/music?play=${encodeURIComponent(id)}"></audio>`;registerPlayer(container.querySelector('audio'));}catch(e){container.innerHTML=`<span class="message">${esc(e.message)} <button class="btn" data-retry>重试</button></span>`;container.querySelector('[data-retry]').onclick=()=>preview(track,title,artist,container);}}
-async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks();}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
-async function logout(){await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.href='/';}
+async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks(true);/* 自己的票要立刻看到：绕开边缘缓存 */}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
+async function logout(){try{apiCache.set('me',null);}catch{}/* 主动退出也要清掉直出缓存，否则回首页会先闪已登录界面 */await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.href='/';}
 function renderTrackChoices(tracks,container,onPick){container.innerHTML=tracks.map((x,i)=>`<article class="song track-option"><div><b>${esc(x.name||x.title)}</b><small class="muted">${esc(x.artist||'未知歌手')} · ${esc(x.album||'')}</small><div class="song-actions"><button class="btn primary" type="button" data-pick="${i}">选择此版本</button><button class="btn quiet" type="button" data-track-preview="${i}">试听版本</button></div><div id="result-player-${i}"></div></div><span class="muted">${esc(x.source||'')}${x.duration?` · ${Math.floor(x.duration/60)}:${String(x.duration%60).padStart(2,'0')}`:''}${x.playable===false?' · 暂不可播':x.playable===true?' · 可试听':''}</span></article>`).join('');$$('[data-pick]',container).forEach(b=>b.onclick=()=>onPick(tracks[Number(b.dataset.pick)]));$$('[data-track-preview]',container).forEach(b=>b.onclick=()=>{const x=tracks[Number(b.dataset.trackPreview)];preview(x.id,x.name||x.title,x.artist,$(`#result-player-${b.dataset.trackPreview}`,container));});}
 async function votePage(){
   $('#nav').innerHTML=nav('vote');$('[data-logout]').onclick=logout;
@@ -306,8 +333,20 @@ async function admin(){ $('#nav').innerHTML=nav('admin'); document.body.classLis
   $('#adminTabs').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b)return;$$('#adminTabs [data-view]').forEach(x=>x.classList.toggle('active',x===b));adminView(b.dataset.view);/* ≤768 抽屉形态：选中页签即收起抽屉（对齐前台"点链接即离开抽屉"的体验；桌面端 nav-open 本就不存在，无副作用） */document.body.classList.remove('nav-open');});
   $('#adminRefresh').onclick=()=>adminView($('#adminTabs .active')?.dataset.view||'pending');
   /* 会话还在就直接进工作台：注册后自动登录、或刷新页面时不用再登一次。
-     探测失败（401/403，含只带学生会话的情况）才显示登录表单。 */
-  try{await api('/api/admin-settings',{quiet401:true});await enterWork();}catch{} }
+     探测失败（401/403，含只带学生会话的情况）才显示登录表单。
+     v3.6.2 后台入口提速：探测（admin-settings）与「待审核」列表**并行发出**
+     —— 原来是"先探会话、再拉列表"两段串行回源（各 0.4~2 秒，跨国链路下
+     打开后台要干等两轮）；现在一轮并行搞定，列表与设置结果留给
+     adminView('pending') 直接复用（见 adminList 的 bootList 分支）。 */
+  try{
+    const [settings,list]=await Promise.all([
+      api('/api/admin-settings',{quiet401:true}),
+      api('/api/admin-list?status=pending',{quiet401:true}),
+    ]);
+    window.__adminBootSettings=settings;
+    window.__adminBootList=Array.isArray(list)?list:null;
+    await enterWork();
+  }catch{ window.__adminBootSettings=null;window.__adminBootList=null; } }
 async function adminView(view){const titles={pending:'待审核歌曲',approved:'已通过歌曲',rejected:'回收站',schedule:'排期管理',banned:'违禁词库',settings:'系统设置',reports:'举报收件箱',announcements:'公告管理',suggestions:'版本建议',accounts:'管理员账号',invites:'管理员邀请码',classes:'班级管理',passes:'口令管理',theme:'主题'};$('#adminTitle').textContent=titles[view]||'管理工作台';$('#reportInbox').innerHTML='';
   /* 关键体验修复（用户反馈"切换页签时短暂残留上一个页面的内容"）：
      发请求之前先把列表区清成骨架条。各视图自己的防串台守卫只拦"迟到数据
@@ -349,6 +388,21 @@ async function adminList(status){const box=$('#adminRows');
     $$('#adminRows [data-suggest]').forEach(b=>b.onclick=()=>showSuggestions(b.dataset.suggest));
   };
   try{
+    /* v3.6.2：后台入口探测时并行预取的「待审核」列表与设置，这里直接复用 ——
+       打开后台只花一段并行回源的时间（见 admin() 的说明）。 */
+    if(status==='pending'&&window.__adminBootList){
+      const bootList=window.__adminBootList;const bootCats=(window.__adminBootSettings&&window.__adminBootSettings.categories)||[];
+      window.__adminBootList=null;window.__adminBootSettings=null;
+      if(($('#adminTabs .active')?.dataset.view||'pending')!==status)return;
+      adminRowsCache[status]={t:Date.now(),rows:bootList,cats:bootCats};
+      renderRows(bootList,bootCats);
+      renderReportInbox();
+      /* 预热：把另外两个页签的数据提前拉好（复用同一份分类配置） */
+      if(!window.__adminWarm){window.__adminWarm=true;
+        ['approved','rejected'].forEach(s=>{api('/api/admin-list?status='+s).then(d=>{adminRowsCache[s]={t:Date.now(),rows:Array.isArray(d)?d:[],cats:bootCats};}).catch(()=>{});});
+      }
+      return;
+    }
     /* 留存：互切页签先直出上一次的数据（零等待） */
     const cachedEntry=adminRowsCache[status];
     if(cachedEntry)renderRows(cachedEntry.rows,cachedEntry.cats||[]);
@@ -360,9 +414,10 @@ async function adminList(status){const box=$('#adminRows');
     adminRowsCache[status]={t:Date.now(),rows,cats};
     renderRows(rows,cats);
     if(status==='pending')renderReportInbox();
-    /* 预热：首次进审核区时，把另外两个页签的数据提前拉好 */
+    /* 预热：首次进审核区时，把另外两个页签的数据提前拉好（分类配置一并带上，
+       免得切过去第一帧的分类下拉是空的） */
     if(!window.__adminWarm){window.__adminWarm=true;
-      ['pending','approved','rejected'].filter(s=>s!==status).forEach(s=>{api('/api/admin-list?status='+s).then(d=>{adminRowsCache[s]={t:Date.now(),rows:Array.isArray(d)?d:[]};}).catch(()=>{});});
+      ['pending','approved','rejected'].filter(s=>s!==status).forEach(s=>{api('/api/admin-list?status='+s).then(d=>{adminRowsCache[s]={t:Date.now(),rows:Array.isArray(d)?d:[],cats};}).catch(()=>{});});
     }
   }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;} }
 async function adminSchedule(){const box=$('#adminRows');try{
@@ -376,7 +431,9 @@ async function adminSchedule(){const box=$('#adminRows');try{
   const lastMonday=(()=>{const d2=new Date(monday);d2.setUTCDate(d2.getUTCDate()-7);return d2.toISOString().slice(0,10);})();
   const [cfg,d,approved]=await Promise.all([
     api('/api/admin-settings'),
-    api('/api/schedule?week_start='+lastMonday+'&weeks=3'),
+    /* `&_=` 强制新鲜：排期接口在边缘有 60 秒缓存，管理员编辑后必须立刻看到新排期
+       （publicCache 见到 `_` 会退回 no-store，见 _lib/http.js）。 */
+    api('/api/schedule?week_start='+lastMonday+'&weeks=3&_='+Date.now()),
     api('/api/admin-list?status=approved'),
   ]);
   if($('#adminTabs .active')?.dataset.view!=='schedule')return;

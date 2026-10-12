@@ -64,6 +64,67 @@ export function hasPrivatePepper(env) {
   return authPepper(env) !== DEFAULT_PEPPER;
 }
 
+/* --------------------- 边缘缓存的"通行证"（2026-10-12） --------------------- */
+
+/**
+ * 边缘缓存通行证（`_k`）。
+ *
+ * ## 为什么需要它
+ * 公开 GET 接口（榜单/公告/排期）上了边缘缓存之后，命中缓存的请求**不到源站**，
+ * "必须登录才能读"的检查被绕过 —— 没登录的人拿着同样的 URL 也能读到缓存数据。
+ * 通行证把门槛补回来：
+ *   · 值 = HMAC(AUTH_PEPPER, `edge-cache-v1:<中国日历日>`) 前 16 位十六进制，
+ *     **只有登录成功后由服务端下发**（/api/me 与 /api/login 的 `X-Cache-Key` 响应头），
+ *     未登录者拿不到、也猜不出来（HMAC 派生，无法离线爆破）；
+ *   · 所有登录学生拿到的是**同一个值** —— URL 一致，ESA 的共享缓存照样命中，
+ *     速度一点不丢；
+ *   · 带 `_k` 的请求**仍然先过 requireSession**：没登录就算捡到一个有效 `_k`，
+ *     源站也是一记 401（只有"命中已有缓存"才会绕过源站 —— 那正是"登录过的人
+ *     把缓存填暖"的正常路径）；
+ *   · **按天轮换**：HMAC 输入带上中国日历日，泄露的通行证最多用一天；
+ *     换 AUTH_PEPPER 也会立刻换新（旧缓存自然过期）。
+ *
+ * 注意这里比较用 `===` 而不是常量时间：它不是认证凭据（不授权任何写操作，
+ * 只决定"读缓存还是回源"），且值无法从响应里推导 —— 没有可利用的时序信道。
+ */
+export async function edgeCacheKey(env) {
+  const day = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  return (await hmacHex(authPepper(env), `edge-cache-v1:${day}`)).slice(0, 16);
+}
+
+/**
+ * 需要通行证的公开数据接口的缓存头（用法：`return json(data, 200, await gatedCache(request, env, 20))`）。
+ *
+ * 三种情况：
+ *   · 带了今天有效的 `_k` → `public, s-maxage=<seconds>`（进 ESA 共享缓存）；
+ *   · 带 `?_=`（强制新鲜暗号，投票/管理员编辑后）→ 不给缓存头（no-store），
+ *     但仍然下发通行证；
+ *   · 没带或不带对的 `_k` → 不给缓存头（回源），同时也下发通行证 ——
+ *     已登录的学生第一次请求（本地还没存 `_k`）走这条，拿到响应头里的新 `_k`
+ *     就存下，之后全部命中缓存。
+ *
+ * 调用位置约定：**必须放在 requireSession 通过之后**（handler 里 `if(!auth.ok) return` 之后）。
+ * 这样"未登录 + 拿到一个过期或当天的 `_k`"最多只是回源吃 401，拿不到任何数据、
+ * 也拿不到新通行证。
+ */
+export async function gatedCache(request, env, seconds, swr = seconds * 3) {
+  const key = await edgeCacheKey(env);
+  let presented = '';
+  let forceFresh = false;
+  try {
+    const u = new URL(request.url);
+    presented = u.searchParams.get('_k') || '';
+    forceFresh = u.searchParams.has('_');
+  } catch { /* URL 解析不了就当没带 */ }
+  if (!forceFresh && presented && presented === key) {
+    return {
+      'Cache-Control': `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${swr}`,
+      'X-Cache-Key': key,
+    };
+  }
+  return { 'X-Cache-Key': key };
+}
+
 /**
  * "列不存在"的两种报错形态。
  *

@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireSession, requireStaff, isGuestSession, readSession } from '../../_lib/auth.js';
+import { requireSession, requireStaff, isGuestSession, readSession, gatedCache } from '../../_lib/auth.js';
 import { parsePositiveInt, parseEnum, sanitizeText } from '../../_lib/validate.js';
 import { changedRows, isMissingTable, isMissingColumn } from '../../_lib/db.js';
 import {
@@ -269,6 +269,9 @@ export async function onRequestGet(context) {
     const schedule = await getScheduleConfig(env);
     const activePeriods = schedule.mode === 'noon' ? ['noon'] : PERIODS.slice();
 
+    // 边缘缓存 60 秒（2026-10-12 流畅度专项）：**需要登录通行证 `_k`**
+    // （gatedCache，见 _lib/auth.js）。管理员编辑后排期管理页带 `?_=时间戳`
+    // 强制新鲜，所以"改完立刻看到新排期"不受影响；学生端最多晚 60 秒。
     return json({
       weekStart: start,
       weeks,
@@ -278,7 +281,7 @@ export async function onRequestGet(context) {
       customSupported,
       schedule,
       weeklies: out,
-    });
+    }, 200, await gatedCache(request, env, 60, 300));
   } catch (err) {
     // 老库没跑 012 迁移时**不要整页报错**：照常返回空的三周，
     // 页面能打开（显示"待排歌曲"），再附 needsMigration 让前端提示管理员。
@@ -300,7 +303,7 @@ export async function onRequestGet(context) {
         weeklies: out,
         needsMigration: true,
         hint: MIGRATION_HINT,
-      });
+      }, 200, await gatedCache(request, env, 60, 300));
     }
     throw err;
   }

@@ -32,6 +32,39 @@ export function error(message, status = 400, extraHeaders = {}) {
 }
 
 /**
+ * 公开 GET 接口的**边缘缓存**响应头（2026-10-12，流畅度专项）。
+ *
+ * 背景（实测出来的）：线上链路是 客户端 → 阿里云 ESA → Cloudflare Pages，
+ * 而 ESA→CF 这一跳很贵（冷 1~9 秒、常态 0.4~3 秒，还偶发 522/525）。
+ * 实测证实 ESA **完全遵循源站的 Cache-Control**（静态资源命中后 11ms），
+ * 所以对"全校同一份、短时间不变"的数据（榜单/公告/排期/站点配置），
+ * 让它缓存在 ESA 的国内节点上 —— 学生拿到的是 20ms 级响应，也不再受
+ * 回源抖动的影响。
+ *
+ * 用法：`return json(data, 200, publicCache(request, 20));`
+ *
+ * 约定与红线：
+ *   · `?_=<时间戳>` 是前端的"强制新鲜"暗号（投票/后台编辑后重拉用）——
+ *     带它就返回 `{}`，保持 JSON_HEADERS 的默认 no-store，**不进缓存**；
+ *   · 只给**全校同构**的响应加缓存；带个人身份的数据（/api/me、admin-*）
+ *     一律不加 —— 边缘缓存不认识 Cookie，加了会把张三的数据发给李四；
+ *   · 这些 GET 响应**不带 Set-Cookie**（会话续期只改数据库、不发 Cookie，
+ *     见 _lib/auth.js），有测试守着"带缓存的接口不许发 Set-Cookie"。
+ *
+ * @param {Request} request 用于识别 `_` 参数
+ * @param {number} seconds   ESA 共享缓存秒数（s-maxage）
+ * @param {number} [swr]     过期后允许"先回旧值、后台刷新"的秒数
+ */
+export function publicCache(request, seconds, swr = seconds * 3) {
+  try {
+    if (new URL(request.url).searchParams.has('_')) return {};
+  } catch { /* URL 解析不了就当没带 */ }
+  return {
+    'Cache-Control': `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${swr}`,
+  };
+}
+
+/**
  * 带多个 Set-Cookie 的 JSON 响应。
  * 普通对象没法承载同名的多个头（会互相覆盖），所以这里用 Headers.append。
  */

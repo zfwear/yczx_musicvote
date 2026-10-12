@@ -1,4 +1,4 @@
-import { json } from '../../_lib/http.js';
+import { json, publicCache } from '../../_lib/http.js';
 
 /**
  * 健康检查。**不需要登录**（监控与负载均衡本来就不会带会话）。
@@ -59,5 +59,9 @@ export async function onRequestGet(context) {
     time: new Date().toISOString(),
     // 诊断用：源站实际看到的主机名（含网关留下的转发头）
     seenHost: seen,
-  });
+    // 边缘缓存 5 秒（2026-10-12 防额度专项）：它是**唯一**域名闸与地理闸都放行的
+    // 接口，最容易被匿名高频刷。给一个很短的共享缓存，探活洪峰被 ESA 国内节点
+    // 直接吸收，不再逐个打到 Cloudflare（免费套餐每天 10 万次调用是有限额的）。
+    // time 字段因此可能滞后 5 秒 —— 探活只看 200，不影响。
+  }, 200, publicCache(request, 5, 10));
 }

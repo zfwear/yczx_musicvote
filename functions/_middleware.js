@@ -222,24 +222,86 @@ function isNavigation(request) {
  * 会走到 fallback（context.next()），由 server.mjs 自己的同一段逻辑分发 ——
  * 判定模块是同一份（resolveRootPage），两边结论必然一致。
  */
+/**
+ * 页面导航的边缘缓存（2026-10-12 流畅度专项，v3.6.2）。
+ *
+ * 背景（线上实测）：链路是 客户端 → 阿里云 ESA → Cloudflare Pages，
+ * ESA→CF 回源这一跳冷启 1~9 秒、常态 0.4~3 秒，还偶发 522/525；
+ * 而 HTML 页面一直是 `max-age=0, must-revalidate`（每次回源）。
+ * 实测证实 **ESA 完全遵循源站的 Cache-Control**（静态资源命中后 11ms），
+ * 页面内容本身是静态外壳（数据全部由 JS 拉），所以给它们加上
+ * `s-maxage`：ESA 国内节点缓存 2 分钟，学生翻页从秒级降到 20ms 级。
+ *
+ * 为什么放在中间件而不是 `_headers`：
+ *   `_headers` 只作用于 Pages 直出的静态资源；页面经中间件（hostGate/
+ *   根路径分发）返回，那一步不是"直出"，拿不到 `_headers` 的头。
+ *   放在这里，任何出口都一样生效。
+ *
+ * ⚠️ 根路径 `/` 只缓存"已登录 → index"这一支：
+ *   未登录时它返回发布页（landing），两种内容共用同一个 URL ——
+ *   若把发布页缓存进 `/`，登录学生打开首页会被塞发布页。
+ *   所以 `/` 与 `/index.html` 只在 page==='app' 时挂缓存头；
+ *   landing 分支不挂（保持现行为，未登录流量走发布页的标记跳转）。
+ *   `/landing`、`/login` 等显式路径各占一个 URL，直接缓存即可。
+ */
+const PAGE_CACHE_CONTROL = 'public, max-age=0, s-maxage=120, stale-while-revalidate=600';
+
+/** 可以直接整体缓存的页面路径（同一个 URL 对所有人内容一致）。 */
+const CACHEABLE_PAGE_PATHS = new Set([
+  '/login', '/login.html',
+  '/vote', '/vote.html',
+  '/schedule', '/schedule.html',
+  '/suggest', '/suggest.html',
+  '/register', '/register.html',
+  '/landing', '/landing.html',
+  '/admin7318434', '/admin7318434.html',
+]);
+
+/** 只给"已登录分支"挂缓存头的路径（内容因人而异，不能整体缓存）。 */
+const ROOT_PATHS = new Set(['/index.html']);
+
+/** 响应还没有缓存头时，挂上页面缓存头（已有（如 _headers 生效）就不覆盖）。 */
+function withPageCacheHeader(response) {
+  try {
+    if (!response || !response.headers || response.headers.has('Cache-Control')) return response;
+    const out = new Response(response.body, response);
+    out.headers.set('Cache-Control', PAGE_CACHE_CONTROL);
+    return out;
+  } catch {
+    return response;
+  }
+}
+
 export async function onRequest(context) {
   const { request, env, next } = context;
 
+  let routePath = '';
+  try { routePath = new URL(request.url).pathname; } catch { /* 拿不到就按普通路径走 */ }
+  const isNav = request.method === 'GET' && isNavigation(request);
+  const wantsPageCache = isNav
+    && (CACHEABLE_PAGE_PATHS.has(routePath) || routePath === '/' || ROOT_PATHS.has(routePath));
+
   const nextWithRootRouting = async () => {
-    let path = '';
-    try { path = new URL(request.url).pathname; } catch { /* 拿不到就按普通路径走 */ }
-    if ((path === '/' || path === '/index.html')
+    if ((routePath === '/' || routePath === '/index.html')
         && request.method === 'GET'
         && isNavigation(request)
         && env && env.ASSETS) {
       const page = await resolveRootPage(env, request);
       try {
-        return await env.ASSETS.fetch(new URL(page === 'app' ? '/index.html' : '/landing.html', request.url));
+        const res = await env.ASSETS.fetch(new URL(page === 'app' ? '/index.html' : '/landing.html', request.url));
+        // 根路径只缓存"已登录 → 主页"这一支（见 CACHEABLE_PAGE_PATHS 的说明）；
+        // 发布页不缓存，否则登录学生打开首页会被塞发布页。
+        return page === 'app' ? withPageCacheHeader(res) : res;
       } catch {
         // ASSETS 意外不可用：退回默认静态命中，总比 500 好
       }
     }
-    return next();
+    const res = await next();
+    // 显式路径的页面（/login /vote …）整体可缓存；/index.html 直连同根路径口径。
+    // （wantsPageCache 已包含"是导航 + 命中名单"，这里只排除根路径 '/'：
+    //  它的登录/未登录两个分支上面已处理，走到这里说明拿不到 ASSETS、内容不定，不缓存。）
+    if (wantsPageCache && routePath !== '/') return withPageCacheHeader(res);
+    return res;
   };
 
   // 域名闸放行之后、真正进到页面/接口之前，再过一道地理闸（见 geoGate 的说明）。

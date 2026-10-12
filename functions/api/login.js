@@ -4,6 +4,7 @@ import {
   classPasswordLookup, authPepper, CLASS_TTL_SECONDS,
   debugLoginEnabled, normalizeRole,
   guestPassword, guestLoginEnabled, GUEST_ROLE, GUEST_CLASS_NAME,
+  edgeCacheKey,
 } from '../../_lib/auth.js';
 import { parseSecret } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
@@ -29,6 +30,16 @@ import { findUsablePassByLookup, passSessionTtlSeconds, PASS_LABELS } from '../.
  *  - 调试：DEBUG_LOGIN=1 且用高级管理员的"账号:密码"。
  */
 export async function onRequestPost(context) {
+  const res = await handleLoginPost(context);
+  // 登录成功的响应顺带下发"边缘缓存通行证"（X-Cache-Key，见 _lib/auth.js 的注释）：
+  // 学生登录完立刻就能带着 `_k` 读共享缓存，不必等下一个 /api/me 请求。
+  if (res && res.status === 200) {
+    try { res.headers.set('X-Cache-Key', await edgeCacheKey(context.env)); } catch { /* 拿不到就不下发 */ }
+  }
+  return res;
+}
+
+async function handleLoginPost(context) {
   const { request, env } = context;
 
   const missing = requireDb(env);

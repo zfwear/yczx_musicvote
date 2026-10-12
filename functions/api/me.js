@@ -1,5 +1,5 @@
 import { json } from '../../_lib/http.js';
-import { requireSession, isGuestSession, GUEST_CLASS_NAME, GUEST_ROLE } from '../../_lib/auth.js';
+import { requireSession, isGuestSession, GUEST_CLASS_NAME, GUEST_ROLE, edgeCacheKey } from '../../_lib/auth.js';
 import { getClassLimits, countClassVotes, countClassSubmissions, getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 
 /**
@@ -79,6 +79,10 @@ export async function onRequestGet(context) {
     })()
     : null;
 
+  // X-Cache-Key：边缘缓存通行证（2026-10-12）。/api/me 是学生端每次打开页面
+  // 的**第一个请求**，于是它顺便把当天的通行证发给已登录的浏览器（存本地，
+  // 之后的榜单/公告/排期请求带上 `_k` 才允许进共享缓存）。未登录时走不到这里
+  // （上面 401 已返回），所以通行证不会落到没登录的人手里。
   return json({
     ok: true,
     role: isGuest ? GUEST_ROLE : (storedRole || 'class'),
@@ -86,5 +90,5 @@ export async function onRequestGet(context) {
     className,
     limits,
     globalSubmit,
-  });
+  }, 200, { 'X-Cache-Key': await edgeCacheKey(env) });
 }
