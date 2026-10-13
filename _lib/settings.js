@@ -50,14 +50,29 @@ export const SCHEDULE_SLOT_MAX = 12;
 export const SETTING_SUBMISSIONS_PAUSED = 'submissions_paused';
 
 /**
- * 站点主题（2026-10-12 用户要求）：全站外观，后台「主题」页切换。
+ * 站点主题（2026-10-12 上线，2026-10-14 随 MD3 项目扩到五套）：
+ * 全站外观，后台「主题」页切换。
  *
- * 取值：'mono' = 黑白主题（白纸黑字的单色观感）；其它/没配过 = 默认主题
- * （冷调蓝，跟随系统深浅色）。app.js 启动时经 /api/config 拿到它并给
- * <html> 挂 data-theme；颜色映射全部在 app.css 的
- * :root[data-theme="mono"] 里，布局与图片（校徽）不受影响。
+ * 取值见 SITE_THEMES：'' 默认 / 'mono' 黑白 / 'mint' 薄荷青 /
+ * 'beige' 暖米棕 / 'lavender' 薰衣草浅紫；不认识的值一律归一成 ''。
+ * app.js 启动时经 /api/config 拿到它并给 <html> 挂 data-theme；
+ * 颜色映射全部在 app.css 的 :root[data-theme="…"] 里，布局与图片
+ * （校徽、公安备案徽标）不受影响。个人配色走 personal_prefs 表，
+ * 与这里互不干扰（个人优先级更高，见 app.js 的 applyPersonalTheme）。
  */
 export const SETTING_SITE_THEME = 'site_theme';
+
+/** 全站主题取值集合（含个人偏好页与后台主题页共用的五个键位）。 */
+export const SITE_THEMES = ['', 'mono', 'mint', 'beige', 'lavender'];
+
+/** 主题显示名（后台消息与偏好页卡片共用，'' 也要有名字）。 */
+export const SITE_THEME_LABELS = {
+  '': '默认主题',
+  mono: '黑白主题',
+  mint: '薄荷青主题',
+  beige: '暖米棕主题',
+  lavender: '薰衣草浅紫主题',
+};
 
 /** 举报进入收件箱所需的"被举报次数"阈值。默认 3，可后台调整。 */
 export const DEFAULT_REPORT_THRESHOLD = 3;
@@ -169,13 +184,14 @@ export async function getScheduleConfig(env) {
 
 /* --------------------- 站点主题 --------------------- */
 
-/** 读站点主题；只有 'mono' 是特殊值，其它一律归一成 ''（默认主题）。 */
+/** 读站点主题；不认识的值一律归一成 ''（默认主题）。 */
 export async function getSiteTheme(env) {
-  const raw = await getSetting(env, SETTING_SITE_THEME, '');
-  return String(raw).trim() === 'mono' ? 'mono' : '';
+  const raw = String(await getSetting(env, SETTING_SITE_THEME, '')).trim();
+  return SITE_THEMES.includes(raw) ? raw : '';
 }
 
-/** 写站点主题；只接受 'mono' 与 ''（默认）。表不存在时原样抛给调用方处理。 */
+/** 写站点主题；只接受 SITE_THEMES 里的值，其它一律落回 ''。表不存在时原样抛给调用方。 */
 export async function setSiteTheme(env, theme) {
-  await setSetting(env, SETTING_SITE_THEME, theme === 'mono' ? 'mono' : '');
+  const t = String(theme ?? '').trim();
+  await setSetting(env, SETTING_SITE_THEME, SITE_THEMES.includes(t) ? t : '');
 }

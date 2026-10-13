@@ -1011,6 +1011,295 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .admin-skeleton .skel { animation: none; opacity: .8; }
 }
 
+/* ==========================================================================
+   v3.7.0 MD3 基础层（设计令牌 + 按钮 / 输入框 / 弹窗统一改版）
+   --------------------------------------------------------------------------
+   本节只做"全站基础件"，不改任何页面结构、不动任何业务代码：
+     · 设计令牌：间距 / 圆角 / 状态层 / 动效时长。颜色继续走原有
+       --primary / --page / --card 等变量 —— 主题切换、后续三套新预设与
+       个人调色都建立在那些变量上，两套体系互不冲突。
+     · 按钮：MD3 三式 —— 填充（.btn.primary）/ 描边（.btn）/ 文字（.btn.quiet）。
+       圆角一律胶囊形（MD3 按钮特征）。高度沿用既有响应式规则（36/40/44）不推翻，
+       避免与 pointer:coarse、≤640 等既有覆盖打架。
+     · 输入框：描边式文本框，聚焦 2px 主色（用外环实现，不改变边框宽度，
+       杜绝聚焦瞬间的 1px 布局抖动）。
+     · 弹窗：实色 MD3 对话框（去掉毛玻璃 —— 低端机更快，观感更"实"），
+       圆角 20px，动作区可换行。
+   防重叠/错位（用户红线）：所有动作区一律弹性 + 可换行；按钮自身裁剪
+   兜底，任何情况下都不允许按钮互相压叠或溢出父容器。
+   ========================================================================== */
+
+:root {
+  /* 间距（4px 基数，后续页面改版统一引用） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  /* 圆角（MD3 柔和圆角）：输入框/骨架沿用 --radius-btn；卡片 14；弹窗 20；按钮用胶囊 */
+  --radius-btn: 10px;
+  --radius-card: 14px;
+  --radius-dialog: 20px;
+  --radius-pill: 999px;
+  /* 状态层（悬停/按压的叠加色，替代原来的"加厚玻璃"） */
+  --state-hover: rgba(17, 24, 39, .05);
+  --state-press: rgba(17, 24, 39, .09);
+  /* 描边按钮 / 输入框的边线（比 --line 深一档，MD3 描边要看得见） */
+  --outline: #D5DAE1;
+  /* 动效（简单、克制；尊重系统"减少动效"） */
+  --dur-fast: .15s;
+  --dur: .22s;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --state-hover: rgba(255, 255, 255, .07);
+    --state-press: rgba(255, 255, 255, .12);
+    --outline: #4B5563;
+  }
+}
+:root[data-theme="mono"] {
+  --state-hover: rgba(0, 0, 0, .05);
+  --state-press: rgba(0, 0, 0, .09);
+  --outline: #D9D9D9;
+}
+
+/* ---------- 按钮：MD3 三式 ---------- */
+/* 描边式（默认）：透明底 + 细描边，悬停叠一层浅状态色 */
+.btn {
+  border-radius: var(--radius-pill);
+  padding: 0 16px;
+  background: transparent;
+  border: 1px solid var(--outline);
+  color: var(--title);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  max-width: 100%;
+  overflow: hidden;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease, box-shadow var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+.btn:hover {
+  background: var(--state-hover);
+  border-color: var(--secondary);
+  color: var(--title);
+}
+.btn:active {
+  background: var(--state-press);
+  box-shadow: none;
+  transform: none;
+}
+/* 填充式（主按钮）：实心主色，扁平无阴影（MD3 filled 不用投影） */
+.btn.primary {
+  color: var(--on-primary);
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: none;
+}
+.btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); color: var(--on-primary); }
+.btn.primary:active { background: var(--primary-hover); }
+/* 文字按钮：无边框无底色，只有状态层 */
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--secondary);
+}
+.btn.quiet:hover { background: var(--state-hover); border-color: transparent; color: var(--title); }
+/* 危险填充 */
+.btn.danger { color: #FFFFFF; background: var(--danger); border-color: var(--danger); box-shadow: none; }
+.btn.danger:hover { background: var(--danger-hover); border-color: var(--danger-hover); }
+/* 触屏设备上的图标按钮保持可点尺寸（原规则不动，仅补圆角） */
+.nav-burger { border-radius: 50%; }
+
+/* ---------- 输入框：MD3 描边文本框 ---------- */
+.input {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-btn);
+  background: var(--page);
+}
+.input:hover { border-color: var(--secondary); }
+.input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+/* 移动端：输入框加高加内边距（规范硬性要求），后台密集表单不受影响
+   （.admin-row .input / .slot-edit .input 等带更高特异性的规则照旧生效） */
+@media (max-width: 640px) {
+  .input { height: 46px; padding: 0 14px; font-size: 15px; }
+  textarea.input { height: auto; padding: 12px 14px; }
+}
+
+/* ---------- 弹窗：MD3 实色对话框 ---------- */
+dialog.glass-dialog,
+dialog.rl-confirm {
+  background: var(--card);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-pop);
+}
+dialog.track-dialog {
+  background: var(--card);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-pop);
+}
+.rl-confirm h2 { margin: 0 0 10px; font-size: 20px; line-height: 1.3; }
+.rl-confirm p { margin: 0 0 22px; font-size: 14px; line-height: 1.65; color: var(--secondary); white-space: pre-wrap; }
+.dialog-actions { flex-wrap: wrap; gap: 10px; }
+.dialog-actions .btn { min-width: 84px; }
+.glass-dialog.notice-dialog { gap: 14px; }
+.glass-dialog.notice-dialog .notice-body { font-size: 14px; line-height: 1.65; }
+
+/* ---------- 动作区防重叠/防错位（用户红线） ----------
+   所有"一排按钮"的容器一律弹性 + 可换行：空间不够时整颗按钮换到下一行，
+   而不是互相挤压、错位或叠在一起。按钮自身加裁剪兜底。 */
+.dialog-actions,
+.form-actions,
+.song-actions,
+.panel-head,
+.week h2,
+.slot,
+.track-dialog-head,
+.landing-top,
+.toolbar,
+.page-head,
+.settings-class-head,
+.weight-form {
+  flex-wrap: wrap;
+}
+
+/* ---------- 后台侧边栏页签：MD3 导航项（胶囊） ---------- */
+.admin-nav button { border-radius: var(--radius-pill); }
+.admin-nav { padding: 10px; }
+
+/* ==========================================================================
+   v3.7.0 三套低饱和预设主题（MD3 项目，用户决策 2/4）
+   --------------------------------------------------------------------------
+   与黑白主题同一套做法：只覆盖颜色变量，布局/圆角/字号不动；
+   color-scheme 固定 light（预设是"白天观感"，不随系统翻黑）。
+   校徽与公安备案徽标是图片，不参与变量换色，任何主题下保持原样。
+   对比度已逐一验算（_harness/contrast-370.cjs）：
+   白字/主色 4.56、5.29、4.95；正文/页面与正文/卡片均 >10。
+   个人配色（custom）用行内变量叠加，优先级天然高于这些预设。
+   ========================================================================== */
+:root[data-theme="mint"] {
+  color-scheme: light;
+  --page: #F2FAF7;
+  --card: #E3F4EE;
+  --line: #CFE7DE;
+  --line-soft: #E2F2EC;
+  --fill: #E3F0EA;
+  --fill-strong: #CFE5DC;
+  --primary: #0B8571;
+  --primary-hover: #096B5C;
+  --primary-soft: #DCF2EC;
+  --title: #0D2B25;
+  --body: #12332C;
+  --secondary: #4C7268;
+  --muted: #7C9C93;
+  --on-primary: #FFFFFF;
+
+  --glass-bg: rgba(242, 250, 247, .85);
+  --chip: rgba(227, 244, 238, .72);
+  --chip-hover: rgba(207, 231, 222, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(13, 43, 37, .07);
+  --glass-line: rgba(18, 51, 44, .08);
+  --backdrop: rgba(13, 43, 37, .42);
+  --track: #E3F0EA;
+  --seg-active: #FFFFFF;
+  --nav-active: #DCF2EC;
+  --focus-ring: 0 0 0 3px rgba(11, 133, 113, .16);
+}
+:root[data-theme="beige"] {
+  color-scheme: light;
+  --page: #FAF5EC;
+  --card: #F1E7D6;
+  --line: #E2D3B9;
+  --line-soft: #EFE4D0;
+  --fill: #F1E8D8;
+  --fill-strong: #E2D3BA;
+  --primary: #8F6238;
+  --primary-hover: #774F2B;
+  --primary-soft: #F2E5D2;
+  --title: #302518;
+  --body: #3A2E22;
+  --secondary: #6E5C44;
+  --muted: #9C8A70;
+  --on-primary: #FFFFFF;
+
+  --glass-bg: rgba(250, 245, 236, .85);
+  --chip: rgba(241, 231, 214, .72);
+  --chip-hover: rgba(226, 211, 185, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(48, 37, 24, .07);
+  --glass-line: rgba(58, 46, 34, .08);
+  --backdrop: rgba(48, 37, 24, .42);
+  --track: #F1E8D8;
+  --seg-active: #FFFFFF;
+  --nav-active: #F2E5D2;
+  --focus-ring: 0 0 0 3px rgba(143, 98, 56, .16);
+}
+:root[data-theme="lavender"] {
+  color-scheme: light;
+  --page: #F7F5FC;
+  --card: #ECE7F8;
+  --line: #D9D0EE;
+  --line-soft: #EAE4F6;
+  --fill: #EDE8F7;
+  --fill-strong: #DCD3EF;
+  --primary: #7565B0;
+  --primary-hover: #5F519B;
+  --primary-soft: #EBE6F9;
+  --title: #241E38;
+  --body: #2F2A44;
+  --secondary: #5F567F;
+  --muted: #918AA8;
+  --on-primary: #FFFFFF;
+
+  --glass-bg: rgba(247, 245, 252, .85);
+  --chip: rgba(236, 231, 248, .72);
+  --chip-hover: rgba(217, 208, 238, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(36, 30, 56, .07);
+  --glass-line: rgba(47, 42, 68, .08);
+  --backdrop: rgba(36, 30, 56, .42);
+  --track: #EDE8F7;
+  --seg-active: #FFFFFF;
+  --nav-active: #EBE6F9;
+  --focus-ring: 0 0 0 3px rgba(117, 101, 176, .16);
+}
+
+/* ---------- 偏好设置页（MD3 项目 决策 11~13） ---------- */
+.pref-section { margin: 26px 0 0; min-width: 0; }
+.pref-section h2 { margin: 0 0 6px; }
+.pref-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 12px; }
+.theme-card .bar { display: flex; width: 100%; height: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.theme-card .bar span { flex: 1 1 0; }
+.palette-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.palette-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--secondary); min-width: 0; }
+.palette-field input[type="color"] {
+  width: 100%; height: 46px; padding: 4px;
+  border: 1px solid var(--outline); border-radius: var(--radius-btn);
+  background: var(--page); cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.palette-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.pref-state { font-size: 12px; color: var(--muted); }
+@media (min-width: 641px) {
+  .pref-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .pref-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .palette-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+/* 登录页：个人口令格式提示行（新增行，不改原有文字） */
+.field .hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+
 /* 审核操作的就地移除（v3.6.1）：点「通过 / 移入回收站 / 恢复 / 彻底删除」后
    该行淡出消失，不再整列表重拉重绘；管理员连续审核的节奏快一个量级。 */
 .admin-row.leaving { opacity: 0; transform: translateY(-6px); transition: opacity .18s ease, transform .18s ease; }

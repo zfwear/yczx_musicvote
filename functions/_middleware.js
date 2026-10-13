@@ -254,6 +254,7 @@ const CACHEABLE_PAGE_PATHS = new Set([
   '/suggest', '/suggest.html',
   '/register', '/register.html',
   '/landing', '/landing.html',
+  '/preferences', '/preferences.html',
   '/admin7318434', '/admin7318434.html',
 ]);
 

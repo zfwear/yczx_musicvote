@@ -79,6 +79,18 @@ export async function onRequestGet(context) {
     })()
     : null;
 
+  // 个人口令身份（MD3 项目，2026-10-14）：sessions.personal_pass_id 记录这次登录
+  // 来自哪条个人口令，把用户名带出去 —— 前端据此显示「班级名 · 用户名」与
+  // 「个性化」入口。016 未执行/查不到就不带（personal 为 null，按普通班级处理）。
+  let personal = null;
+  if (Number(session.personal_pass_id) > 0) {
+    try {
+      const prow = await env.DB.prepare('SELECT username FROM personal_passes WHERE id = ?')
+        .bind(Number(session.personal_pass_id)).first();
+      if (prow && prow.username) personal = { username: String(prow.username) };
+    } catch { /* 表不存在等：不带个人标记 */ }
+  }
+
   // X-Cache-Key：边缘缓存通行证（2026-10-12）。/api/me 是学生端每次打开页面
   // 的**第一个请求**，于是它顺便把当天的通行证发给已登录的浏览器（存本地，
   // 之后的榜单/公告/排期请求带上 `_k` 才允许进共享缓存）。未登录时走不到这里
@@ -88,6 +100,7 @@ export async function onRequestGet(context) {
     role: isGuest ? GUEST_ROLE : (storedRole || 'class'),
     isGuest,
     className,
+    personal,
     limits,
     globalSubmit,
   }, 200, { 'X-Cache-Key': await edgeCacheKey(env) });

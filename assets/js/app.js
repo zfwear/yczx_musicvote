@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 /* 版本一致性守卫：页面 HTML 与 app.js 必须同批次上传。
    只传一半（比如新页面配旧脚本、或反之）时，页面会"点了没反应"——
    这里直接把它变成一条看得懂的提示。 */
-const APP_VER = '3.6.3';
+const APP_VER = '3.7.0';
 {
   const pageVer = document.body && document.body.dataset ? document.body.dataset.appVer : '';
   if (pageVer && pageVer !== APP_VER) {
@@ -60,7 +60,7 @@ function uiDialog(opts){
     const actions=document.createElement('div'); actions.className='dialog-actions';
     let settled=false;
     const done=(v)=>{ if(settled)return; settled=true; try{d.close();}catch{} d.remove(); resolve(v); };
-    if(cancel){ const c=document.createElement('button'); c.type='button'; c.className='btn'; c.textContent=cancel; c.onclick=()=>done(false); actions.append(c); }
+    if(cancel){ const c=document.createElement('button'); c.type='button'; c.className='btn quiet'; c.textContent=cancel; c.onclick=()=>done(false); actions.append(c); }
     const b=document.createElement('button'); b.type='button'; b.className='btn '+(danger?'danger':'primary'); b.textContent=ok; b.onclick=()=>done(true); actions.append(b);
     d.append(h,p,actions);
     d.addEventListener('cancel',(e)=>{ e.preventDefault(); done(false); });
@@ -131,8 +131,62 @@ async function clientConfig(){if(!recaptchaConfig||!powConfig){const d=(await si
 /* 站点主题：后台「主题」页设置的全站外观，存服务端（system_settings 表）。
    先用 localStorage 缓存值即时上色（防刷新闪回默认），再用服务端真值纠正 ——
    管理员换主题后，所有访客下一次打开任何页面就是新主题。
-   校徽（ico.svg）与公安备案徽标是独立图片，主题变量不作用于图片，黑白主题下保持原样。 */
-(async()=>{try{if(localStorage.getItem('site_theme')==='mono')document.documentElement.dataset.theme='mono';const d=await siteConfig();const mono=!!d&&d.theme==='mono';if(mono)document.documentElement.dataset.theme='mono';else delete document.documentElement.dataset.theme;localStorage.setItem('site_theme',mono?'mono':'');}catch{}})();
+   五套键位（MD3 项目 决策 2）：'' 默认 / mono 黑白 / mint 薄荷青 /
+   beige 暖米棕 / lavender 薰衣草浅紫；个人口令用户另有"个人主题"叠加在上，
+   见 applyPersonalTheme（个人优先级更高，仅本人生效）。
+   校徽（ico.svg）与公安备案徽标是独立图片，主题变量不作用于图片，任何主题下保持原样。 */
+const SITE_THEME_KEYS=['','mono','mint','beige','lavender'];
+/* 五套预设的卡片元数据：后台「主题」页与个人偏好页共用（决策 2/4）。 */
+const THEME_PRESETS=[
+  {key:'',name:'默认主题',desc:'冷调蓝，白天浅色、夜间跟随系统深色。',swatch:['#FFFFFF','#E5E7EB','#2563EB','#111827']},
+  {key:'mono',name:'黑白主题',desc:'白纸黑字的单色观感，不含彩色；校徽保持原样。',swatch:['#FFFFFF','#E4E4E4','#141414','#0A0A0A']},
+  {key:'mint',name:'薄荷青主题',desc:'低饱和清新青，柔和干净，卡片浅青底色。',swatch:['#F2FAF7','#E3F4EE','#0B8571','#12332C']},
+  {key:'beige',name:'暖米棕主题',desc:'暖米色背景，低饱和棕强调色，柔和护眼，安静氛围感。',swatch:['#FAF5EC','#F1E7D6','#8F6238','#3A2E22']},
+  {key:'lavender',name:'薰衣草浅紫主题',desc:'低饱和淡紫色，浅灰紫卡片，柔和不艳俗。',swatch:['#F7F5FC','#ECE7F8','#7565B0','#2F2A44']},
+];
+function applySiteTheme(t){t=SITE_THEME_KEYS.includes(t)?t:'';if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme;try{localStorage.setItem('site_theme',t);}catch{}}
+(async()=>{try{applySiteTheme(localStorage.getItem('site_theme')||'');const d=await siteConfig();applySiteTheme(d&&typeof d.theme==='string'?d.theme:'');}catch{}})();
+/* 个人主题（MD3 项目 决策 11~14，仅个人口令用户）：预设复用同一套 data-theme
+   CSS；自定义配色把 4 个颜色写成 <html> 行内变量（优先级最高，天然盖住预设）。
+   与全局主题的关系：先全局后个人、个人优先；没保存过就跟随全局。
+   下面的 IIFE 用本地缓存先上色（防刷新闪回），真值由 session() 后的
+   syncPersonalTheme 校正。对比度公式与后端 /api/prefs 一致（4.5:1 双组）。 */
+function personalLum(hex){const n=parseInt(String(hex).slice(1),16);const c=[(n>>16)&255,(n>>8)&255,n&255].map(v=>{const x=v/255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];}
+function personalContrast(a,b){const l1=personalLum(a),l2=personalLum(b);const hi=Math.max(l1,l2),lo=Math.min(l1,l2);return (hi+0.05)/(lo+0.05);}
+const personalMix=(a,b,t)=>{const pa=[1,3,5].map(i=>parseInt(a.slice(i,i+2),16)),pb=[1,3,5].map(i=>parseInt(b.slice(i,i+2),16));return '#'+pa.map((v,i)=>Math.round(v+(pb[i]-v)*t).toString(16).padStart(2,'0')).join('');};
+const PERSONAL_VARS=['--primary','--primary-hover','--primary-soft','--on-primary','--title','--secondary','--muted','--page','--card','--line','--line-soft','--fill','--fill-strong','--nav-active','--track','--outline','--focus-ring'];
+function clearPersonalVars(){const s=document.documentElement.style;for(const k of PERSONAL_VARS)s.removeProperty(k);s.colorScheme='';}
+function applyPersonalTheme(p){const root=document.documentElement;if(!p)return;
+  if(p.mode==='custom'&&p.colors&&/^#[0-9a-fA-F]{6}$/.test(String(p.colors.primary||''))){
+    const c=p.colors;clearPersonalVars();delete root.dataset.theme;
+    const darkText=personalLum(c.text)<personalLum(c.bg);
+    const s=root.style;
+    s.setProperty('--primary',c.primary);
+    s.setProperty('--primary-hover',personalMix(c.primary,'#000000',0.14));
+    s.setProperty('--primary-soft',personalMix(c.primary,'#FFFFFF',0.86));
+    s.setProperty('--on-primary',personalLum(c.primary)<0.4?'#FFFFFF':'#111827');
+    s.setProperty('--page',c.bg);
+    s.setProperty('--card',c.card);
+    s.setProperty('--body',c.text);
+    s.setProperty('--title',darkText?personalMix(c.text,'#000000',0.3):personalMix(c.text,'#FFFFFF',0.3));
+    s.setProperty('--secondary',personalMix(c.text,c.bg,0.35));
+    s.setProperty('--muted',personalMix(c.text,c.bg,0.55));
+    s.setProperty('--line',personalMix(c.card,c.text,0.18));
+    s.setProperty('--line-soft',personalMix(c.card,c.text,0.08));
+    s.setProperty('--fill',personalMix(c.card,c.text,0.06));
+    s.setProperty('--fill-strong',personalMix(c.card,c.text,0.12));
+    s.setProperty('--nav-active',personalMix(c.primary,'#FFFFFF',0.88));
+    s.setProperty('--track',personalMix(c.card,c.text,0.06));
+    s.setProperty('--outline',personalMix(c.card,c.text,0.24));
+    s.setProperty('--focus-ring','0 0 0 3px '+c.primary+'29');
+    s.colorScheme=personalLum(c.bg)<0.4?'dark':'light';
+    return;
+  }
+  clearPersonalVars();
+  const preset=SITE_THEME_KEYS.includes(String(p.preset||''))?String(p.preset||''):'';
+  if(preset)root.dataset.theme=preset;else delete root.dataset.theme;
+}
+(async()=>{try{const meCached=sessionCached();if(meCached&&meCached.personal)applyPersonalTheme(apiCache.get('prefs'));}catch{}})();
 /* 页面预取（v3.6.1）：进站空闲时把前台三个页面提前拉进 HTTP 缓存，
    点导航时省一次整页下载（JS/CSS 早已长缓存，剩下的延迟主要就是文档本身）。
    浏览器开了"省流"或 2G 类慢网时不做，别跟学生抢流量；后台页签切换不换页，无此需求。 */
@@ -141,10 +195,10 @@ try{
   if(!(conn&&(conn.saveData||/^(slow-)?2g$/.test(conn.effectiveType||'')))){
     /* Chromium 系用 Speculation Rules（预取优先级更高、保留更久）；其它浏览器忽略不报错 */
     const sr=document.createElement('script');sr.type='speculationrules';
-    sr.textContent=JSON.stringify({prefetch:[{source:'list',urls:['/vote','/schedule','/suggest'],eagerness:'moderate'}]});
+    sr.textContent=JSON.stringify({prefetch:[{source:'list',urls:['/vote','/schedule','/suggest','/preferences'],eagerness:'moderate'}]});
     document.head.append(sr);
     const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,1500));
-    idle(()=>{for(const u of ['/vote','/schedule','/suggest']){const l=document.createElement('link');l.rel='prefetch';l.href=u;document.head.append(l);}});
+    idle(()=>{for(const u of ['/vote','/schedule','/suggest','/preferences']){const l=document.createElement('link');l.rel='prefetch';l.href=u;document.head.append(l);}});
   }
 }catch{}
 /* 人机校验的两个外域提前握手（DNS+TLS）：真到投稿/投票提交那一刻，
@@ -165,7 +219,10 @@ async function bootGate(){
 async function session(){ /* v3.6.2 me 直出：成功的身份存本地，下次打开先按它渲染、再后台校正
   （未登录/会话失效时 api 层的 401 流程照旧弹"登录已过期"；直出只是省掉"等 me 回来才敢画页面"的空白）。
   拿到 401 时把缓存清成 null：否则每次打开都会先闪一下已登录界面、再弹一次过期框。 */
-  try{const me=await api('/api/me',{quiet401:true});window.__me=me;apiCache.set('me',me);return me;}catch{try{apiCache.set('me',null);}catch{}return null;} }
+  try{const me=await api('/api/me',{quiet401:true});window.__me=me;apiCache.set('me',me);if(me&&me.personal)void syncPersonalTheme();return me;}catch{try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}return null;} }
+/* 个人主题同步（MD3 项目）：把本人配色拉回来应用；60 秒内用本地缓存（留存加载同款机制），
+   拿不到就维持当前外观（全局主题照常）。 */
+async function syncPersonalTheme(){try{const cached=apiCache.fresh('prefs',60000);if(cached){applyPersonalTheme(cached);return;}const d=await api('/api/prefs',{quiet401:true});apiCache.set('prefs',d);applyPersonalTheme(d);}catch{}}
 /** 上次成功拿到、且不太旧（24 小时）的身份 —— 用于首屏直出，不发给服务端。 */
 function sessionCached(){return apiCache.fresh('me',24*3600*1000);}
 /* 首屏直出：有缓存身份就先按它画（零等待），返回 true；没有就让调用方照旧 await。 */
@@ -185,12 +242,16 @@ function classBlockReason(kind){
   if(kind==='submit'&&g&&g.cap>0&&g.used>=g.cap)return'站点投稿总数量已达上限，暂无法提交投稿';
   return'';
 }
-function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule','本周排期');const suggest=link('/suggest','版本建议');const sets={home:[submit,sched,suggest],vote:[home,sched,suggest],schedule:[submit,home,suggest],suggest:[submit,sched,home],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');
+function nav(name){const guest=document.body.classList.contains('guest-mode');const link=(href,label,cls='')=>`<a class="btn${cls}" href="${href}">${label}</a>`;const submit=guest?'':link('/vote','投稿一首',' primary');const home=link('/','返回首页');const sched=link('/schedule','本周排期');const suggest=link('/suggest','版本建议');
+  /* 「个性化」（MD3 项目 决策 10）：仅个人口令用户可见，PC 端位于「本周排期」与
+     「版本建议」之间；移动端它在 .nav-links 里，随既有抽屉机制自动收进侧边菜单。 */
+  const me0=window.__me||{};const personalLink=(me0&&me0.personal&&me0.personal.username)?link('/preferences','个性化'):'';
+  const sets={home:[submit,sched,personalLink,suggest],vote:[home,sched,personalLink,suggest],schedule:[submit,home,personalLink,suggest],suggest:[submit,sched,personalLink,home],preferences:[submit,home,sched,suggest],admin:[home,sched,suggest]};const links=(sets[name]||sets.home).filter(Boolean).join('');
   /* 移动端（≤768px）：汉堡按钮 + 抽屉式侧边导航（.actions 整块变成抽屉，遮罩在其下）。
      桌面端这三个新元素全部 display:none，DOM 多了几项、画面一字不变。 */
   return `<header class="topbar"><button class="nav-burger" type="button" data-burger aria-label="打开导航" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button><a class="brand" href="/"><img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标"><div><strong>盐中之声</strong><small>Radio Light</small></div></a><div class="actions"><button class="btn quiet nav-drawer-close" type="button" data-nav-close aria-label="收起导航">关闭</button><nav class="nav-links">${links}</nav><button class="btn quiet" data-logout>退出</button></div><div class="nav-backdrop" data-nav-backdrop aria-hidden="true"></div></header>`;}
 /** 身份行的统一画法（me 直出与真值共用；游客要一眼看出、暂停要当场说明）。 */
-function paintIdentity(me){let t=me.className||'已登录';if(me.isGuest)t='【游客状态】游客模式 · 只能浏览与试听';else if(me.limits&&me.limits.paused)t=t+'（班级已暂停投稿与投票）';$('#identity').textContent=t;if(me.isGuest){$('#guest').hidden=false;$('#guest').textContent='【游客状态】可以浏览榜单和试听，但不能投稿、投票或举报。';}}
+function paintIdentity(me){let t=me.className||'已登录';if(me.isGuest)t='【游客状态】游客模式 · 只能浏览与试听';else{if(me.personal&&me.personal.username)t=t+' · '+me.personal.username;/* 个人口令身份后缀（决策 13） */if(me.limits&&me.limits.paused)t=t+'（班级已暂停投稿与投票）';}$('#identity').textContent=t;if(me.isGuest){$('#guest').hidden=false;$('#guest').textContent='【游客状态】可以浏览榜单和试听，但不能投稿、投票或举报。';}}
 async function home(){
   const root=$('#app');
   /* v3.6.2 me 直出：上次成功登录过的话，先按缓存身份把外壳画出来（零等待），
@@ -240,7 +301,7 @@ async function loadRanks(fresh){/* 留存加载（v3.6.1）：上一次的榜单
 async function reportSong(id){if(!await uiConfirm('确认举报这首歌曲？',{title:'举报歌曲',ok:'确认举报'}))return;try{const[fp,recaptcha_token]=await Promise.all([fingerprint(),recaptchaToken('report')]);await api('/api/report',{method:'POST',body:JSON.stringify({id:Number(id),reason:'',fingerprint:fp,client_id:fp,recaptcha_token})});toast('举报已提交');}catch(e){toast(e.message);}}
 async function preview(track,title,artist,container){if(!container)return;stopAllPlayers();container.innerHTML='<span class="muted">正在准备试听…</span>';try{let id=track;if(!id){const d=await api(`/api/music?q=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);id=(d.results||[]).find(x=>x.id)?.id;}if(!id){container.innerHTML='<span class="muted">没有可试听的音源</span>';return;}const check=await api(`/api/music?check=${encodeURIComponent(id)}`);if(check.playable===false){container.innerHTML='<span class="muted">该版本暂时无法试听</span>';return;}container.innerHTML=`<audio controls autoplay preload="none" src="/api/music?play=${encodeURIComponent(id)}"></audio>`;registerPlayer(container.querySelector('audio'));}catch(e){container.innerHTML=`<span class="message">${esc(e.message)} <button class="btn" data-retry>重试</button></span>`;container.querySelector('[data-retry]').onclick=()=>preview(track,title,artist,container);}}
 async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks(true);/* 自己的票要立刻看到：绕开边缘缓存 */}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
-async function logout(){try{apiCache.set('me',null);}catch{}/* 主动退出也要清掉直出缓存，否则回首页会先闪已登录界面 */await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.href='/';}
+async function logout(){try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}/* 主动退出也要清掉直出缓存（含个人配色），否则回首页会先闪已登录界面 */await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.href='/';}
 function renderTrackChoices(tracks,container,onPick){container.innerHTML=tracks.map((x,i)=>`<article class="song track-option"><div><b>${esc(x.name||x.title)}</b><small class="muted">${esc(x.artist||'未知歌手')} · ${esc(x.album||'')}</small><div class="song-actions"><button class="btn primary" type="button" data-pick="${i}">选择此版本</button><button class="btn quiet" type="button" data-track-preview="${i}">试听版本</button></div><div id="result-player-${i}"></div></div><span class="muted">${esc(x.source||'')}${x.duration?` · ${Math.floor(x.duration/60)}:${String(x.duration%60).padStart(2,'0')}`:''}${x.playable===false?' · 暂不可播':x.playable===true?' · 可试听':''}</span></article>`).join('');$$('[data-pick]',container).forEach(b=>b.onclick=()=>onPick(tracks[Number(b.dataset.pick)]));$$('[data-track-preview]',container).forEach(b=>b.onclick=()=>{const x=tracks[Number(b.dataset.trackPreview)];preview(x.id,x.name||x.title,x.artist,$(`#result-player-${b.dataset.trackPreview}`,container));});}
 async function votePage(){
   $('#nav').innerHTML=nav('vote');$('[data-logout]').onclick=logout;
@@ -661,35 +722,85 @@ async function adminPasses(){const box=$('#adminRows');try{
     if(!await uiConfirm('彻底删除这条口令？它签发的所有登录会立即失效。',{title:'删除口令',ok:'删除',danger:true}))return;
     try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'delete',id:Number(b.dataset.deletePass)})});toast(r.message||'已删除');adminPasses();}catch(err){toast(err.message);}
   });
+
+  /* ---- 个人口令（MD3 项目 决策 8/9/10）：嵌在同一个「口令管理」页，不新建页面 ---- */
+  const pbox=document.createElement('section');pbox.className='pref-section';pbox.innerHTML=personalSectionHtml(d);box.append(pbox);wirePersonalSection(pbox,d);
 }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
 
-/* 主题页（2026-10-12 用户要求）：全站外观二选一。
-   · default —— 默认主题：现在的冷调蓝，跟随系统深浅色；
-   · mono   —— 黑白主题：白纸黑字的单色观感（app.css 的 :root[data-theme="mono"]）。
+/* ---- 个人口令区（管理员「口令管理」内嵌；MD3 项目 决策 8/9/10） ---- */
+
+/** 未绑定态显示的前缀（与后端 _lib/personal.js 的 UNBOUND_PREFIX 一致）。 */
+const UNBOUND_PREFIX_UI='yczxuser';
+
+function personalSectionHtml(d){
+  const rows=d.personalPasses||[];
+  if(d.personalReady===false){
+    return `<h3>个人口令</h3><p class="muted">数据库尚未执行 016 迁移（缺少个人口令表）。在 D1 控制台执行 sql/016_personal_passes.sql 后，本区即可使用。</p>`;
+  }
+  const classes=d.classes||[];
+  const classOptions=classes.map(c=>`<option value="${c.id}">${esc(c.name)}${c.password?'（口令 '+esc(c.password)+'）':''}</option>`).join('');
+  const example=classes.length&&classes[0].password?esc(classes[0].password)+'@李三':'g15@李三';
+  return `<h3>个人口令</h3>
+  <p class="muted">绑定一条班级口令 + 一个用户名；登录时输入「班级口令@用户名」（例：${example}）。用户名仅管理员录入、同一班级内唯一；班级口令改名后所有前缀自动跟随。班级被删除时，其下个人口令自动转为未绑定状态（显示 yczxuser@用户名、暂不可登录），在本区重新绑定到新班级即可恢复。</p>
+  <form id="personalForm" class="settings-form">
+    <select class="input" id="personalClass" required aria-label="绑定班级">${classOptions||'<option value="">（没有可用班级）</option>'}</select>
+    <input class="input" id="personalName" maxlength="20" placeholder="用户名（1~20 位，可用中文）" required>
+    <button class="btn primary">创建个人口令</button>
+  </form>
+  <div id="personalList" class="class-settings-list">${rows.map(p=>personalRowHtml(p)).join('')||'<p class="muted">还没有个人口令。</p>'}</div>`;
+}
+
+function personalRowHtml(p){
+  const label=p.unbound?`${UNBOUND_PREFIX_UI}@${p.username}`:(p.prefix?`${p.prefix}@${p.username}`:`（${p.class_name||'班级口令'}）@${p.username}`);
+  const canCopy=!p.unbound&&!!p.prefix;
+  const note=p.unbound?'未绑定（原班级已被删除）：重新绑定后即可登录':`绑定班级：${p.class_name||'未知'}`;
+  return `<div class="admin-row" data-personal-row="${p.id}"><div><b>${esc(label)}</b>
+    <div class="muted">${esc(note)} · 创建于 ${esc(p.created_at||'')}${!p.unbound&&!p.prefix?' · 口令不可查看（未配置 AUTH_PEPPER），请用班级管理里的当前口令拼接':''}</div></div>
+    <div class="actions">${canCopy?`<button class="btn quiet" data-copy-personal="${p.id}">复制登录标识</button>`:''}<button class="btn" data-rebind-personal="${p.id}">重新绑定</button><button class="btn danger" data-del-personal="${p.id}">删除</button></div></div>`;
+}
+
+function wirePersonalSection(root,d){
+  const form=$('#personalForm',root);
+  if(form)form.onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'create_personal',class_id:Number($('#personalClass',root).value),username:$('#personalName',root).value})});toast(r.message||'个人口令已创建');adminPasses();}catch(err){toast(err.message);}};
+  const cls=(d.classes||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $$('[data-copy-personal]',root).forEach(b=>b.onclick=()=>{
+    const p=(d.personalPasses||[]).find(x=>String(x.id)===b.dataset.copyPersonal);const t=p&&p.prefix?`${p.prefix}@${p.username}`:'';
+    if(!t){toast('口令不可查看，无法复制完整登录标识');return;}
+    navigator.clipboard?.writeText(t).then(()=>toast('登录标识已复制')).catch(()=>toast(t));
+  });
+  $$('[data-rebind-personal]',root).forEach(b=>b.onclick=()=>{
+    const row=b.closest('[data-personal-row]');if(!row)return;const actions=$('.actions',row);if(!actions||actions.querySelector('.rebind-box'))return;
+    actions.innerHTML=`<span class="rebind-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><select class="input" style="min-width:150px" aria-label="绑定到班级">${cls}</select><button class="btn primary" type="button" data-rebind-ok>绑定</button><button class="btn quiet" type="button" data-rebind-cancel>取消</button></span>`;
+    $('[data-rebind-cancel]',actions).onclick=()=>adminPasses();
+    $('[data-rebind-ok]',actions).onclick=async()=>{const sel=$('select',actions);try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'rebind_personal',id:Number(row.dataset.personalRow),class_id:Number(sel.value)})});toast(r.message||'已重新绑定');adminPasses();}catch(err){toast(err.message);}};
+  });
+  $$('[data-del-personal]',root).forEach(b=>b.onclick=async()=>{
+    if(!await uiConfirm('删除这条个人口令？它签发的登录会立即失效；该用户名的配色记录会保留（同名重建可读回）。',{title:'删除个人口令',ok:'删除',danger:true}))return;
+    try{const r=await api('/api/admin-passes',{method:'POST',body:JSON.stringify({action:'delete_personal',id:Number(b.dataset.delPersonal)})});toast(r.message||'已删除');adminPasses();}catch(err){toast(err.message);}
+  });
+}
+
+/* 主题页（MD3 项目起扩到五套预设，决策 2）：
+   '' 默认 / mono 黑白 / mint 薄荷青 / beige 暖米棕 / lavender 薰衣草浅紫。
    存 system_settings.site_theme（007 已有的表，无需新迁移）。
    点卡片立即在本页生效（直接改 <html> 的 data-theme），同时写入服务端 ——
    学生端、后台所有访客下一次打开页面由 app.js 启动逻辑应用新主题。
-   校徽（ico.svg）与公安备案徽标是独立图片文件，不参与变量换色，任何主题下保持原样。 */
-async function adminTheme(){const box=$('#adminRows');try{const d=(await siteConfig())||{};if(($('#adminTabs .active')?.dataset.view||'theme')!=='theme')return;/* 迟到的旧响应不许覆盖已切换的视图 */const current=d.theme==='mono'?'mono':'default';
-box.innerHTML=`<p class="muted">主题对全站生效：学生端、后台与发布页都会换外观。校徽与公安备案徽标不参与换色，任何主题下保持原样。</p>
+   校徽（ico.svg）与公安备案徽标是独立图片文件，不参与变量换色，任何主题下保持原样。
+   个人口令用户可在「个性化」页自选自己的主题与配色，只对本人生效、不动这里。 */
+async function adminTheme(){const box=$('#adminRows');try{const d=(await siteConfig())||{};if(($('#adminTabs .active')?.dataset.view||'theme')!=='theme')return;/* 迟到的旧响应不许覆盖已切换的视图 */const current=SITE_THEME_KEYS.includes(d.theme)?d.theme:'';
+box.innerHTML=`<p class="muted">主题对全站生效：学生端、后台与发布页都会换外观。校徽与公安备案徽标不参与换色，任何主题下保持原样。个人口令用户在「个性化」页自选的主题/配色只对本人生效，不影响这里。</p>
   <div class="theme-grid">
-    <button type="button" class="theme-card ${current==='default'?'active':''}" data-set-theme="default">
-      <span class="swatch" aria-hidden="true"><span style="background:#FFFFFF"></span><span style="background:#E5E7EB"></span><span style="background:#2563EB"></span><span style="background:#111827"></span></span>
-      <b>默认主题</b>
-      <span class="muted">现在的样子：冷调蓝，白天浅色、夜间跟随系统深色。</span>
-      ${current==='default'?'<span class="now">当前使用</span>':''}
-    </button>
-    <button type="button" class="theme-card ${current==='mono'?'active':''}" data-set-theme="mono">
-      <span class="swatch" aria-hidden="true"><span style="background:#FFFFFF"></span><span style="background:#E4E4E4"></span><span style="background:#141414"></span><span style="background:#0A0A0A"></span></span>
-      <b>黑白主题</b>
-      <span class="muted">白纸黑字的单色观感，不含彩色；校徽保持原样。</span>
-      ${current==='mono'?'<span class="now">当前使用</span>':''}
-    </button>
+    ${THEME_PRESETS.map(t=>`<button type="button" class="theme-card ${current===t.key?'active':''}" data-set-theme="${t.key||'default'}">
+      <span class="swatch" aria-hidden="true">${t.swatch.map(c=>`<span style="background:${c}"></span>`).join('')}</span>
+      <b>${t.name}</b>
+      <span class="muted">${t.desc}</span>
+      ${current===t.key?'<span class="now">当前使用</span>':''}
+    </button>`).join('')}
   </div>`;
-$$('[data-set-theme]',box).forEach(b=>b.onclick=async()=>{const theme=b.dataset.setTheme;try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_theme',theme})});toast(r.message||'主题已更新');if(theme==='mono')document.documentElement.dataset.theme='mono';else delete document.documentElement.dataset.theme;try{localStorage.setItem('site_theme',theme==='mono'?'mono':'');}catch{}
+$$('[data-set-theme]',box).forEach(b=>b.onclick=async()=>{const raw=b.dataset.setTheme;/* 默认主题沿用老写法 default（服务端与旧测试都认它），提交时还原成 '' */const theme=raw==='default'?'':raw;try{const r=await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'set_theme',theme})});toast(r.message||'主题已更新');applySiteTheme(theme);
 /* 配置有 60 秒本地缓存（留存加载）—— 把缓存里的 theme 同步改掉并作废单例，
    下面的重渲染与后续 siteConfig() 才能拿到新主题，卡片「当前使用」才标得对。 */
-const cc=apiCache.get('config');if(cc)apiCache.set('config',{...cc,theme:theme==='mono'?'mono':''});siteConfigPromise=null;adminTheme();}catch(e){toast(e.message);}});
+const cc=apiCache.get('config');if(cc)apiCache.set('config',{...cc,theme});siteConfigPromise=null;adminTheme();}catch(e){toast(e.message);}});
 }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
 
 async function adminBanned(){const box=$('#adminRows');try{const d=await api('/api/admin-settings');if(($('#adminTabs .active')?.dataset.view||'banned')!=='banned')return;/* 迟到的旧响应不许覆盖已切换的视图 */box.innerHTML=`<form id="bannedForm" class="toolbar"><label class="field">违禁词<input class="input" id="bannedWord" maxlength="12" required></label><label class="field">原因<input class="input" id="bannedReason" maxlength="60" placeholder="管理员封禁"></label><label class="field">失效时间<input class="input" type="date" id="bannedExpiry"></label><button class="btn primary">加入词库</button></form><p class="muted">命中规则会拦截包含该词的歌名或歌手；未设置日期时默认长期有效。</p><div>${(d.banned||[]).map(x=>`<div class="admin-row"><div><b>${esc(x.keyword)}</b><div class="muted">${esc(x.reason||'管理员封禁')} · 至 ${esc(x.expire_at||'长期')}</div></div><button class="btn" data-remove-ban="${x.id}">移除</button></div>`).join('')||'<p class="muted">词库目前为空。</p>'}</div>`;$('#bannedForm').onsubmit=async e=>{e.preventDefault();try{const expiry=$('#bannedExpiry').value;const body={action:'add_banned',keyword:$('#bannedWord').value,reason:$('#bannedReason').value};if(expiry)body.expire_at=expiry+' 23:59:59';await api('/api/admin-settings',{method:'POST',body:JSON.stringify(body)});toast('违禁词已加入');adminBanned();}catch(err){toast(err.message);}};$$('[data-remove-ban]').forEach(b=>b.onclick=async()=>{try{await api('/api/admin-settings',{method:'POST',body:JSON.stringify({action:'delete_banned',id:Number(b.dataset.removeBan)})});adminBanned();}catch(e){toast(e.message);}});}catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
@@ -722,6 +833,74 @@ if(!document.querySelector('.recaptcha-disclosure')){const note=document.createE
   ((document.querySelector('#beianFooter')||document.querySelector('.shell'))?.append(note));}
 /* 登录页：已登录直接进主页；未登录显示门口表单（发布页的「进入」落到这里）。 */
 async function loginPage(){document.body.classList.remove('guest-mode');const me=await session();if(me){location.replace('/');return;}const gate=$('#gateView');if(gate)gate.hidden=false;await loadGateAnnouncements();bootGate();}
+
+/* 偏好设置页（MD3 项目 决策 3/11/12/13/15）：独立页面 /preferences.html，仅个人口令可访问。
+   非个人身份：内置弹窗讲清原因后带回首页（服务端 /api/prefs 还会再拦一道 —— 前端拦截
+   只是体验）。页面自身也套个人主题（切了立刻看到效果）。 */
+async function preferencesPage(){
+  $('#nav').innerHTML=nav('preferences');$$('[data-logout]').forEach(b=>b.onclick=logout);
+  const me=await session();
+  if(!me){location.replace('/login');return;}
+  if(!me.personal||!me.personal.username){
+    await uiAlert('偏好设置仅个人口令可用。\n班级用户请用「班级口令@用户名」的形式登录后再访问。',{title:'无法访问',ok:'回到首页'});
+    location.replace('/');return;
+  }
+  const root=$('#prefRoot');if(!root)return;
+  let state={mode:'preset',preset:'',colors:null};
+  try{const d=await api('/api/prefs');state={mode:d.mode||'preset',preset:d.preset||'',colors:d.colors||null};apiCache.set('prefs',state);}catch(e){toast(e.message);}
+  renderPrefs(root,state,me);
+}
+
+function paletteValue(state,k){
+  const c=state.colors||{};
+  const def={primary:'#2563EB',bg:'#FFFFFF',card:'#FAFAFA',text:'#111827'};
+  return /^#[0-9a-fA-F]{6}$/.test(String(c[k]||''))?c[k]:def[k];
+}
+
+function renderPrefs(root,state,me){
+  const presetOf=state.mode==='custom'?null:state.preset;
+  const who=((me.className||'')+' · '+me.personal.username).replace(/^ · /,'');
+  root.innerHTML=`
+  <section class="pref-section">
+    <h2>预设主题</h2>
+    <p class="muted">点卡片立即生效，只对你自己（${esc(who)}）生效，不影响全局站点主题与班级设置。</p>
+    <div class="theme-grid pref-grid">
+      ${THEME_PRESETS.map(t=>`<button type="button" class="theme-card ${presetOf===t.key?'active':''}" data-pick-preset="${t.key}">
+        <span class="bar" aria-hidden="true">${t.swatch.map(c=>`<span style="background:${c}"></span>`).join('')}</span>
+        <b>${t.name}</b>
+        <span class="muted">${t.desc}</span>
+        ${presetOf===t.key?'<span class="now">当前使用</span>':''}
+      </button>`).join('')}
+    </div>
+  </section>
+  <section class="pref-section">
+    <h2>自定义调色</h2>
+    <p class="muted">选 4 个颜色后保存，保存成功即切换到自定义配色（预设卡片取消选中）。正文与页面背景、卡片底色的对比度都需要达到 4.5:1，不足时会弹窗提示、不会保存。</p>
+    <div class="palette-grid">
+      ${[['primary','主色'],['bg','页面背景色'],['card','卡片底色'],['text','正文文字颜色']].map(([k,label])=>`<label class="palette-field">${label}<input type="color" id="pc-${k}" value="${paletteValue(state,k)}"></label>`).join('')}
+    </div>
+    <div class="palette-actions">
+      <button class="btn primary" id="savePalette">保存并使用自定义配色</button>
+      <span class="pref-state">${state.mode==='custom'?'当前：自定义配色使用中':'当前：使用预设主题'}</span>
+    </div>
+  </section>`;
+  $$('[data-pick-preset]',root).forEach(b=>b.onclick=async()=>{
+    const preset=b.dataset.pickPreset;
+    applyPersonalTheme({mode:'preset',preset});
+    try{await api('/api/prefs',{method:'POST',body:JSON.stringify({mode:'preset',preset})});apiCache.set('prefs',{mode:'preset',preset,colors:null});toast('主题已切换');renderPrefs(root,{mode:'preset',preset,colors:null},me);}
+    catch(e){toast(e.message);}
+  });
+  $('#savePalette',root).onclick=async()=>{
+    const colors={primary:$('#pc-primary',root).value,bg:$('#pc-bg',root).value,card:$('#pc-card',root).value,text:$('#pc-text',root).value};
+    const r1=personalContrast(colors.text,colors.bg),r2=personalContrast(colors.text,colors.card);
+    if(r1<4.5||r2<4.5){
+      await uiAlert('对比度不足（需达到 4.5:1），没有保存：\n正文/页面背景 '+r1.toFixed(2)+'，正文/卡片底 '+r2.toFixed(2)+'。\n请把正文文字调深、或把背景/卡片调亮后重试。',{title:'对比度不足，未保存',ok:'知道了'});
+      return;
+    }
+    try{await api('/api/prefs',{method:'POST',body:JSON.stringify({mode:'custom',colors})});applyPersonalTheme({mode:'custom',colors});apiCache.set('prefs',{mode:'custom',preset:'',colors});toast('自定义配色已保存');renderPrefs(root,{mode:'custom',preset:'',colors},me);}
+    catch(e){toast(e.message);}
+  };
+}
 /* 路由。两个必须知道的事实：
    ① 先看**页面身份**再按路径分发：服务端（中间件/server.mjs）会把发布页直接挂在 `/` 上
       给未登录访客，此时 location.pathname 是 '/' 但页面是 landing.html。
@@ -733,7 +912,7 @@ async function loginPage(){document.body.classList.remove('guest-mode');const me
 const isLandingBody=document.body.classList.contains('landing-page');
 const path=location.pathname;
 const pageName=(path.replace(/\/+$/,'/').split('/').pop()||'index').replace(/\.html$/i,'')||'index';
-if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(pageName==='index')home(); else if(pageName==='landing'){/* 显式路径进来的发布页 */} else if(pageName==='login')loginPage(); else if(pageName==='vote')votePage(); else if(pageName==='schedule')schedule(); else if(pageName==='admin7318434')admin(); else if(pageName==='register')register();else if(pageName==='suggest')suggestionsPage();
+if(isLandingBody){/* 发布页：纯静态，无需脚本 */} else if(pageName==='index')home(); else if(pageName==='landing'){/* 显式路径进来的发布页 */} else if(pageName==='login')loginPage(); else if(pageName==='vote')votePage(); else if(pageName==='schedule')schedule(); else if(pageName==='admin7318434')admin(); else if(pageName==='register')register();else if(pageName==='suggest')suggestionsPage();else if(pageName==='preferences')preferencesPage();
 ;
 
 /* 投稿须知与免责声明原文（2026-10-08 从旧前端补回；页面上的可见内容与此同源）*/

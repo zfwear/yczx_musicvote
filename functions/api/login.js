@@ -11,6 +11,7 @@ import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.j
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.js';
 import { findUsablePassByLookup, passSessionTtlSeconds, PASS_LABELS } from '../../_lib/passes.js';
+import { parsePersonalLogin, findPersonalByClassAndName, findUnboundByName, UNBOUND_PREFIX } from '../../_lib/personal.js';
 
 /**
  * 班级口令登录。
@@ -226,6 +227,63 @@ async function handleLoginPost(context) {
         200,
         { 'Set-Cookie': session.setCookie }
       );
+    }
+  }
+
+  // 2.6) 个人口令（MD3 项目，2026-10-14 用户确认）：登录标识「班级口令@用户名」。
+  //
+  // 解析约定（决策 5）：**先整串精确匹配**（上面班级/凭证/游客全都做过，老路径
+  // 一字不改）；到这里还不命中、且输入里含 @ 时，按**第一个 @** 拆分 —— 前缀按
+  // 班级口令校验（同一套 HMAC 索引 + PBKDF2），后缀是管理员录入的用户名
+  // （字符集不含 @，拆分无歧义）。命中后签发**学生侧会话**：
+  // subject_id = 绑定班级 —— 投票/投稿/班级上限与班级成员完全一致，
+  // 原有投票统计代码零改动；personal_pass_id 只标记"是不是个人用户 + 精确撤销"。
+  // yczxuser 是保留前缀（未绑定态显示用），单独给一句"班级已被删除"的明确提示。
+  if (!matched) {
+    const personal = parsePersonalLogin(secret.value);
+    if (personal) {
+      if (personal.prefix === UNBOUND_PREFIX) {
+        // 未绑定态（决策 8）：暂不可登录，但要说清楚"为什么"。
+        const orphan = await findUnboundByName(env, personal.username);
+        if (orphan) {
+          return error('这条个人口令的班级已被删除，暂不可登录；请联系广播站管理员重新绑定班级', 403);
+        }
+      } else {
+        const pLookup = await classPasswordLookup(env, personal.prefix);
+        let pRow = await env.DB.prepare(
+          'SELECT id, name, password FROM classes WHERE password_lookup = ?'
+        ).bind(pLookup).first();
+        if (pRow && !(await verifyPassword(pRow.password, personal.prefix)).ok) pRow = null;
+
+        // 与主路径同款的"老数据回退"：password_lookup 为空的行逐条校验（通常只有一两条）。
+        if (!pRow) {
+          const { results } = await env.DB.prepare(
+            'SELECT id, name, password FROM classes WHERE password_lookup IS NULL'
+          ).all();
+          for (const candidate of results || []) {
+            const verdict = await verifyPassword(candidate.password, personal.prefix);
+            if (verdict.ok) { pRow = candidate; break; }
+          }
+        }
+
+        if (pRow) {
+          const pp = await findPersonalByClassAndName(env, pRow.id, personal.username);
+          if (pp) {
+            const session = await createSession(env, request, {
+              subject: 'class',
+              subjectId: pRow.id,
+              personalPassId: pp.id,
+              ttlSeconds: CLASS_TTL_SECONDS,
+            });
+            await clearRateLimit(env, loginBucket);
+            return json(
+              { ok: true, class_id: pRow.id, class_name: pRow.name, personal: true, username: personal.username },
+              200,
+              { 'Set-Cookie': session.setCookie }
+            );
+          }
+        }
+      }
     }
   }
 

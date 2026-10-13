@@ -1,10 +1,15 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireStaff, revokeSessionsByPass, authPepper, hasPrivatePepper } from '../../_lib/auth.js';
+import {
+  requireStaff, revokeSessionsByPass, revokeSessionsByPersonalPass, authPepper, hasPrivatePepper,
+} from '../../_lib/auth.js';
 import { parsePositiveInt, sanitizeText } from '../../_lib/validate.js';
 import { hashPassword, encryptSecret, decryptSecret } from '../../_lib/crypto.js';
 import { changedRows } from '../../_lib/db.js';
 import { classPasswordLookup } from '../../_lib/auth.js';
 import { generatePassToken, PASS_KINDS } from '../../_lib/passes.js';
+import {
+  PERSONAL_USERNAME_RE, createPersonalPass, deletePersonalPass, rebindPersonalPass,
+} from '../../_lib/personal.js';
 
 /**
  * 口令凭证管理（测试口令 / 游客口令）。
@@ -66,7 +71,53 @@ export async function onRequestGet(context) {
     passes.push(item);
   }
 
-  return json({ ok: true, canView, passes });
+  // ---- 个人口令（MD3 项目）：绑定班级 + 管理员录入的用户名 ----
+  //
+  // 前缀 =「班级当前口令」的明文（只在配了私有 AUTH_PEPPER 时解得开，与
+  // 测试/游客口令同一政策）；解不开就只显示班级名，前端把复制按钮藏起来。
+  // personalReady=false 表示 016 迁移未执行 —— 前端提示"先执行迁移"。
+  let personalPasses = [];
+  let classes = [];
+  let personalReady = true;
+  try {
+    const { results: prows } = await env.DB.prepare(
+      `SELECT p.id, p.class_id, p.username, p.created_at,
+              c.name AS class_name, c.password_encrypted AS class_enc
+         FROM personal_passes p LEFT JOIN classes c ON c.id = p.class_id
+        ORDER BY p.id DESC LIMIT 500`
+    ).all();
+    for (const row of prows || []) {
+      let prefix = null;
+      if (canView && row.class_enc) {
+        try { prefix = await decryptSecret(pepper, row.class_enc); } catch { prefix = null; }
+      }
+      personalPasses.push({
+        id: row.id,
+        class_id: Number(row.class_id) || 0,
+        class_name: row.class_name || null,
+        username: row.username,
+        created_at: row.created_at,
+        prefix,
+        unbound: Number(row.class_id) <= 0,
+      });
+    }
+    const { results: cls } = await env.DB.prepare('SELECT id, name, password_encrypted FROM classes ORDER BY id').all();
+    for (const c of cls || []) {
+      let pw = null;
+      if (canView && c.password_encrypted) {
+        try { pw = await decryptSecret(pepper, c.password_encrypted); } catch { pw = null; }
+      }
+      classes.push({ id: c.id, name: c.name, password: pw });
+    }
+  } catch (err) {
+    if (/no such table/i.test(String((err && err.message) || ''))) {
+      personalReady = false;      // 016 未执行：个人口令功能整体不可用
+    } else {
+      throw err;
+    }
+  }
+
+  return json({ ok: true, canView, passes, personalPasses, classes, personalReady });
 }
 
 export async function onRequestPost(context) {
@@ -83,9 +134,15 @@ export async function onRequestPost(context) {
     if (data.action === 'create') return await createPass(env, data);
     if (data.action === 'revoke') return await revokePass(env, data);
     if (data.action === 'delete') return await deletePass(env, data);
+    if (data.action === 'create_personal') return await createPersonal(env, data);
+    if (data.action === 'delete_personal') return await deletePersonal(env, data);
+    if (data.action === 'rebind_personal') return await rebindPersonal(env, data);
     return error('未知操作', 400);
   } catch (err) {
     if (/no such table/i.test(String((err && err.message) || ''))) {
+      if (/personal/i.test(String((err && err.message) || ''))) {
+        return error('数据库尚未执行 016 迁移（缺少个人口令表），请先执行 sql/016_personal_passes.sql', 500);
+      }
       return error('数据库尚未执行 015 迁移（缺少 access_passes 表），请先执行 sql/015_access_passes_and_limits.sql', 500);
     }
     throw err;
@@ -198,4 +255,65 @@ async function deletePass(env, data) {
   if (changedRows(result) === 0) return error('凭证不存在', 404);
 
   return json({ ok: true, revokedSessions, message: '口令已删除，相关登录已全部失效' });
+}
+
+/* --------------------- 个人口令（MD3 项目，2026-10-14） --------------------- */
+
+/** 创建个人口令（决策 2/5/6/7）：必须绑定一条已存在的班级口令 + 管理员录入的用户名。 */
+async function createPersonal(env, data) {
+  const classId = parsePositiveInt(data.class_id, { field: '绑定班级' });
+  if (!classId.ok) return error(classId.error, 400);
+
+  const username = String(data.username ?? '').trim();
+  if (!PERSONAL_USERNAME_RE.test(username)) {
+    return error('用户名需要是 1 到 20 位的中文、字母、数字、下划线或短横线', 400);
+  }
+
+  const cls = await env.DB.prepare('SELECT id, name FROM classes WHERE id = ?').bind(classId.value).first();
+  if (!cls) return error('绑定的班级口令不存在（班级可能已被删除）', 404);
+
+  const created = await createPersonalPass(env, classId.value, username);
+  if (!created.ok && created.conflict) return error('这个用户名在该班级下已存在，请换一个', 409);
+
+  return json({
+    ok: true,
+    id: created.row ? created.row.id : null,
+    class_name: cls.name,
+    username,
+    message: '个人口令已创建：登录时输入「班级口令@用户名」',
+  });
+}
+
+/** 删除个人口令（决策 9）：真删、登录立即失效；配色记录保留（同名重建读回）。 */
+async function deletePersonal(env, data) {
+  const id = parsePositiveInt(data.id, { field: '个人口令' });
+  if (!id.ok) return error(id.error, 400);
+
+  const row = await deletePersonalPass(env, id.value);
+  if (!row) return error('个人口令不存在', 404);
+
+  const revokedSessions = await revokeSessionsByPersonalPass(env, id.value);
+  return json({ ok: true, revokedSessions, message: '个人口令已删除；该用户名的配色记录已保留（同名重建可读回）' });
+}
+
+/** 重新绑定（决策 8）：未绑定态恢复 / 换班；前缀自动替换，旧登录一并撤销。 */
+async function rebindPersonal(env, data) {
+  const id = parsePositiveInt(data.id, { field: '个人口令' });
+  if (!id.ok) return error(id.error, 400);
+  const classId = parsePositiveInt(data.class_id, { field: '绑定班级' });
+  if (!classId.ok) return error(classId.error, 400);
+
+  const cls = await env.DB.prepare('SELECT id, name FROM classes WHERE id = ?').bind(classId.value).first();
+  if (!cls) return error('要绑定的班级口令不存在', 404);
+
+  const moved = await rebindPersonalPass(env, id.value, classId.value);
+  if (!moved) return error('个人口令不存在', 404);
+
+  const revokedSessions = await revokeSessionsByPersonalPass(env, id.value);
+  return json({
+    ok: true,
+    class_name: cls.name,
+    revokedSessions,
+    message: `已绑定到「${cls.name}」，登录标识已同步更新`,
+  });
 }

@@ -10,10 +10,11 @@ import {
   getVoteCap, setSetting, SETTING_VOTE_CAP, getSetting,
   getReportThreshold, SETTING_REPORT_THRESHOLD, DEFAULT_REPORT_THRESHOLD,
   isSubmissionsPaused, SETTING_SUBMISSIONS_PAUSED, SETTING_SUBMIT_CAP,
-  getSiteTheme, setSiteTheme,
+  getSiteTheme, setSiteTheme, SITE_THEMES, SITE_THEME_LABELS,
 } from '../../_lib/settings.js';
 import { getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 import { changedRows, isMissingTable } from '../../_lib/db.js';
+import { unbindPersonalOfClass } from '../../_lib/personal.js';
 
 const DEFAULT_EXPIRY = '2099-12-31 23:59:59';
 const EXPIRY_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -444,15 +445,18 @@ async function setVoteCap(env, data) {
 }
 
 /**
- * 站点主题（2026-10-12 需求）：后台「主题」页切换全站外观。
- * 只接受 'mono'（黑白）与 ''/'default'（默认）两种取值，其它一律归一成默认 ——
- * 主题是外观开关，不是自由文本，乱值没有意义。
+ * 站点主题（2026-10-12 上线，2026-10-14 随 MD3 项目扩到五套）：后台「主题」页切换全站外观。
+ * 只接受 SITE_THEMES 里的键位（''/'mono'/'mint'/'beige'/'lavender'），
+ * 其它一律归一成默认 —— 主题是外观开关，不是自由文本，乱值没有意义。
  * 只写一个 system_settings 键，**不需要任何数据库迁移**；
  * 前端生效路径：/api/config 下发 → app.js 启动时给 <html> 挂 data-theme
- * → app.css 的 :root[data-theme="mono"] 变量组接管颜色。
+ * → app.css 的 :root[data-theme="…"] 变量组接管颜色。
+ * 三套低饱和预设（薄荷青/暖米棕/薰衣草浅紫）与个人偏好页共用同一批键位
+ * （用户决策 2）；个人配色存在 personal_prefs，与这里互不干扰。
  */
 async function setTheme(env, data) {
-  const theme = data.theme === 'mono' ? 'mono' : '';
+  const raw = String(data.theme ?? '').trim();
+  const theme = SITE_THEMES.includes(raw) ? raw : '';
   try {
     await setSiteTheme(env, theme);
   } catch (err) {
@@ -465,9 +469,9 @@ async function setTheme(env, data) {
   return json({
     ok: true,
     theme,
-    message: theme === 'mono'
-      ? '已切换到黑白主题：所有访客下一次打开页面生效（校徽保持原样）'
-      : '已恢复默认主题：所有访客下一次打开页面生效',
+    message: theme === ''
+      ? '已恢复默认主题：所有访客下一次打开页面生效'
+      : `已切换到${SITE_THEME_LABELS[theme] || '新主题'}：所有访客下一次打开页面生效（校徽保持原样）`,
   });
 }
 
@@ -659,7 +663,13 @@ async function deleteClass(env, session, data) {
   await env.DB.prepare("DELETE FROM sessions WHERE subject = 'class' AND subject_id = ?")
     .bind(id.value).run();
 
-  return json({ ok: true, message: '已删除该班级口令' });
+  // 个人口令联动（MD3 项目 决策 8）：该班绑定的个人口令整体转入未绑定态
+  // （登录标识显示为 yczxuser@用户名、暂不可登录），配色记录一并平移；
+  // 管理员之后可在「口令管理」里重新绑定到新班级。上面的会话删除已经覆盖
+  // 这些个人登录（subject_id 相同）；016 未执行时下面的联动自动降级为无操作。
+  await unbindPersonalOfClass(env, id.value).catch(() => {});
+
+  return json({ ok: true, message: '已删除该班级口令；其下个人口令已转为未绑定状态（可在「口令管理」重新绑定）' });
 }
 
 /**
@@ -693,7 +703,10 @@ async function deleteClasses(env, data) {
     `DELETE FROM sessions WHERE subject = 'class' AND subject_id IN (${placeholders})`
   ).bind(...ids).run();
 
-  return json({ ok: true, deleted, message: `已删除 ${deleted} 个班级口令` });
+  // 个人口令联动（MD3 项目 决策 8）：同 deleteClass 的单班版本。
+  for (const cid of ids) await unbindPersonalOfClass(env, cid).catch(() => {});
+
+  return json({ ok: true, deleted, message: `已删除 ${deleted} 个班级口令；相关个人口令已转为未绑定状态` });
 }
 
 async function updateClassPassword(env, data) {

@@ -301,7 +301,7 @@ function presentedTokens(request, subject) {
  * @returns {Promise<{token: string, maxAge: number, setCookie: string}>}
  */
 export async function createSession(
-  env, request, { subject, subjectId, role = null, ttlSeconds, debugAdminId = null, passId = null }
+  env, request, { subject, subjectId, role = null, ttlSeconds, debugAdminId = null, passId = null, personalPassId = null }
 ) {
   const token = randomToken(32);
   const tokenHash = await sha256Hex(token);
@@ -333,6 +333,35 @@ export async function createSession(
     } catch (err) {
       if (!isMissingColumnError(err)) throw err;
       // 015 还没执行：退回普通会话（不带 pass_id）。
+    }
+  }
+
+  // 个人口令会话（MD3 项目，2026-10-14）：把来源个人口令记在 personal_pass_id。
+  // 与 pass_id 同一套路：016 未执行（没有该列）时退回普通会话 ——
+  // 少一个标记只影响"个人入口显示与精确撤销"，不影响登录本身。
+  // 与口令凭证不同，个人会话**参与滑动续期**（学生每天都来，长期有效）。
+  if (personalPassId !== null && personalPassId !== undefined) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO sessions (token_hash, subject, subject_id, role, personal_pass_id, ip, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', ?))`
+      ).bind(
+        tokenHash, subject, subjectId, role, Number(personalPassId),
+        clientIp(request), header(request, 'User-Agent', 300), expiresAt
+      ).run();
+      return {
+        token,
+        maxAge: ttlSeconds,
+        setCookie: serializeCookie(cookieNameFor(subject), token, {
+          maxAge: ttlSeconds,
+          secure: isSecureRequest(request),
+          httpOnly: true,
+          sameSite: 'Lax',
+        }),
+      };
+    } catch (err) {
+      if (!isMissingColumnError(err)) throw err;
+      // 016 还没执行：退回普通会话（个人标记丢失，登录不受影响）。
     }
   }
 
@@ -431,17 +460,17 @@ export async function readSession(env, request, subject = null) {
       let row;
       try {
         row = await env.DB.prepare(
-          `SELECT id, subject, subject_id, role, debug_admin_id, pass_id, expires_at, user_agent
+          `SELECT id, subject, subject_id, role, debug_admin_id, pass_id, personal_pass_id, expires_at, user_agent
              FROM sessions
             WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
         ).bind(tokenHash).first();
       } catch (err) {
-        // 013/015 迁移还没执行（没有 debug_admin_id / pass_id 列）：退回旧查询，
+        // 013/015/016 迁移还没执行（缺列）：逐级退回旧查询，
         // 让迁移进度不同的部署都还能正常登录。
         if (!isMissingColumnError(err)) throw err;
         try {
           row = await env.DB.prepare(
-            `SELECT id, subject, subject_id, role, NULL AS debug_admin_id, NULL AS pass_id, expires_at, user_agent
+            `SELECT id, subject, subject_id, role, NULL AS debug_admin_id, NULL AS pass_id, NULL AS personal_pass_id, expires_at, user_agent
                FROM sessions
               WHERE token_hash = ? AND datetime(expires_at) > datetime('now')`
           ).bind(tokenHash).first();
@@ -773,6 +802,25 @@ export async function revokeSessionsByPass(env, passId) {
       "DELETE FROM sessions WHERE subject = 'class' AND (role = 'guest' OR role = 'test')"
     ).run();
     return Number((result && result.meta && result.meta.changes) || 0);
+  }
+}
+
+/**
+ * 撤销某条个人口令签发的**全部会话**（MD3 项目）。
+ *
+ * 用途：删除个人口令（决策 9：登录立即失效）、重新绑定（前缀变了，旧会话
+ * 按旧班级归属，必须重登）、班级被删（决策 8：整体转入未绑定态）时调用。
+ * 016 未执行（没有该列）时返回 0 —— 那种部署也不存在个人登录。
+ */
+export async function revokeSessionsByPersonalPass(env, personalPassId) {
+  const id = Number(personalPassId);
+  if (!Number.isInteger(id) || id <= 0) return 0;
+  try {
+    const result = await env.DB.prepare('DELETE FROM sessions WHERE personal_pass_id = ?').bind(id).run();
+    return Number((result && result.meta && result.meta.changes) || 0);
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    return 0;
   }
 }
 
