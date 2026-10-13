@@ -50,7 +50,7 @@ Cloudflare Pages + Pages Functions + D1 的点歌 / 投票系统，部署在 `vo
 **整包覆盖上传**（不挑文件）。上传后 30 秒自查：
 
 1. 打开 `https://vote.yzstu.top/schedule`：页脚显示 `版本 3.7.0`，顶部无橙色提示条。
-2. 打开 `https://vote.yzstu.top/assets/js/app.js?v=3.7.0.1`：搜 `APP_VER`，应为 `3.7.0`。
+2. 打开 `https://vote.yzstu.top/assets/js/app.js?v=3.7.0.2`：搜 `APP_VER`，应为 `3.7.0`。
 3. 打开登录页：输入框下方应有一行灰字「个人用户请输入：班级口令@用户名」。
 
 ---
