@@ -1,9 +1,10 @@
 /**
  * 班级维度与全站维度的投稿/投票限制（2026-10-10 需求）。
  *
- * 三道闸的分工（投稿走 ①②③，投票只走 ①）：
+ * 三道闸的分工（投稿走 ①②③，投票走 ①②）：
  *   ① 班级暂停：classes.paused = 1 → 该班不能投票、不能投稿；
- *   ② 班级上限：已投 ≥ vote_limit / 已投 ≥ submit_limit → 拦截；
+ *   ② 班级上限：已投 ≥ vote_limit（**投票按"参与人数"计**，2026-10-16 改口径，
+ *      见 countClassVoters —— 一个人给多首歌投票只算一个人）/ 已投 ≥ submit_limit → 拦截；
  *   ③ 全站投稿上限：全站累计投稿 ≥ submit_cap → 拦截投稿。
  *
  * 通用约定（与 denyGuest / isSubmissionsPaused 同一套哲学）：
@@ -113,13 +114,34 @@ export async function countClassSubmissions(env, classId) {
   }
 }
 
-/** 某班级累计投票数（upvote_logs 按班级记录）。 */
+/** 某班级累计投票数（upvote_logs 按班级记录）。注意：班级上限判定用的是 countClassVoters（人数口径），不是这个。 */
 export async function countClassVotes(env, classId) {
   const id = Number(classId);
   if (!Number.isInteger(id) || id <= 0) return 0;
   try {
     const row = await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM upvote_logs WHERE class_id = ?'
+    ).bind(id).first();
+    return Number((row && row.n) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 某班级累计**参与投票人数**（upvote_logs 里出现过的不同设备指纹数）。
+ *
+ * 2026-10-16（用户要求，站点正式投用后的紧急修正）：班级投票上限的口径
+ * 从"累计票数"改为"投过票的人数" —— 一个人给 20 首歌各投一票，只算 1 个
+ * 人、只消耗 1 个名额（旧口径按票数计，单设备 20 票即吃掉 20 个名额）。
+ * 计数直接现算，不需要迁移；004 之前遗留的 fingerprint=NULL 记录天然不计入。
+ */
+export async function countClassVoters(env, classId) {
+  const id = Number(classId);
+  if (!Number.isInteger(id) || id <= 0) return 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT COUNT(DISTINCT fingerprint) AS n FROM upvote_logs WHERE class_id = ?'
     ).bind(id).first();
     return Number((row && row.n) || 0);
   } catch {

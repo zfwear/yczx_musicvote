@@ -235,7 +235,7 @@ function classBlockReason(kind){
   const L=me.limits;
   if(L){
     if(L.paused)return'本班级已被暂停投稿与投票，请联系广播站管理员';
-    if(kind==='vote'&&L.voteLimit>0&&L.voteUsed>=L.voteLimit)return'本班级投票数已达上限，暂时无法继续投票';
+    if(kind==='vote'&&L.voteLimit>0&&L.voteUsed>=L.voteLimit)return'本班级参与投票人数已达上限，暂时无法继续投票';
     if(kind==='submit'&&L.submitLimit>0&&L.submitUsed>=L.submitLimit)return'本班级投稿数量已达上限，暂时无法继续投稿';
   }
   const g=me.globalSubmit;

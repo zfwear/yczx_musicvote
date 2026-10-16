@@ -1,6 +1,6 @@
 import { json } from '../../_lib/http.js';
 import { requireSession, isGuestSession, GUEST_CLASS_NAME, GUEST_ROLE, edgeCacheKey } from '../../_lib/auth.js';
-import { getClassLimits, countClassVotes, countClassSubmissions, getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
+import { getClassLimits, countClassVoters, countClassSubmissions, getSubmitCap, countGlobalSubmissions } from '../../_lib/classconfig.js';
 
 /**
  * 当前身份（学生端）。
@@ -52,13 +52,14 @@ export async function onRequestGet(context) {
   }
 
   // 班级维度的限制：只对真实班级会话有意义（游客/调试/测试口令没有班级归属）。
+  // voteUsed 口径（2026-10-16）：参投**人数**（不同设备），不是票数 —— 与 upvote 闸门同源。
   let limits = null;
   if (!isGuest && storedRole !== 'debug' && storedRole !== 'test'
       && Number(session.subject_id) > 0) {
     const cfg = await getClassLimits(env, session.subject_id);
     if (cfg.found) {
       const [voteUsed, submitUsed] = await Promise.all([
-        countClassVotes(env, session.subject_id),
+        countClassVoters(env, session.subject_id),
         countClassSubmissions(env, session.subject_id),
       ]);
       limits = {
