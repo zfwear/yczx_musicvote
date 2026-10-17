@@ -164,7 +164,39 @@ const THEME_PRESETS=[
   {key:'taro',name:'香芋紫 × 墨黑',desc:'深色主题：墨黑底配香芋紫，安静、低刺激，夜间友好。',swatch:['#0B0C10','#2A2B36','#C98EFF','#F3E9FF']},
   {key:'xuan',name:'玄青 × 燕领红',desc:'深色主题：玄青灰底配燕领红，克制但有力量。',swatch:['#1E1E1E','#3A3A3A','#FC6315','#FFF1E8']},
 ];
-function applySiteTheme(t){t=SITE_THEME_KEYS.includes(t)?t:'';if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme;try{localStorage.setItem('site_theme',t);}catch{}}
+
+/* 主题首屏快照：让“上一次选择的主题”在 HTML 解析阶段就生效，避免进站时
+   先显示默认/全局主题，再闪一下切成个人主题。
+   每个页面 <head> 里有一小段同逻辑的内联脚本（键名 rl_theme_v1）；app.js
+   每次应用主题时同步更新这个快照。个人主题只在个人页面生效，且要求本地
+   缓存的登录身份与快照用户名一致，避免共用电脑把上一个人的主题带过来。 */
+const THEME_SNAPSHOT_KEY='rl_theme_v1';
+const isPersonalThemePage=()=>{
+  const p=(location.pathname||'/').replace(/\.html$/i,'').replace(/\/+$/,'')||'/';
+  return p==='/'||p==='/index'||p==='/vote'||p==='/schedule'||p==='/suggest'||p==='/preferences';
+};
+function readThemeSnapshot(){try{return JSON.parse(localStorage.getItem(THEME_SNAPSHOT_KEY)||'null')||{};}catch{return {};}}
+function writeThemeSnapshot(patch){try{const s=readThemeSnapshot();const next={...s,...patch};if(!next.personal)delete next.personal;localStorage.setItem(THEME_SNAPSHOT_KEY,JSON.stringify(next));}catch{}}
+function cachedPersonalUsername(){try{const m=JSON.parse(localStorage.getItem('yczxc_v1_me')||'null');return m&&m.d&&m.d.personal&&m.d.personal.username?String(m.d.personal.username):'';}catch{return '';}}
+let personalThemeActive=false;
+(function(){
+  try{
+    const s=readThemeSnapshot();
+    if(s&&s.personal&&isPersonalThemePage()&&s.personal.username&&cachedPersonalUsername()===s.personal.username)personalThemeActive=true;
+  }catch{}
+})();
+function clearPersonalThemeSnapshot(){
+  personalThemeActive=false;
+  try{const s=readThemeSnapshot();delete s.personal;localStorage.setItem(THEME_SNAPSHOT_KEY,JSON.stringify(s));}catch{}
+}
+
+function applySiteTheme(t){
+  t=SITE_THEME_KEYS.includes(t)?t:'';
+  try{localStorage.setItem('site_theme',t);}catch{}
+  writeThemeSnapshot({site:t});
+  if(personalThemeActive)return;
+  if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme;
+}
 (async()=>{try{applySiteTheme(localStorage.getItem('site_theme')||'');const d=await siteConfig();applySiteTheme(d&&typeof d.theme==='string'?d.theme:'');}catch{}})();
 /* 个人主题（MD3 项目 决策 11~14，仅个人口令用户）：预设复用同一套 data-theme
    CSS；自定义配色把 4 个颜色写成 <html> 行内变量（优先级最高，天然盖住预设）。
@@ -174,39 +206,56 @@ function applySiteTheme(t){t=SITE_THEME_KEYS.includes(t)?t:'';if(t)document.docu
 function personalLum(hex){const n=parseInt(String(hex).slice(1),16);const c=[(n>>16)&255,(n>>8)&255,n&255].map(v=>{const x=v/255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];}
 function personalContrast(a,b){const l1=personalLum(a),l2=personalLum(b);const hi=Math.max(l1,l2),lo=Math.min(l1,l2);return (hi+0.05)/(lo+0.05);}
 const personalMix=(a,b,t)=>{const pa=[1,3,5].map(i=>parseInt(a.slice(i,i+2),16)),pb=[1,3,5].map(i=>parseInt(b.slice(i,i+2),16));return '#'+pa.map((v,i)=>Math.round(v+(pb[i]-v)*t).toString(16).padStart(2,'0')).join('');};
-const PERSONAL_VARS=['--primary','--primary-hover','--primary-soft','--on-primary','--title','--secondary','--muted','--page','--card','--line','--line-soft','--fill','--fill-strong','--nav-active','--track','--outline','--focus-ring'];
+const PERSONAL_VARS=['--primary','--primary-hover','--primary-soft','--on-primary','--title','--body','--secondary','--muted','--page','--card','--line','--line-soft','--fill','--fill-strong','--nav-active','--track','--outline','--focus-ring'];
 function clearPersonalVars(){const s=document.documentElement.style;for(const k of PERSONAL_VARS)s.removeProperty(k);s.colorScheme='';}
-function applyPersonalTheme(p){const root=document.documentElement;if(!p)return;
+function applyPersonalTheme(p, usernameOverride){
+  const root=document.documentElement;
+  if(!p){
+    clearPersonalThemeSnapshot();
+    clearPersonalVars();
+    applySiteTheme(localStorage.getItem('site_theme')||'');
+    return;
+  }
+  const snap=readThemeSnapshot();
+  const username=String(usernameOverride||(window.__me&&window.__me.personal&&window.__me.personal.username)||(snap.personal&&snap.personal.username)||'');
   if(p.mode==='custom'&&p.colors&&/^#[0-9a-fA-F]{6}$/.test(String(p.colors.primary||''))){
     const c=p.colors;clearPersonalVars();delete root.dataset.theme;
     const darkText=personalLum(c.text)<personalLum(c.bg);
+    const vars={
+      '--primary':c.primary,
+      '--primary-hover':personalMix(c.primary,'#000000',0.14),
+      '--primary-soft':personalMix(c.primary,'#FFFFFF',0.86),
+      '--on-primary':personalLum(c.primary)<0.4?'#FFFFFF':'#111827',
+      '--page':c.bg,
+      '--card':c.card,
+      '--body':c.text,
+      '--title':darkText?personalMix(c.text,'#000000',0.3):personalMix(c.text,'#FFFFFF',0.3),
+      '--secondary':personalMix(c.text,c.bg,0.35),
+      '--muted':personalMix(c.text,c.bg,0.55),
+      '--line':personalMix(c.card,c.text,0.18),
+      '--line-soft':personalMix(c.card,c.text,0.08),
+      '--fill':personalMix(c.card,c.text,0.06),
+      '--fill-strong':personalMix(c.card,c.text,0.12),
+      '--nav-active':personalMix(c.primary,'#FFFFFF',0.88),
+      '--track':personalMix(c.card,c.text,0.06),
+      '--outline':personalMix(c.card,c.text,0.24),
+      '--focus-ring':'0 0 0 3px '+c.primary+'29',
+    };
     const s=root.style;
-    s.setProperty('--primary',c.primary);
-    s.setProperty('--primary-hover',personalMix(c.primary,'#000000',0.14));
-    s.setProperty('--primary-soft',personalMix(c.primary,'#FFFFFF',0.86));
-    s.setProperty('--on-primary',personalLum(c.primary)<0.4?'#FFFFFF':'#111827');
-    s.setProperty('--page',c.bg);
-    s.setProperty('--card',c.card);
-    s.setProperty('--body',c.text);
-    s.setProperty('--title',darkText?personalMix(c.text,'#000000',0.3):personalMix(c.text,'#FFFFFF',0.3));
-    s.setProperty('--secondary',personalMix(c.text,c.bg,0.35));
-    s.setProperty('--muted',personalMix(c.text,c.bg,0.55));
-    s.setProperty('--line',personalMix(c.card,c.text,0.18));
-    s.setProperty('--line-soft',personalMix(c.card,c.text,0.08));
-    s.setProperty('--fill',personalMix(c.card,c.text,0.06));
-    s.setProperty('--fill-strong',personalMix(c.card,c.text,0.12));
-    s.setProperty('--nav-active',personalMix(c.primary,'#FFFFFF',0.88));
-    s.setProperty('--track',personalMix(c.card,c.text,0.06));
-    s.setProperty('--outline',personalMix(c.card,c.text,0.24));
-    s.setProperty('--focus-ring','0 0 0 3px '+c.primary+'29');
-    s.colorScheme=personalLum(c.bg)<0.4?'dark':'light';
+    for(const [k,v] of Object.entries(vars))s.setProperty(k,v);
+    const scheme=personalLum(c.bg)<0.4?'dark':'light';
+    s.colorScheme=scheme;
+    personalThemeActive=true;
+    writeThemeSnapshot({personal:{username,vars,scheme}});
     return;
   }
   clearPersonalVars();
   const preset=SITE_THEME_KEYS.includes(String(p.preset||''))?String(p.preset||''):'';
   if(preset)root.dataset.theme=preset;else delete root.dataset.theme;
+  personalThemeActive=true;
+  writeThemeSnapshot({personal:{username,preset}});
 }
-(async()=>{try{const meCached=sessionCached();if(meCached&&meCached.personal)applyPersonalTheme(apiCache.get('prefs'));}catch{}})();
+(async()=>{try{const meCached=sessionCached();const prefs=apiCache.get('prefs');if(meCached&&meCached.personal&&prefs)applyPersonalTheme(prefs,meCached.personal.username);}catch{}})();
 /* 页面预取（v3.6.1）：进站空闲时把前台三个页面提前拉进 HTTP 缓存，
    点导航时省一次整页下载（JS/CSS 早已长缓存，剩下的延迟主要就是文档本身）。
    浏览器开了"省流"或 2G 类慢网时不做，别跟学生抢流量；后台页签切换不换页，无此需求。 */
@@ -234,6 +283,20 @@ async function powProof(action){return withVerification(async()=>{const{pow:p}=a
 async function bootGate(){
   const form=$('#gateForm'), msg=$('#gateMessage'), input=$('#gatePassword');
   input.focus();
+  /* 口令框默认用圆点遮罩；右侧小眼睛只切换遮罩，不改变 type=text，
+     所以手机键盘始终是能输入中文的普通键盘。 */
+  const eyeBtn=$('#toggleGatePassword');
+  if(eyeBtn){
+    eyeBtn.onclick=()=>{
+      const masked=input.classList.toggle('password-mask');
+      eyeBtn.setAttribute('aria-pressed',String(!masked));
+      eyeBtn.setAttribute('aria-label',masked?'显示口令':'隐藏口令');
+      const eye=eyeBtn.querySelector('[data-eye]'), off=eyeBtn.querySelector('[data-eye-off]');
+      if(eye)eye.hidden=!masked;
+      if(off)off.hidden=masked;
+      input.focus();
+    };
+  }
   form.addEventListener('submit',async e=>{
     e.preventDefault();
     const b=$('button[type=submit]',form);
@@ -262,10 +325,35 @@ async function bootGate(){
 async function session(){ /* v3.6.2 me 直出：成功的身份存本地，下次打开先按它渲染、再后台校正
   （未登录/会话失效时 api 层的 401 流程照旧弹"登录已过期"；直出只是省掉"等 me 回来才敢画页面"的空白）。
   拿到 401 时把缓存清成 null：否则每次打开都会先闪一下已登录界面、再弹一次过期框。 */
-  try{const me=await api('/api/me',{quiet401:true});window.__me=me;apiCache.set('me',me);if(me&&me.personal)void syncPersonalTheme();return me;}catch{try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}return null;} }
+  try{
+    const me=await api('/api/me',{quiet401:true});
+    window.__me=me;apiCache.set('me',me);
+    if(me&&me.personal){
+      const prefs=apiCache.get('prefs');
+      if(prefs)applyPersonalTheme(prefs,me.personal.username);
+      void syncPersonalTheme();
+    }else{
+      clearPersonalThemeSnapshot();
+      clearPersonalVars();
+      applySiteTheme(localStorage.getItem('site_theme')||'');
+    }
+    return me;
+  }catch{
+    try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}
+    clearPersonalThemeSnapshot();
+    return null;
+  } }
 /* 个人主题同步（MD3 项目）：把本人配色拉回来应用；60 秒内用本地缓存（留存加载同款机制），
    拿不到就维持当前外观（全局主题照常）。 */
-async function syncPersonalTheme(){try{const cached=apiCache.fresh('prefs',60000);if(cached){applyPersonalTheme(cached);return;}const d=await api('/api/prefs',{quiet401:true});apiCache.set('prefs',d);applyPersonalTheme(d);}catch{}}
+async function syncPersonalTheme(){
+  try{
+    const who=(window.__me&&window.__me.personal&&window.__me.personal.username)||'';
+    const cached=apiCache.fresh('prefs',60000);
+    if(cached){applyPersonalTheme(cached,who);return;}
+    const d=await api('/api/prefs',{quiet401:true});
+    apiCache.set('prefs',d);applyPersonalTheme(d,who);
+  }catch{}
+}
 /** 上次成功拿到、且不太旧（24 小时）的身份 —— 用于首屏直出，不发给服务端。 */
 function sessionCached(){return apiCache.fresh('me',24*3600*1000);}
 /* 首屏直出：有缓存身份就先按它画（零等待），返回 true；没有就让调用方照旧 await。 */
@@ -362,7 +450,7 @@ async function loadRanks(fresh){/* 留存加载（v3.6.1）：上一次的榜单
 async function reportSong(id){if(!await uiConfirm('确认举报这首歌曲？',{title:'举报歌曲',ok:'确认举报'}))return;try{const[fp,recaptcha_token]=await Promise.all([fingerprint(),recaptchaToken('report')]);await api('/api/report',{method:'POST',body:JSON.stringify({id:Number(id),reason:'',fingerprint:fp,client_id:fp,recaptcha_token})});toast('举报已提交');}catch(e){toast(e.message);}}
 async function preview(track,title,artist,container){if(!container)return;stopAllPlayers();container.innerHTML='<span class="muted">正在准备试听…</span>';try{let id=track;if(!id){const d=await api(`/api/music?q=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);id=(d.results||[]).find(x=>x.id)?.id;}if(!id){container.innerHTML='<span class="muted">没有可试听的音源</span>';return;}const check=await api(`/api/music?check=${encodeURIComponent(id)}`);if(check.playable===false){container.innerHTML='<span class="muted">该版本暂时无法试听</span>';return;}container.innerHTML=`<audio controls autoplay preload="none" src="/api/music?play=${encodeURIComponent(id)}"></audio>`;registerPlayer(container.querySelector('audio'));}catch(e){container.innerHTML=`<span class="message">${esc(e.message)} <button class="btn" data-retry>重试</button></span>`;container.querySelector('[data-retry]').onclick=()=>preview(track,title,artist,container);}}
 async function vote(id){const block=classBlockReason('vote');if(block){toast(block);return;}const b=$(`[data-vote="${id}"]`);if(b){b.disabled=true;b.querySelector('[data-vote-label]').textContent='正在提交…';}try{const[fp,recaptcha_token,pow]=await Promise.all([fingerprint(),recaptchaToken('upvote'),powProof('upvote')]);const r=await api('/api/upvote',{method:'POST',body:JSON.stringify({id:Number(id),fingerprint:fp,client_id:fp,recaptcha_token,pow,request_id:crypto.randomUUID?.()||String(Date.now())})});toast(r.duplicate?'这次投票已记录，没有重复计票':'投票成功');await loadRanks(true);/* 自己的票要立刻看到：绕开边缘缓存 */}catch(e){toast(e.message);}finally{if(b&&b.isConnected){b.disabled=false;b.querySelector('[data-vote-label]').textContent='支持这首';}}}
-async function logout(){try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}/* 主动退出也要清掉直出缓存（含个人配色），否则回首页会先闪已登录界面 *//* 4.0.0：只退学生会话，不影响同一浏览器里的后台登录 */await fetch('/api/logout?subject=class',{method:'POST',credentials:'same-origin'});location.href='/';}
+async function logout(){try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}clearPersonalThemeSnapshot();/* 主动退出也要清掉直出缓存（含个人配色），否则回首页会先闪已登录界面 *//* 4.0.0：只退学生会话，不影响同一浏览器里的后台登录 */await fetch('/api/logout?subject=class',{method:'POST',credentials:'same-origin'});location.href='/';}
 /* 后台退出：只退管理员会话，回后台登录页；不碰学生身份。 */
 async function adminLogout(){try{apiCache.set('me',null);apiCache.set('prefs',null);}catch{}await fetch('/api/logout?subject=admin',{method:'POST',credentials:'same-origin'});location.href='/admin7318434';}
 function renderTrackChoices(tracks,container,onPick){container.innerHTML=tracks.map((x,i)=>`<article class="song track-option"><div><b>${esc(x.name||x.title)}</b><small class="muted">${esc(x.artist||'未知歌手')} · ${esc(x.album||'')}</small><div class="song-actions"><button class="btn primary" type="button" data-pick="${i}">选择此版本</button><button class="btn quiet" type="button" data-track-preview="${i}">试听版本</button></div><div id="result-player-${i}"></div></div><span class="muted">${esc(x.source||'')}${x.duration?` · ${Math.floor(x.duration/60)}:${String(x.duration%60).padStart(2,'0')}`:''}${x.playable===false?' · 暂不可播':x.playable===true?' · 可试听':''}</span></article>`).join('');$$('[data-pick]',container).forEach(b=>b.onclick=()=>onPick(tracks[Number(b.dataset.pick)]));$$('[data-track-preview]',container).forEach(b=>b.onclick=()=>{const x=tracks[Number(b.dataset.trackPreview)];preview(x.id,x.name||x.title,x.artist,$(`#result-player-${b.dataset.trackPreview}`,container));});}
@@ -687,7 +775,7 @@ async function adminClasses(){const box=$('#adminRows');try{
     <section class="settings-card"><h3>新增班级</h3>
       <form id="classAddForm" class="settings-form">
         <input class="input" id="newClassName" maxlength="30" placeholder="班级名称" required>
-        <input class="input" id="newClassPassword" type="password" minlength="6" placeholder="初始口令（至少 6 位）" required>
+        <input class="input password-mask" id="newClassPassword" type="text" minlength="6" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="初始口令（至少 6 位）" required>
         <input class="input" id="newClassGrade" maxlength="20" placeholder="年级（选填，如高一）">
         <input class="input" id="newClassCount" type="number" min="0" max="10000" placeholder="班级人数（选填）">
         <input class="input" id="newClassVoteLimit" placeholder="投票上限：如 52 或 如 x*0.25（选填）">
@@ -707,7 +795,7 @@ async function adminClasses(){const box=$('#adminRows');try{
         <button class="btn quiet">保存配置</button>
       </form>
       <form class="settings-form" data-class-password="${c.id}">
-        <input class="input" type="password" minlength="6" placeholder="修改班级口令">
+        <input class="input password-mask" type="text" minlength="6" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="修改班级口令">
         <button class="btn quiet">更新口令</button>
       </form>
       <div class="settings-form">

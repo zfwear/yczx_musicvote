@@ -33,7 +33,9 @@ const COLS = 'id, class_id, username, created_at';
  * 返回 null 表示"这不像个人口令"，调用方照旧走其它登录路径。
  */
 export function parsePersonalLogin(secret) {
-  const s = String(secret ?? '');
+  // 中文输入法常把半角 @ 打成全角 ＠；对个人登录等价处理，避免“看起来输对了
+  // 却一直提示口令错误”。班级口令的整串匹配在调用方先做，不受这里影响。
+  const s = String(secret ?? '').replace(/＠/g, '@');
   const at = s.indexOf('@');
   if (at <= 0 || at === s.length - 1) return null;
   const prefix = s.slice(0, at);

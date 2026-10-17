@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>/* theme-boot */(function(){try{var root=document.documentElement;var snap=null;try{snap=JSON.parse(localStorage.getItem("rl_theme_v1")||"null");}catch(e){}var site=(snap&&snap.site)||localStorage.getItem("site_theme")||"";var p=(snap&&snap.personal)||null;var path=(location.pathname||"/").replace(/\.html$/i,"").replace(/\/+$/,"")||"/";var personalPage=path==="/"||path==="/index"||path==="/vote"||path==="/schedule"||path==="/suggest"||path==="/preferences";var cachedUser="";try{var me=JSON.parse(localStorage.getItem("yczxc_v1_me")||"null");cachedUser=(me&&me.d&&me.d.personal&&me.d.personal.username)||"";}catch(e){}if(!personalPage||!p||!cachedUser||p.username!==cachedUser)p=null;if(p&&p.vars){root.removeAttribute("data-theme");for(var k in p.vars){if(Object.prototype.hasOwnProperty.call(p.vars,k)){try{root.style.setProperty(k,p.vars[k]);}catch(e){}}}root.style.colorScheme=p.scheme||"";}else if(p&&Object.prototype.hasOwnProperty.call(p,"preset")){if(p.preset)root.setAttribute("data-theme",p.preset);else root.removeAttribute("data-theme");}else if(site){root.setAttribute("data-theme",site);}}catch(e){}})();</script>
   <title>版本建议 · 盐中之声</title>
   <link rel="icon" href="/assets/ico.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/css/app.css?v=4.0.0.3">
+  <link rel="stylesheet" href="/assets/css/app.css?v=4.0.0.4">
 </head>
 <body data-app-ver="4.0.0">
   <div class="shell">
@@ -43,7 +44,7 @@
       <div class="site-version">版本 4.0.0</div>
     </footer>
   </div>
-  <script src="/assets/js/app.js?v=4.0.0.3"></script>
+  <script src="/assets/js/app.js?v=4.0.0.4"></script>
 <script>setTimeout(function(){if(!window.__appJsLoaded){var m=document.querySelector('#adminMessage, #gateMessage, #suggestMessage, #voteMessage, #regMsg, #weeks, #rankList');if(m){m.textContent='页面脚本没有加载成功：请按 Ctrl+F5 强制刷新；若仍不行，说明本地服务器没在运行——双击 start-preview.cmd 启动后重试。';}else{document.body.insertAdjacentHTML('afterbegin','<p style="padding:12px 16px;background:#FEF3C7;color:#92400E;font:13px/1.6 sans-serif">页面脚本没有加载成功：请按 Ctrl+F5 强制刷新（本地预览需先启动服务器）。</p>');}}},2500);</script>
 </body>
 </html>

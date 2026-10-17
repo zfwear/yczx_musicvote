@@ -139,6 +139,28 @@ input, select, textarea { font-family: inherit; }
    用 WebKit 的 text-security 做视觉遮罩（Chromium/Safari 支持）；
    不支持该属性的浏览器会显示明文，但中文输入正常工作。 */
 .password-mask { -webkit-text-security: disc; text-security: disc; }
+/* 口令框右侧的显示/隐藏小眼睛：独立按钮，不压在输入框上（按钮审计红线） */
+.password-field { display: flex; align-items: center; gap: 8px; }
+.password-field .input { flex: 1 1 auto; min-width: 0; }
+.password-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-btn);
+  background: var(--page);
+  color: var(--secondary);
+  cursor: pointer;
+}
+.password-toggle:hover { background: var(--fill); color: var(--title); border-color: var(--secondary); }
+.password-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.password-toggle svg { width: 20px; height: 20px; }
+/* SVG 元素上的 hidden 属性在部分浏览器不生效，显式隐藏。 */
+.password-toggle svg[hidden] { display: none; }
 
 /* ---------- 布局 ---------- */
 .shell {

@@ -59,10 +59,14 @@ export function parseFingerprint(input) {
   return { ok: true, value };
 }
 
-/** 口令类字段：只做长度和类型检查，绝不改写内容。 */
+/**
+ * 口令类字段：做长度/类型检查，并统一去掉零宽字符、做 NFC 归一化。
+ * 中文输入法可能插入不可见字符或输出组合字符；后台添加的口令与登录时
+ * 输入的口令必须按同一个字符串比较。纯 ASCII 口令完全不受影响。
+ */
 export function parseSecret(input, { min = 6, max = 128, field = '口令' } = {}) {
   if (typeof input !== 'string') return { ok: false, error: `${field}格式不正确` };
-  const value = input.trim();
+  const value = input.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().normalize('NFC');
   if (value.length < min) return { ok: false, error: `${field}至少 ${min} 位` };
   if (value.length > max) return { ok: false, error: `${field}最多 ${max} 位` };
   return { ok: true, value };
