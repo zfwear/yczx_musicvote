@@ -37,6 +37,7 @@ export async function onRequestGet(context) {
 
   const canView = hasPrivatePepper(env);
   const pepper = authPepper(env);
+  const isSuper = auth.session.role === 'super';
 
   let rows;
   try {
@@ -79,45 +80,55 @@ export async function onRequestGet(context) {
   let personalPasses = [];
   let classes = [];
   let personalReady = true;
-  try {
-    const { results: prows } = await env.DB.prepare(
-      `SELECT p.id, p.class_id, p.username, p.created_at,
-              c.name AS class_name, c.password_encrypted AS class_enc
-         FROM personal_passes p LEFT JOIN classes c ON c.id = p.class_id
-        ORDER BY p.id DESC LIMIT 500`
-    ).all();
-    for (const row of prows || []) {
-      let prefix = null;
-      if (canView && row.class_enc) {
-        try { prefix = await decryptSecret(pepper, row.class_enc); } catch { prefix = null; }
+  let personalForbidden = false;
+  if (!isSuper) {
+    // 年级名单是敏感数据（2026-10-17 用户强调）：普通管理员可以管理
+    // 测试/游客口令，但看不到个人口令的用户名，也拿不到班级人员名单。
+    personalForbidden = true;
+  } else {
+    try {
+      const { results: prows } = await env.DB.prepare(
+        `SELECT p.id, p.class_id, p.username, p.created_at,
+                c.name AS class_name, c.password_encrypted AS class_enc
+           FROM personal_passes p LEFT JOIN classes c ON c.id = p.class_id
+          ORDER BY p.id DESC LIMIT 500`
+      ).all();
+      for (const row of prows || []) {
+        let prefix = null;
+        if (canView && row.class_enc) {
+          try { prefix = await decryptSecret(pepper, row.class_enc); } catch { prefix = null; }
+        }
+        personalPasses.push({
+          id: row.id,
+          class_id: Number(row.class_id) || 0,
+          class_name: row.class_name || null,
+          username: row.username,
+          created_at: row.created_at,
+          prefix,
+          unbound: Number(row.class_id) <= 0,
+        });
       }
-      personalPasses.push({
-        id: row.id,
-        class_id: Number(row.class_id) || 0,
-        class_name: row.class_name || null,
-        username: row.username,
-        created_at: row.created_at,
-        prefix,
-        unbound: Number(row.class_id) <= 0,
-      });
-    }
-    const { results: cls } = await env.DB.prepare('SELECT id, name, password_encrypted FROM classes ORDER BY id').all();
-    for (const c of cls || []) {
-      let pw = null;
-      if (canView && c.password_encrypted) {
-        try { pw = await decryptSecret(pepper, c.password_encrypted); } catch { pw = null; }
+      const { results: cls } = await env.DB.prepare('SELECT id, name, password_encrypted FROM classes ORDER BY id').all();
+      for (const c of cls || []) {
+        let pw = null;
+        if (canView && c.password_encrypted) {
+          try { pw = await decryptSecret(pepper, c.password_encrypted); } catch { pw = null; }
+        }
+        classes.push({ id: c.id, name: c.name, password: pw });
       }
-      classes.push({ id: c.id, name: c.name, password: pw });
-    }
-  } catch (err) {
-    if (/no such table/i.test(String((err && err.message) || ''))) {
-      personalReady = false;      // 016 未执行：个人口令功能整体不可用
-    } else {
-      throw err;
+    } catch (err) {
+      if (/no such table/i.test(String((err && err.message) || ''))) {
+        personalReady = false;      // 016 未执行：个人口令功能整体不可用
+      } else {
+        throw err;
+      }
     }
   }
 
-  return json({ ok: true, canView, passes, personalPasses, classes, personalReady });
+  return json({
+    ok: true, canView, passes,
+    personalPasses, classes, personalReady, personalForbidden,
+  });
 }
 
 export async function onRequestPost(context) {
@@ -129,6 +140,13 @@ export async function onRequestPost(context) {
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
   const data = parsed.value;
+
+  // 年级名单是敏感数据：普通管理员可以发放测试/游客口令，但不能新增、
+  // 删除、重新绑定个人口令（那等于间接改写年级名单）。
+  const personalAction = ['create_personal', 'delete_personal', 'rebind_personal'].includes(String(data.action || ''));
+  if (personalAction && auth.session.role !== 'super') {
+    return error('个人口令管理仅高级管理员可用', 403);
+  }
 
   try {
     if (data.action === 'create') return await createPass(env, data);

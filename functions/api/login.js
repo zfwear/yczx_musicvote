@@ -12,7 +12,7 @@ import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.js';
 import { findUsablePassByLookup, passSessionTtlSeconds, PASS_LABELS } from '../../_lib/passes.js';
 import {
-  parsePersonalLogin, findPersonalByClassAndName, findUnboundByName,
+  parsePersonalLogin, findPersonalByClassAndName,
   isPersonalBanned, UNBOUND_PREFIX,
 } from '../../_lib/personal.js';
 import { ensureDeviceIdentity } from '../../_lib/device.js';
@@ -254,17 +254,13 @@ async function handleLoginPost(context) {
   // （字符集不含 @，拆分无歧义）。命中后签发**学生侧会话**：
   // subject_id = 绑定班级 —— 投票/投稿/班级上限与班级成员完全一致，
   // 原有投票统计代码零改动；personal_pass_id 只标记"是不是个人用户 + 精确撤销"。
-  // yczxuser 是保留前缀（未绑定态显示用），单独给一句"班级已被删除"的明确提示。
+  // 年级名单防泄露（2026-10-17 用户强调）：个人口令登录失败一律回同一句
+  // 「口令错误」，不再区分“姓名不存在 / 已被封禁 / 班级已删未绑定 / 设备冲突”。
+  // 任何不同的错误文案都会变成“这个名字在不在名单里”的探测口。
+  // yczxuser 是保留前缀（未绑定态显示用），直接按普通失败处理，不查库、不提示。
   if (!matched) {
     const personal = parsePersonalLogin(secret.value);
-    if (personal) {
-      if (personal.prefix === UNBOUND_PREFIX) {
-        // 未绑定态（决策 8）：暂不可登录，但要说清楚"为什么"。
-        const orphan = await findUnboundByName(env, personal.username);
-        if (orphan) {
-          return error('这条个人口令的班级已被删除，暂不可登录；请联系广播站管理员重新绑定班级', 403);
-        }
-      } else {
+    if (personal && personal.prefix !== UNBOUND_PREFIX) {
         const pLookup = await classPasswordLookup(env, personal.prefix);
         let pRow = await env.DB.prepare(
           'SELECT id, name, password FROM classes WHERE password_lookup = ?'
@@ -285,15 +281,16 @@ async function handleLoginPost(context) {
         if (pRow) {
           const pp = await findPersonalByClassAndName(env, pRow.id, personal.username);
           if (pp) {
-            // 017：封禁人员不能登录（前端提示与这里同一句）。
+            // 017：封禁人员不能登录。错误与“姓名不存在”完全同形，避免探测名单。
             if (await isPersonalBanned(env, pp.id)) {
-              return error('该姓名已被封禁，请联系广播站管理员', 403);
+              return error('口令错误', 401);
             }
 
             // 017：设备-姓名绑定。规则见 _lib/device.js 顶部注释：
             // 同一设备在同一班级只能登一个姓名，登录时锁定，三天后解锁；
             // 一个姓名可以登录多台设备。前端登录页会带 fingerprint；
             // 老客户端/测试没带时跳过绑定（不因此拒绝登录）。
+            // 设备冲突也回「口令错误」：否则它同样能确认“这个名字存在”。
             const fp = parseFingerprint(parsed.value.fingerprint);
             if (fp.ok) {
               const bind = await ensureDeviceIdentity(env, {
@@ -302,7 +299,7 @@ async function handleLoginPost(context) {
                 username: personal.username,
               });
               if (bind.conflict) {
-                return error('这台设备近三天已绑定本班的其他姓名，请更换设备，或等三天后再试', 403);
+                return error('口令错误', 401);
               }
             }
 
@@ -327,7 +324,6 @@ async function handleLoginPost(context) {
             );
           }
         }
-      }
     }
   }
 

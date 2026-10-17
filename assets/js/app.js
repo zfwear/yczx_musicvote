@@ -29,6 +29,11 @@ const api = async (url, options={}) => { const {quiet401=false,...init}=options;
   let r; try{ r=await fetch(target,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(init.headers||{})},...init}); }catch(err){ throw new Error('连不上后台服务——若你是"直接双击打开页面"预览的，请改用 server.mjs 启动本地服务器（见交付说明）'); }
   try{const nk=r.headers.get('X-Cache-Key');if(nk)edgeKeySave(nk);}catch{/* 读不到头就算了 */}
   let d={}; try{d=await r.json();}catch{} if(r.status===401){
+  /* 登录/探测类请求（quiet401）保留服务端的具体原因：
+     登录口令错就是「口令错误」，管理员密码错就是「账号或密码错误」，
+     不能一律改写成「登录已过期」。这里必须放在后台 401 分支之前 ——
+     登录表单本身也在 admin-page 里，放后面会把密码错误误报成会话过期。 */
+  if(quiet401) throw new Error(d.error||'登录已过期，请重新登录');
   /* 4.0.0 前后台分离：后台接口 401 只回后台登录表单，
      绝不跳前台登录页，也不调用 /api/logout（那会连学生会话一起清掉）。 */
   if(document.body&&document.body.classList.contains('admin-page')){
@@ -36,7 +41,7 @@ const api = async (url, options={}) => { const {quiet401=false,...init}=options;
     setTimeout(()=>{api.sessionPrompted=false;},3000);
     throw new Error('后台登录已过期，请重新登录');
   }
-  if(!quiet401&&!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){/* 先把服务端会话与两种身份的 Cookie 一起清掉（logout 幂等，永远 200）——
+  if(!api.sessionPrompted){api.sessionPrompted=true;toast('登录已过期，请重新登录');if(await uiConfirm('需要重新登录。\n按「回到登录页」重新输入口令，按「留在本页」继续浏览。',{title:'登录已过期',ok:'回到登录页',cancel:'留在本页'})){/* 先把服务端会话与两种身份的 Cookie 一起清掉（logout 幂等，永远 200）——
    这一步就是"登出后再登录提示会话过期、只能手动清 Cookie"那类死锁的解药：
    回到登录页之前凭证已经被主动作废，不会留着一份过期的旧会话继续捣乱。 */
     try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});}catch{}try{sessionStorage.setItem('loginNotice','登录已过期，请重新输入班级口令。');}catch{}location.href='/login';return;}setTimeout(()=>{api.sessionPrompted=false;},3000);}throw new Error('登录已过期，请重新登录');}if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）')); return d; };
@@ -818,6 +823,14 @@ function openBatchAdd(classId,className){
 /** 班级人员页：搜索才出结果；选中后右侧执行编辑/移除/封禁/解绑设备。 */
 async function adminMembers(){
   const box=$('#adminRows');
+  // 年级名单是敏感数据：连搜索入口都只给高级管理员。
+  try{
+    const cfg=await api('/api/admin-settings');
+    if(!cfg.security||cfg.security.isSuper!==true){
+      box.innerHTML='<p class="notice">班级人员名单仅高级管理员可查看；普通管理员仍可管理测试口令与游客口令。</p>';
+      return;
+    }
+  }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;return;}
   const state={q:'',rows:[],selected:null};
   box.innerHTML=`<div class="toolbar">
       <label class="field">搜索人员<input class="input" id="memberSearch" maxlength="40" placeholder="输入姓名或班级关键词"></label>
@@ -984,7 +997,7 @@ async function adminPasses(){const box=$('#adminRows');try{
   });
 
   /* ---- 个人口令（MD3 项目 决策 8/9/10）：嵌在同一个「口令管理」页，不新建页面 ---- */
-  const pbox=document.createElement('section');pbox.className='pref-section';pbox.innerHTML=personalSectionHtml(d);box.append(pbox);wirePersonalSection(pbox,d);
+  const pbox=document.createElement('section');pbox.className='pref-section';pbox.innerHTML=personalSectionHtml(d);box.append(pbox);if(!d.personalForbidden)wirePersonalSection(pbox,d);
 }catch(e){box.innerHTML=`<p class="message">${esc(e.message)}</p>`;}}
 
 /* ---- 个人口令区（管理员「口令管理」内嵌；MD3 项目 决策 8/9/10） ---- */
@@ -993,6 +1006,9 @@ async function adminPasses(){const box=$('#adminRows');try{
 const UNBOUND_PREFIX_UI='yczxuser';
 
 function personalSectionHtml(d){
+  if(d.personalForbidden){
+    return `<h3>个人口令</h3><p class="muted">班级人员名单仅高级管理员可查看；测试口令与游客口令仍可在本页管理。</p>`;
+  }
   const rows=d.personalPasses||[];
   if(d.personalReady===false){
     return `<h3>个人口令</h3><p class="muted">数据库尚未执行 016 迁移（缺少个人口令表）。在 D1 控制台执行 sql/016_personal_passes.sql 后，本区即可使用。</p>`;

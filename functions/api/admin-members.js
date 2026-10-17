@@ -1,5 +1,5 @@
 import { readJson, error, json } from '../../_lib/http.js';
-import { requireStaff, requireSuper, revokeSessionsByPersonalPass } from '../../_lib/auth.js';
+import { requireSuper, revokeSessionsByPersonalPass } from '../../_lib/auth.js';
 import { parsePositiveInt } from '../../_lib/validate.js';
 import {
   PERSONAL_USERNAME_RE, getPersonalById, renamePersonalPass,
@@ -42,7 +42,9 @@ function splitNames(input) {
 export async function onRequestGet(context) {
   const { request, env } = context;
 
-  const auth = await requireStaff(env, request);
+  // 年级名单是敏感数据（2026-10-17 用户强调）：搜索也只给高级管理员。
+  // 普通管理员连“按关键词试出来”的入口都没有。
+  const auth = await requireSuper(env, request);
   if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);

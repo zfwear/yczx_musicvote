@@ -1461,19 +1461,20 @@ payload = {"t":歌名, "a":歌手, "k":音源id, "e":过期时间戳(秒)}
 1. **`POST /api/login`**
    - body 新增可选 `fingerprint`（16~64 位十六进制）。用「班级口令@姓名」登录时，
      服务端据此建立「设备 → 班级+姓名」绑定，三天内同设备同班不能换姓名；
-     一个姓名可以登录多台设备。冲突返回 403。
+     一个姓名可以登录多台设备。冲突返回 401（与“姓名不存在”同形，避免探测名单）。
    - **纯班级口令（不带 `@`）**：默认不再签发完整班级身份，而是返回
      `{ ok:true, guest:true, need_name:true, class_name:"游客模式" }` 并下发只读会话。
      前端据此弹「回登录页重输 / 游客浏览」。
      测试或本地预览可设 `ALLOW_PLAIN_CLASS_LOGIN=1` 保留旧行为；生产不要设。
    - 姓名登录成功额外返回 `personal:true`、`username`、`device_bound`。
-   - 被封禁的姓名返回 403（017 的 `personal_passes.banned`）。
+   - 被封禁 / 未绑定 / 设备冲突等个人口令失败一律返回 401「口令错误」，
+     不确认某个姓名是否存在（年级名单防泄露）。
 
 2. **`POST /api/logout?subject=class|admin`**
    - 只退指定一侧；不带 `subject` 时保持旧行为（两边都退）。
    - 前台退出用 `class`，后台退出用 `admin`，互不影响。
 
-3. **`GET /api/admin-members?q=<关键词>`**（普通管理员可读）
+3. **`GET /api/admin-members?q=<关键词>`**（仅高级管理员）
    - 按姓名或班级名模糊搜索个人口令名单，默认不返回全量；结果含
      `id / class_id / class_name / username / banned / created_at`。
 
@@ -1507,3 +1508,13 @@ payload = {"t":歌名, "a":歌手, "k":音源id, "e":过期时间戳(秒)}
 9. **主题**
    - `SITE_THEMES` 扩展为 11 个键位：`'' / mono / mint / beige / lavender /
      marrs / klein / cream / gold / taro / xuan`；后三个为深色主题。
+
+10. **年级名单保护（2026-10-17 用户强调）**
+   - `GET/POST /api/admin-members` 仅高级管理员；普通管理员即使知道接口也返回 403。
+   - `GET /api/admin-passes` 对普通管理员返回 `personalForbidden:true`、`personalPasses:[]`、
+     `classes:[]`；测试/游客口令仍可管理。`create_personal/delete_personal/rebind_personal`
+     三个 POST 动作也仅高级管理员可用。
+   - 前端「班级管理」页和「口令管理」里的个人口令区对普通管理员显示权限提示，不渲染名单。
+   - 登录失败统一 401「口令错误」；封禁、未绑定、设备冲突不再返回可区分文案。
+   - 年级名单的 xlsx/txt 只保存在本地 `D:\zfff\文档`，**不进入网站仓库、交付夹或 zip**；
+     上传前不要把这些文件一起拖进 Pages。
