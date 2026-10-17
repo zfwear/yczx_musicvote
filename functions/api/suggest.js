@@ -29,6 +29,30 @@ export async function onRequestGet(context) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
+
+  // 4.0.0：后台「版本建议」页要按建议逐条展示（内容 + 歌曲名），
+  // 不再先列全部歌曲再点「查看建议」。只返回**有待处理建议**的歌曲，
+  // 没有建议的歌曲不会出现 —— 与用户 2026-10-17 的要求一致。
+  if (url.searchParams.get('all') === '1') {
+    try {
+      const { results } = await env.DB.prepare(
+        `SELECT s.id, s.song_id, s.content, s.created_at, s.class_id,
+                cl.name AS class_name,
+                so.title AS song_title, so.artist AS song_artist
+           FROM song_suggestions s
+           LEFT JOIN classes cl ON cl.id = s.class_id
+           LEFT JOIN songs so ON so.id = s.song_id
+          WHERE s.handled_at IS NULL
+          ORDER BY s.id DESC
+          LIMIT 500`
+      ).all();
+      return json({ suggestions: results || [] });
+    } catch (err) {
+      if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+      throw err;
+    }
+  }
+
   const songId = parsePositiveInt(url.searchParams.get('song_id'), { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);
 
@@ -116,6 +140,22 @@ export async function onRequestPut(context) {
 
   const parsed = await readJson(request);
   if (!parsed.ok) return error(parsed.error, 400);
+
+  // 4.0.0：支持按单条建议标记（后台版本建议页每条都有「已处理」），
+  // 不传 id 时保留旧的“按歌曲整组标记”行为，老调用方不受影响。
+  if (parsed.value.id !== undefined && parsed.value.id !== null && parsed.value.id !== '') {
+    const suggestionId = parsePositiveInt(parsed.value.id, { field: '建议' });
+    if (!suggestionId.ok) return error(suggestionId.error, 400);
+    try {
+      const result = await env.DB.prepare(
+        "UPDATE song_suggestions SET handled_at = datetime('now') WHERE id = ? AND handled_at IS NULL"
+      ).bind(suggestionId.value).run();
+      return json({ ok: true, handled: changedRows(result), message: '建议已标记为处理' });
+    } catch (err) {
+      if (isMissingTable(err)) return error(MIGRATION_HINT, 500);
+      throw err;
+    }
+  }
 
   const songId = parsePositiveInt(parsed.value.song_id, { field: '歌曲' });
   if (!songId.ok) return error(songId.error, 400);

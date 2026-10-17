@@ -62,8 +62,18 @@ export const SETTING_SUBMISSIONS_PAUSED = 'submissions_paused';
  */
 export const SETTING_SITE_THEME = 'site_theme';
 
-/** 全站主题取值集合（含个人偏好页与后台主题页共用的五个键位）。 */
-export const SITE_THEMES = ['', 'mono', 'mint', 'beige', 'lavender'];
+/**
+ * 全站主题取值集合（含个人偏好页与后台主题页共用）。
+ *
+ * 4.0.0（用户 2026-10-17）：旧五套全部保留，新增参考图六套 ——
+ * 马尔斯绿/玫瑰粉、克莱因蓝/蒂芙尼蓝、奶油黄/薰衣草、
+ * 荣耀金/曜石黑、香芋紫/墨黑、玄青/燕领红。
+ * 后三套是深色主题（color-scheme: dark）。
+ */
+export const SITE_THEMES = [
+  '', 'mono', 'mint', 'beige', 'lavender',
+  'marrs', 'klein', 'cream', 'gold', 'taro', 'xuan',
+];
 
 /** 主题显示名（后台消息与偏好页卡片共用，'' 也要有名字）。 */
 export const SITE_THEME_LABELS = {
@@ -72,6 +82,12 @@ export const SITE_THEME_LABELS = {
   mint: '薄荷青主题',
   beige: '暖米棕主题',
   lavender: '薰衣草浅紫主题',
+  marrs: '马尔斯绿 × 玫瑰粉',
+  klein: '克莱因蓝 × 蒂芙尼蓝',
+  cream: '奶油黄 × 薰衣草',
+  gold: '荣耀金 × 曜石黑',
+  taro: '香芋紫 × 墨黑',
+  xuan: '玄青 × 燕领红',
 };
 
 /** 举报进入收件箱所需的"被举报次数"阈值。默认 3，可后台调整。 */

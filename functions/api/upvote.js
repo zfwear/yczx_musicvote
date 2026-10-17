@@ -1,8 +1,9 @@
 import { readJson, error, json, clientIp } from '../../_lib/http.js';
-import { requireSession, guardRate, denyGuest } from '../../_lib/auth.js';
+import { requireSession, guardRate, denyGuest, rateLimit } from '../../_lib/auth.js';
 import { parsePositiveInt, parseFingerprint } from '../../_lib/validate.js';
 import { changedRows } from '../../_lib/db.js';
 import { getClassLimits, countClassVoters } from '../../_lib/classconfig.js';
+import { ensureDeviceIdentity } from '../../_lib/device.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { verifyPow } from '../../_lib/pow.js';
 import { parseRequestId } from '../../_lib/idempotency.js';
@@ -113,15 +114,58 @@ export async function onRequestPost(context) {
   });
   if (flood) return flood;
 
+  // 017：设备-姓名绑定（登录时已落库，这里再校验一次）。
+  //
+  // 登录时锁定是第一道；这里补第二道，覆盖两种情况：
+  //   · 登录时没带指纹（老客户端）、之后投票才带；
+  //   · 同一个浏览器会话被换人使用，但指纹没变。
+  // 一个姓名可以登录多台设备，所以只在“同一设备、同一班级、不同姓名”时拒绝。
+  let personalUsername = '';
+  if (Number(auth.session.personal_pass_id) > 0) {
+    try {
+      const prow = await env.DB.prepare('SELECT username FROM personal_passes WHERE id = ?')
+        .bind(Number(auth.session.personal_pass_id)).first();
+      if (prow && prow.username) personalUsername = String(prow.username);
+    } catch { /* 016/017 未执行等：不阻断投票 */ }
+  }
+  if (personalUsername) {
+    const bind = await ensureDeviceIdentity(env, {
+      fingerprint: fingerprint.value,
+      classId,
+      username: personalUsername,
+    });
+    if (bind.conflict) {
+      return error('这台设备已被本班其他姓名绑定，不能替他人投票', 403);
+    }
+  }
+
+  // 投票冷却（4.0.0 需求）：同一设备 3 秒内只能提交一次。
+  // 与 30 次/小时的额度是两层：那层管总量，这层管“连点/脚本突刺”。
+  // 测试里显式设 ALLOW_FAST_VOTES=1 跳过，避免用例之间互相卡 3 秒。
+  if (String((env && env.ALLOW_FAST_VOTES) || '') !== '1') {
+    const cool = await rateLimit(env, `upvote-cool:${fingerprint.value}`, 1, 3);
+    if (!cool.allowed) return error('投票太快了，请等几秒再试', 429);
+  }
+
   const song = await env.DB.prepare(
     "SELECT id FROM songs WHERE id = ? AND status = 'pending'"
   ).bind(songId.value).first();
   if (!song) return error('这首歌不在待审核列表中', 404);
 
   // 原子占位：同一设备对同一首歌只能投一次，并发也只能成功一次。
-  const claim = await env.DB.prepare(
-    'INSERT OR IGNORE INTO upvote_logs (class_id, song_id, fingerprint) VALUES (?, ?, ?)'
-  ).bind(classId, songId.value, fingerprint.value).run();
+  // 017 起顺便记录姓名，供“封禁时清零该人员已投票数”精确回滚；
+  // 017 未执行（没有 username 列）时退回旧写法，不影响投票本身。
+  let claim;
+  try {
+    claim = await env.DB.prepare(
+      'INSERT OR IGNORE INTO upvote_logs (class_id, song_id, fingerprint, username) VALUES (?, ?, ?, ?)'
+    ).bind(classId, songId.value, fingerprint.value, personalUsername || null).run();
+  } catch (err) {
+    if (!/no such column/i.test(String((err && err.message) || ''))) throw err;
+    claim = await env.DB.prepare(
+      'INSERT OR IGNORE INTO upvote_logs (class_id, song_id, fingerprint) VALUES (?, ?, ?)'
+    ).bind(classId, songId.value, fingerprint.value).run();
+  }
 
   if (changedRows(claim) !== 1) {
     // 没抢到占位：要么是真的重复投票，要么是客户端把同一次请求重试了一遍。

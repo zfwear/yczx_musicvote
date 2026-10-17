@@ -5,25 +5,24 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>登录 · 盐中之声</title>
   <link rel="icon" href="/assets/ico.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/css/app.css?v=3.7.0.3">
+  <link rel="stylesheet" href="/assets/css/app.css?v=4.0.0">
 </head>
-<body data-app-ver="3.7.0">
+<body data-app-ver="4.0.0">
   <div class="shell">
     <section id="gateView" class="gate-wrap" hidden>
       <div class="gate">
         <img class="brand-mark" src="/assets/ico.svg" alt="盐中之声徽标">
-        <p class="kicker">YANCHENG RADIO / 02</p>
+        <p class="kicker kicker-case">YZstudent RadioLight</p>
         <h1>让下一首旋律，由你决定。</h1>
-        <p>北校区广播站点歌系统，输入班级口令开始探索。</p>
+        <p>北校区广播站点歌系统，输入游客口令或「班级口令@姓名」开始探索。</p>
         <form id="gateForm">
           <div class="field">
-            <label for="gatePassword">班级口令</label>
+            <label for="gatePassword">登录口令</label>
             <input id="gatePassword" class="input" type="password" placeholder="请输入口令" autocomplete="current-password">
-            <p class="hint">个人用户请输入：班级口令@用户名</p>
+            <p class="hint">游客口令可直接进入只读浏览；班级同学请输入「班级口令@姓名」正式登录（姓名需在年级名单内）。</p>
           </div>
           <div class="form-actions">
             <button class="btn primary" type="submit">进入</button>
-            <button class="btn" type="button" id="guestLogin">游客浏览</button>
           </div>
           <p id="gateMessage" class="message"></p>
         </form>
@@ -37,12 +36,11 @@
         <span class="beian-sep" aria-hidden="true">·</span>
         <a id="beianGongan" href="https://beian.mps.gov.cn/#/query/webSearch?code=32090302000745" target="_blank" rel="noopener noreferrer"><img src="/assets/gongan-badge.png" alt="" width="14" height="15"><span id="beianGonganText">苏公网安备32090302000745号</span></a>
       </div>
-      <div class="beian-copy">© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站</span> 版权所有 · 未经许可请勿转载或用于商业用途</div>
-      <div class="site-version">版本 3.7.0</div>
-      <a class="admin-entry" href="/admin7318434">管理入口</a>
+      <div class="beian-copy">© <span id="beianYear">2026</span> <span id="beianHolder">盐中之声广播站技术部</span>. All rights reserved.</div>
+      <div class="site-version">版本 4.0.0</div>
     </footer>
   </div>
-  <script src="/assets/js/app.js?v=3.7.0.3"></script>
+  <script src="/assets/js/app.js?v=4.0.0"></script>
 <script>setTimeout(function(){if(!window.__appJsLoaded){var m=document.querySelector('#adminMessage, #gateMessage, #suggestMessage, #voteMessage, #regMsg, #weeks, #rankList');if(m){m.textContent='页面脚本没有加载成功：请按 Ctrl+F5 强制刷新；若仍不行，说明本地服务器没在运行——双击 start-preview.cmd 启动后重试。';}else{document.body.insertAdjacentHTML('afterbegin','<p style="padding:12px 16px;background:#FEF3C7;color:#92400E;font:13px/1.6 sans-serif">页面脚本没有加载成功：请按 Ctrl+F5 强制刷新（本地预览需先启动服务器）。</p>');}}},2500);</script>
 </body>
 </html>

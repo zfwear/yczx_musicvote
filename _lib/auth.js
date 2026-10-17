@@ -935,16 +935,25 @@ export async function revokeCurrentDebugSession(env, request) {
   return session;
 }
 
-/** 清空 Cookie 的头：两种身份 + 旧名字一起清，避免残留。 */
-export function clearSessionCookies(request) {
+/**
+ * 清空 Cookie 的头。
+ *
+ * 4.0.0 前后台分离：`subject` 可选 'class' / 'admin'，只清那一侧；
+ * 不传时两种身份 + 旧名字一起清（保留旧行为，退出登录默认仍是全退）。
+ */
+export function clearSessionCookies(request, subject = null) {
   const secure = isSecureRequest(request);
-  return [SESSION_COOKIES.class, SESSION_COOKIES.admin, LEGACY_SESSION_COOKIE]
-    .map((name) => serializeCookie(name, '', {
-      maxAge: 0,
-      secure,
-      httpOnly: true,
-      sameSite: 'Lax',
-    }));
+  const names = subject === 'class'
+    ? [SESSION_COOKIES.class, LEGACY_SESSION_COOKIE]
+    : subject === 'admin'
+      ? [SESSION_COOKIES.admin]
+      : [SESSION_COOKIES.class, SESSION_COOKIES.admin, LEGACY_SESSION_COOKIE];
+  return names.map((name) => serializeCookie(name, '', {
+    maxAge: 0,
+    secure,
+    httpOnly: true,
+    sameSite: 'Lax',
+  }));
 }
 
 /**

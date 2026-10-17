@@ -14,9 +14,9 @@ import { SITE_THEMES } from '../../_lib/settings.js';
  *     整页拦截，这里是服务端真正的闸门）；
  *   · 只写"这个用户自己"的 (class_id, username) 行，**不碰全局站点主题
  *     （system_settings.site_theme），也不碰任何班级设置** —— 主题三层隔离；
- *   · 自定义配色在服务端**再查一遍对比度**（正文 vs 页面背景、正文 vs 卡片底，
- *     均需 ≥4.5:1，与前端同一套公式）—— 前端弹窗只是第一时间告诉用户，
- *     接口层不能依赖前端自觉。
+ *   · 自定义配色在服务端**再算一遍对比度**（正文 vs 页面背景、正文 vs 卡片底，
+ *     与前端同一套公式）。4.0.0 起只返回 warning，**不阻止保存** ——
+ *     用户总纲要求“仅给出对比度提示，不禁止应用主题”。
  *
  * 模式互斥（决策 12）：保存预设主题时把自定义配色清空；保存自定义配色时
  * preset 清空。互斥由这里统一保证，前端只负责展示。
@@ -94,18 +94,25 @@ export async function onRequestPost(context) {
     for (const k of ['primary', 'bg', 'card', 'text']) {
       if (!HEX.test(String(c[k] || ''))) return error('颜色值需要是 #RRGGBB 格式', 400);
     }
+    // 4.0.0（用户总纲）：对比度只提示、不阻止保存。
+    // 仍然在服务端算一遍（前端可能被绕过/关闭 JS），低对比度时把具体比值
+    // 放进 warning 返回，前端展示给用户参考；颜色照常落库。
     const r1 = ratio(c.text, c.bg);
     const r2 = ratio(c.text, c.card);
-    if (r1 < MIN_RATIO || r2 < MIN_RATIO) {
-      return error(
-        `对比度不足（需 ≥${MIN_RATIO}:1）：正文/页面背景 ${r1.toFixed(2)}、正文/卡片底 ${r2.toFixed(2)}。`
-        + '请把正文文字调深、或把背景/卡片调亮后重试',
-        400
-      );
-    }
+    const warning = (r1 < MIN_RATIO || r2 < MIN_RATIO)
+      ? `对比度偏低（建议 ≥${MIN_RATIO}:1）：正文/页面背景 ${r1.toFixed(2)}、正文/卡片底 ${r2.toFixed(2)}。`
+        + '已按你的选择保存，可随时回来调整。'
+      : '';
     const colors = { primary: String(c.primary), bg: String(c.bg), card: String(c.card), text: String(c.text) };
     await savePrefs(env, who.pass.class_id, who.pass.username, 'custom', '', JSON.stringify(colors));
-    return json({ ok: true, mode: 'custom', preset: '', colors, message: '自定义配色已保存' });
+    return json({
+      ok: true,
+      mode: 'custom',
+      preset: '',
+      colors,
+      warning,
+      message: warning ? '自定义配色已保存（对比度偏低，仅提示）' : '自定义配色已保存',
+    });
   }
 
   return error('mode 只能是 preset 或 custom', 400);

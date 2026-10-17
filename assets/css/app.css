@@ -17,6 +17,8 @@
   --primary: #2563EB;
   --primary-hover: #1D4ED8;
   --primary-soft: #EFF6FF;
+  --accent: #2563EB;
+  --accent-soft: #DBEAFE;
   --title: #111827;
   --body: #374151;
   --secondary: #6B7280;
@@ -60,6 +62,8 @@
     --primary: #3B82F6;
     --primary-hover: #60A5FA;
     --primary-soft: #1E3A8A;
+    --accent: #60A5FA;
+    --accent-soft: #1E3A8A;
     --title: #F9FAFB;
     --body: #D1D5DB;
     --secondary: #9CA3AF;
@@ -126,6 +130,9 @@ input, select, textarea { font-family: inherit; }
   color: var(--muted);
 }
 .message { margin: 8px 0 0; font-size: 13px; color: var(--secondary); }
+/* 登录页卡片顶部英文需要保留大小写（用户指定 YZstudent RadioLight），
+   不能被全局 .kicker 的 text-transform: uppercase 改成全大写。 */
+.kicker-case { text-transform: none; letter-spacing: .08em; }
 
 /* ---------- 布局 ---------- */
 .shell {
@@ -971,6 +978,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   --primary: #141414;
   --primary-hover: #000000;
   --primary-soft: #F0F0F0;
+  --accent: #141414;
+  --accent-soft: #EFEFEF;
   --title: #0A0A0A;
   --body: #262626;
   --secondary: #595959;
@@ -1199,6 +1208,8 @@ dialog.track-dialog {
   --primary: #0B8571;
   --primary-hover: #096B5C;
   --primary-soft: #DCF2EC;
+  --accent: #0B8571;
+  --accent-soft: #DCF2EC;
   --title: #0D2B25;
   --body: #12332C;
   --secondary: #4C7268;
@@ -1227,6 +1238,8 @@ dialog.track-dialog {
   --primary: #8F6238;
   --primary-hover: #774F2B;
   --primary-soft: #F2E5D2;
+  --accent: #C08A55;
+  --accent-soft: #F2E5D2;
   --title: #302518;
   --body: #3A2E22;
   --secondary: #6E5C44;
@@ -1255,6 +1268,8 @@ dialog.track-dialog {
   --primary: #7565B0;
   --primary-hover: #5F519B;
   --primary-soft: #EBE6F9;
+  --accent: #BE96CD;
+  --accent-soft: #F0E4F7;
   --title: #241E38;
   --body: #2F2A44;
   --secondary: #5F567F;
@@ -1303,3 +1318,232 @@ dialog.track-dialog {
 /* 审核操作的就地移除（v3.6.1）：点「通过 / 移入回收站 / 恢复 / 彻底删除」后
    该行淡出消失，不再整列表重拉重绘；管理员连续审核的节奏快一个量级。 */
 .admin-row.leaving { opacity: 0; transform: translateY(-6px); transition: opacity .18s ease, transform .18s ease; }
+
+/* ==========================================================================
+   v4.0.0 参考图六套主题
+   --------------------------------------------------------------------------
+   前三套浅色（马尔斯绿/克莱因蓝/奶油黄），后三套深色（荣耀金/香芋紫/玄青）。
+   与既有主题同一套做法：只覆盖颜色变量，布局、圆角、字号不动；
+   校徽与公安备案徽标是图片，不参与换色。
+   深色三套必须把 --outline / --state-* / 阴影 / glass 一并覆盖，
+   否则会串到系统深色媒体查询里的默认蓝色系。
+   ========================================================================== */
+:root[data-theme="marrs"] {
+  color-scheme: light;
+  --page: #F4FBF9; --card: #FFFFFF;
+  --line: #CFE8E3; --line-soft: #E6F4F1;
+  --fill: #E6F4F1; --fill-strong: #CFE8E3;
+  --primary: #01847F; --primary-hover: #016A66; --primary-soft: #DDF4F1;
+  --accent: #F9D2E4; --accent-soft: #FDEBF2;
+  --title: #033A37; --body: #0E4B47; --secondary: #4A7773; --muted: #84A5A1;
+  --danger: #B91C1C; --danger-hover: #991B1B; --on-primary: #FFFFFF;
+  --shadow-xs: 0 1px 2px rgba(3, 58, 55, .05);
+  --shadow-card: 0 1px 3px rgba(3, 58, 55, .06), 0 1px 2px rgba(3, 58, 55, .04);
+  --shadow-hover: 0 4px 12px rgba(3, 58, 55, .10), 0 1px 3px rgba(3, 58, 55, .05);
+  --shadow-pop: 0 12px 32px rgba(3, 58, 55, .16), 0 2px 8px rgba(3, 58, 55, .06);
+  --glass-bg: rgba(255, 255, 255, .82);
+  --chip: rgba(230, 244, 241, .72); --chip-hover: rgba(207, 232, 227, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(3, 58, 55, .07);
+  --glass-line: rgba(14, 75, 71, .08); --backdrop: rgba(3, 58, 55, .42);
+  --track: #E6F4F1; --seg-active: #FFFFFF; --nav-active: #DDF4F1;
+  --outline: #B9DAD4; --state-hover: rgba(3, 58, 55, .05); --state-press: rgba(3, 58, 55, .09);
+  --focus-ring: 0 0 0 3px rgba(1, 132, 127, .16);
+}
+:root[data-theme="klein"] {
+  color-scheme: light;
+  --page: #F3F6FF; --card: #FFFFFF;
+  --line: #D6E2FF; --line-soft: #E8EEFF;
+  --fill: #E8EEFF; --fill-strong: #D6E2FF;
+  --primary: #002CB0; --primary-hover: #00228F; --primary-soft: #E3EBFF;
+  --accent: #66D4C8; --accent-soft: #E0F7F4;
+  --title: #001A66; --body: #1B2B5C; --secondary: #4F6091; --muted: #8592B5;
+  --danger: #B91C1C; --danger-hover: #991B1B; --on-primary: #FFFFFF;
+  --shadow-xs: 0 1px 2px rgba(0, 26, 102, .05);
+  --shadow-card: 0 1px 3px rgba(0, 26, 102, .06), 0 1px 2px rgba(0, 26, 102, .04);
+  --shadow-hover: 0 4px 12px rgba(0, 26, 102, .10), 0 1px 3px rgba(0, 26, 102, .05);
+  --shadow-pop: 0 12px 32px rgba(0, 26, 102, .16), 0 2px 8px rgba(0, 26, 102, .06);
+  --glass-bg: rgba(255, 255, 255, .82);
+  --chip: rgba(232, 238, 255, .72); --chip-hover: rgba(214, 226, 255, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(0, 26, 102, .07);
+  --glass-line: rgba(27, 43, 92, .08); --backdrop: rgba(0, 26, 102, .42);
+  --track: #E8EEFF; --seg-active: #FFFFFF; --nav-active: #E3EBFF;
+  --outline: #C0D0FF; --state-hover: rgba(0, 26, 102, .05); --state-press: rgba(0, 26, 102, .09);
+  --focus-ring: 0 0 0 3px rgba(0, 44, 176, .16);
+}
+:root[data-theme="cream"] {
+  color-scheme: light;
+  --page: #FFFEF0; --card: #FFFFF8;
+  --line: #E8E4C2; --line-soft: #F2EED8;
+  --fill: #F7F3D9; --fill-strong: #E8E4C2;
+  --primary: #7B5FA6; --primary-hover: #66498F; --primary-soft: #F3E9FA;
+  --accent: #BE96CD; --accent-soft: #F6ECFA;
+  --title: #3D3550; --body: #4A4160; --secondary: #6F6485; --muted: #9A90AD;
+  --danger: #B91C1C; --danger-hover: #991B1B; --on-primary: #FFFFFF;
+  --shadow-xs: 0 1px 2px rgba(61, 53, 80, .05);
+  --shadow-card: 0 1px 3px rgba(61, 53, 80, .06), 0 1px 2px rgba(61, 53, 80, .04);
+  --shadow-hover: 0 4px 12px rgba(61, 53, 80, .10), 0 1px 3px rgba(61, 53, 80, .05);
+  --shadow-pop: 0 12px 32px rgba(61, 53, 80, .16), 0 2px 8px rgba(61, 53, 80, .06);
+  --glass-bg: rgba(255, 255, 248, .85);
+  --chip: rgba(247, 243, 217, .75); --chip-hover: rgba(232, 228, 194, .92);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 1px 2px rgba(61, 53, 80, .07);
+  --glass-line: rgba(74, 65, 96, .08); --backdrop: rgba(61, 53, 80, .42);
+  --track: #F7F3D9; --seg-active: #FFFFFF; --nav-active: #F3E9FA;
+  --outline: #DCD4B4; --state-hover: rgba(61, 53, 80, .05); --state-press: rgba(61, 53, 80, .09);
+  --focus-ring: 0 0 0 3px rgba(123, 95, 166, .16);
+}
+:root[data-theme="gold"] {
+  color-scheme: dark;
+  --page: #000000; --card: #121212;
+  --line: #2A2A2A; --line-soft: #1C1C1C;
+  --fill: #1E1E1E; --fill-strong: #2E2E2E;
+  --primary: #FFD700; --primary-hover: #FFE44D; --primary-soft: #3A2F00;
+  --accent: #FFD700; --accent-soft: #3A2F00;
+  --title: #FFF8DC; --body: #F5E6B8; --secondary: #C9B26A; --muted: #8C7A3F;
+  --danger: #FF6B6B; --danger-hover: #FF8A8A; --on-primary: #000000;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .45);
+  --shadow-hover: 0 4px 14px rgba(0, 0, 0, .55);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .65);
+  --glass-bg: rgba(0, 0, 0, .84);
+  --chip: rgba(30, 30, 30, .72); --chip-hover: rgba(46, 46, 46, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 1px 2px rgba(0, 0, 0, .5);
+  --glass-line: rgba(255, 248, 220, .08); --backdrop: rgba(0, 0, 0, .62);
+  --track: #1E1E1E; --seg-active: #2E2E2E; --nav-active: #3A2F00;
+  --outline: #4A4A4A; --state-hover: rgba(255, 255, 255, .07); --state-press: rgba(255, 255, 255, .12);
+  --focus-ring: 0 0 0 3px rgba(255, 215, 0, .22);
+}
+:root[data-theme="taro"] {
+  color-scheme: dark;
+  --page: #0B0C10; --card: #15161C;
+  --line: #2A2B36; --line-soft: #1E1F28;
+  --fill: #1E1F28; --fill-strong: #2E2F3A;
+  --primary: #C98EFF; --primary-hover: #D8A8FF; --primary-soft: #33234A;
+  --accent: #C98EFF; --accent-soft: #33234A;
+  --title: #F3E9FF; --body: #D9CBEA; --secondary: #A995C0; --muted: #756687;
+  --danger: #FF6B8A; --danger-hover: #FF8AA3; --on-primary: #1A1024;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .45);
+  --shadow-hover: 0 4px 14px rgba(0, 0, 0, .55);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .65);
+  --glass-bg: rgba(11, 12, 16, .84);
+  --chip: rgba(30, 31, 40, .72); --chip-hover: rgba(46, 47, 58, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 1px 2px rgba(0, 0, 0, .5);
+  --glass-line: rgba(243, 233, 255, .08); --backdrop: rgba(0, 0, 0, .62);
+  --track: #1E1F28; --seg-active: #2E2F3A; --nav-active: #33234A;
+  --outline: #45465A; --state-hover: rgba(255, 255, 255, .07); --state-press: rgba(255, 255, 255, .12);
+  --focus-ring: 0 0 0 3px rgba(201, 142, 255, .22);
+}
+:root[data-theme="xuan"] {
+  color-scheme: dark;
+  --page: #1E1E1E; --card: #262626;
+  --line: #3A3A3A; --line-soft: #2E2E2E;
+  --fill: #2E2E2E; --fill-strong: #3E3E3E;
+  --primary: #FC6315; --primary-hover: #FF7A36; --primary-soft: #4A2411;
+  --accent: #FC6315; --accent-soft: #4A2411;
+  --title: #FFF1E8; --body: #E8D5CB; --secondary: #C0A79A; --muted: #8C7B70;
+  --danger: #FF5A5A; --danger-hover: #FF7A7A; --on-primary: #1A0D06;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .45);
+  --shadow-hover: 0 4px 14px rgba(0, 0, 0, .55);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .65);
+  --glass-bg: rgba(30, 30, 30, .84);
+  --chip: rgba(46, 46, 46, .72); --chip-hover: rgba(62, 62, 62, .9);
+  --chip-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 1px 2px rgba(0, 0, 0, .5);
+  --glass-line: rgba(255, 241, 232, .08); --backdrop: rgba(0, 0, 0, .62);
+  --track: #2E2E2E; --seg-active: #3E3E3E; --nav-active: #4A2411;
+  --outline: #555555; --state-hover: rgba(255, 255, 255, .07); --state-press: rgba(255, 255, 255, .12);
+  --focus-ring: 0 0 0 3px rgba(252, 99, 21, .22);
+}
+
+/* 副色只用在装饰件上：信号标、当前周边框。主色仍负责按钮与链接。 */
+.signal-mark::before,
+.signal-mark::after { background: var(--accent, var(--primary)); }
+.week.current { border-color: var(--accent, var(--primary)); }
+
+/* ==========================================================================
+   v4.0.0 列表压缩 / 展开收起 / 班级人员管理 / 投票明细 / 建议列表
+   ========================================================================== */
+
+/* 歌曲列表：条目更紧凑，按钮更小；手机端一屏能多放两首。 */
+.song { padding: 12px 16px; gap: 12px; }
+.song h3 { font-size: 15px; margin-bottom: 1px; }
+.song p { font-size: 12px; }
+.song-actions { margin-top: 8px; gap: 6px; }
+.song-actions .btn { height: 30px; padding: 0 10px; font-size: 12px; }
+.votes { font-size: 16px; }
+.list { gap: 8px; }
+.list-more { display: flex; justify-content: center; padding: 6px 0 2px; }
+.list-more .btn { width: 100%; max-width: 320px; }
+
+/* 后台审核列表也压一档（按钮多，仍保持可点尺寸与换行）。 */
+.admin-song { padding: 12px 0; }
+.admin-song .muted { font-size: 12px; }
+.admin-song .actions .btn { height: 30px; padding: 0 10px; font-size: 12px; }
+.admin-song .song-actions .btn { height: 30px; padding: 0 10px; font-size: 12px; }
+
+/* 班级人员管理：左搜索列表 + 右操作面板；窄屏堆叠。 */
+.member-layout { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 12px; align-items: start; }
+.member-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.member-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 10px 12px; text-align: left; font: inherit;
+  color: var(--body); background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+.member-item:hover { border-color: var(--secondary); }
+.member-item.active { border-color: var(--primary); background: var(--nav-active); }
+.member-item > span:first-child { min-width: 0; }
+.member-item b { display: block; color: var(--title); font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.member-item small { display: block; color: var(--secondary); font-size: 12px; }
+.member-state { flex: 0 0 auto; font-size: 12px; color: var(--muted); }
+.member-item.active .member-state { color: var(--primary); }
+.member-actions { min-width: 0; }
+.member-actions .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.member-actions .muted { line-height: 1.7; }
+@media (min-width: 769px) {
+  .member-layout { grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); }
+  .member-actions { position: sticky; top: 88px; }
+}
+
+/* 版本建议：按歌分组，直接显示建议内容；每条可单独标记。 */
+.suggestion-group { padding: 0; overflow: hidden; }
+.suggestion-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft);
+}
+.suggestion-head b { color: var(--title); font-size: 15px; }
+.suggestion-head .muted { margin-left: 8px; font-size: 12px; }
+.suggestion-item {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 6px 12px; padding: 12px 16px; border-top: 1px solid var(--line-soft);
+}
+.suggestion-item:first-of-type { border-top: 0; }
+.suggestion-item p { flex: 1 1 100%; margin: 0; font-size: 14px; color: var(--body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-item small { flex: 1 1 auto; }
+.suggestion-item .btn { flex: 0 0 auto; height: 28px; padding: 0 10px; font-size: 12px; }
+
+/* 查看具体投票弹窗 */
+.vote-detail-wrap { overflow: auto; margin: 10px 0 18px; border: 1px solid var(--line); border-radius: var(--radius-btn); }
+.vote-detail { width: 100%; border-collapse: collapse; font-size: 13px; }
+.vote-detail th, .vote-detail td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); text-align: left; white-space: nowrap; }
+.vote-detail th { color: var(--secondary); font-weight: 500; background: var(--fill); }
+.vote-detail tr:last-child td { border-bottom: 0; }
+.vote-detail th:nth-child(2), .vote-detail td:nth-child(2),
+.vote-detail th:nth-child(3), .vote-detail td:nth-child(3) { text-align: right; }
+
+/* 4.0.0 自研调色板：色相/饱和/亮度滑块 + 色块预览（不用原生取色器） */
+.palette-field { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--card); }
+.palette-field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--title); font-size: 13px; font-weight: 500; }
+.palette-field-head code { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--secondary); }
+.palette-preview { display: block; height: 24px; margin: 2px 0 4px; border: 1px solid var(--line); border-radius: 8px; }
+.palette-slider { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--secondary); }
+.palette-slider > span { flex: 0 0 auto; width: 28px; }
+.palette-slider input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--primary); cursor: pointer; }
+.contrast-note { margin: 10px 0 0; font-size: 12px; color: var(--secondary); }
+.contrast-note.low { color: var(--danger); }
+@media (max-width: 640px) {
+  .palette-grid { grid-template-columns: 1fr; }
+}
+
+

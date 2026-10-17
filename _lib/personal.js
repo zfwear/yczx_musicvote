@@ -158,6 +158,70 @@ export async function unbindPersonalOfClass(env, classId) {
   return ids;
 }
 
+/* --------------------- 017：人员封禁与改名（2026-10-17） --------------------- */
+
+/** 读封禁状态；017 未执行时返回 false（按未封禁处理）。 */
+export async function isPersonalBanned(env, id) {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  try {
+    const row = await env.DB.prepare('SELECT banned FROM personal_passes WHERE id = ?').bind(n).first();
+    return Number(row && row.banned) === 1;
+  } catch (err) {
+    if (/no such column/i.test(String((err && err.message) || ''))) return false;
+    if (isMissingTable(err)) return false;
+    throw err;
+  }
+}
+
+/** 设置/解除封禁；017 未执行时抛错，由调用方给出迁移提示。 */
+export async function setPersonalBanned(env, id, banned) {
+  const n = Number(id);
+  await env.DB.prepare(
+    "UPDATE personal_passes SET banned = ?, banned_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END WHERE id = ?"
+  ).bind(banned ? 1 : 0, banned ? 1 : 0, n).run();
+}
+
+/**
+ * 改名（017 需求：编辑只改姓名）。
+ * 同一班级内重名返回 conflict；成功时把个人配色键一起迁移。
+ */
+export async function renamePersonalPass(env, id, nextUsername) {
+  const row = await getPersonalById(env, id);
+  if (!row) return { ok: false, missing: true };
+  const oldName = String(row.username);
+  const newName = String(nextUsername);
+  if (oldName === newName) return { ok: true, row, oldName, unchanged: true };
+
+  const duplicate = await env.DB.prepare(
+    'SELECT id FROM personal_passes WHERE class_id = ? AND username = ? AND id <> ?'
+  ).bind(Number(row.class_id), newName, Number(id)).first();
+  if (duplicate) return { ok: false, conflict: true };
+
+  try {
+    await env.DB.prepare('UPDATE personal_passes SET username = ? WHERE id = ?')
+      .bind(newName, Number(id)).run();
+  } catch (err) {
+    if (isUniqueError(err)) return { ok: false, conflict: true };
+    throw err;
+  }
+
+  // 配色键跟着人走（键是 class_id+username，不是口令 id）。
+  try {
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO personal_prefs (class_id, username, mode, preset, colors, updated_at)
+       SELECT class_id, ?, mode, preset, colors, updated_at
+         FROM personal_prefs WHERE class_id = ? AND username = ?`
+    ).bind(newName, Number(row.class_id), oldName).run();
+    await env.DB.prepare('DELETE FROM personal_prefs WHERE class_id = ? AND username = ? AND username <> ?')
+      .bind(Number(row.class_id), oldName, newName).run();
+  } catch (err) {
+    if (!isMissingTable(err)) throw err;
+  }
+
+  return { ok: true, row: { ...row, username: newName }, oldName };
+}
+
 /** 读配色；没有记录/016 未执行都返回 null。 */
 export async function getPrefs(env, classId, username) {
   try {

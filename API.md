@@ -1452,3 +1452,58 @@ payload = {"t":歌名, "a":歌手, "k":音源id, "e":过期时间戳(秒)}
 7. **`Function` 层对未导出方法的 405 行为**：依据是 `functions/api/pow.js` 里的注释（"Pages Functions 对没有对应处理器的请求方法自动返回 405"），我没有在本地跑起来验证。
 8. **`admin-settings` GET 在 `classes` 查询四种降级尝试全部失败时**的行为：代码里 `for` 循环结束后 `classRows` 保持 `[]`、`canViewPasswords` 保持 `false`，不会报错；但那是"四种列组合都不存在"的极端情况，我没有构造过。
 9. **`/api/report` 的实际执行顺序**：`guardRate` 在 `readJson` **之后**、`verifyRecaptcha` **之前**（`report.js:37` 与 `report.js:30`），我按代码行号顺序记录；而 `suggest.js` 的 `guardRate` 在 `readJson` **之前**。两者不一致，但都是代码事实，不是笔误。
+
+
+## v4.0.0 接口变更（2026-10-17）
+
+> 这一节是 4.0.0 的增量说明；上面的历史契约仍然有效，除非这里明确改写。
+
+1. **`POST /api/login`**
+   - body 新增可选 `fingerprint`（16~64 位十六进制）。用「班级口令@姓名」登录时，
+     服务端据此建立「设备 → 班级+姓名」绑定，三天内同设备同班不能换姓名；
+     一个姓名可以登录多台设备。冲突返回 403。
+   - **纯班级口令（不带 `@`）**：默认不再签发完整班级身份，而是返回
+     `{ ok:true, guest:true, need_name:true, class_name:"游客模式" }` 并下发只读会话。
+     前端据此弹「回登录页重输 / 游客浏览」。
+     测试或本地预览可设 `ALLOW_PLAIN_CLASS_LOGIN=1` 保留旧行为；生产不要设。
+   - 姓名登录成功额外返回 `personal:true`、`username`、`device_bound`。
+   - 被封禁的姓名返回 403（017 的 `personal_passes.banned`）。
+
+2. **`POST /api/logout?subject=class|admin`**
+   - 只退指定一侧；不带 `subject` 时保持旧行为（两边都退）。
+   - 前台退出用 `class`，后台退出用 `admin`，互不影响。
+
+3. **`GET /api/admin-members?q=<关键词>`**（普通管理员可读）
+   - 按姓名或班级名模糊搜索个人口令名单，默认不返回全量；结果含
+     `id / class_id / class_name / username / banned / created_at`。
+
+4. **`POST /api/admin-members`**（仅高级管理员）
+   - `{action:"batch_add", class_id, names:[...]}`：批量创建「班级口令@姓名」登录，
+     返回 `added / skipped / invalid`。
+   - `{action:"rename", id, username}`：只改姓名；设备绑定、投票记录与个人配色键同步。
+   - `{action:"remove", id}`：删除登录资格；已投票数保留，设备绑定释放。
+   - `{action:"ban", id}`：封禁 + 撤销会话 + **清零该姓名已投票数**（返回
+     `removedVotes / songs`）；`{action:"unban", id}` 解封。
+   - `{action:"unbind_device", id}`：解绑该姓名名下全部设备（解决共用电脑误伤）。
+
+5. **`GET /api/admin-action?id=<歌曲ID>`**（管理员）
+   - 单曲投票明细，按投票班级汇总：`rows:[{class_id,class_name,votes,voters}]`、
+     `total`。`class_id=0` 显示为「未归属/已重置」。
+
+6. **`GET /api/suggest?all=1`**（管理员）
+   - 返回全部待处理版本建议，带 `song_id / song_title / song_artist / content /
+     class_name / created_at`；没有建议的歌曲不会出现。
+   - `PUT /api/suggest` 新增 `{id}` 单条标记；不传 `id` 仍按 `song_id` 整组标记。
+
+7. **`POST /api/prefs`**
+   - 低对比度自定义配色不再返回 400；改为保存并返回 `warning` 文本。
+     前端只提示，不阻止应用。
+
+8. **迁移**
+   - 新增 `sql/017_members_devices.sql`：`personal_passes.banned`、
+     `personal_passes.banned_at`、`upvote_logs.username`、`device_identities`。
+     未执行 017 时姓名登录与投票仍可用（跳过绑定/封禁），但后台人员封禁会提示先迁移。
+
+9. **主题**
+   - `SITE_THEMES` 扩展为 11 个键位：`'' / mono / mint / beige / lavender /
+     marrs / klein / cream / gold / taro / xuan`；后三个为深色主题。

@@ -6,12 +6,28 @@ import {
   guestPassword, guestLoginEnabled, GUEST_ROLE, GUEST_CLASS_NAME,
   edgeCacheKey,
 } from '../../_lib/auth.js';
-import { parseSecret } from '../../_lib/validate.js';
+import { parseSecret, parseFingerprint } from '../../_lib/validate.js';
 import { verifyPassword, hashPassword, encryptSecret } from '../../_lib/crypto.js';
 import { verifyRecaptcha } from '../../_lib/recaptcha.js';
 import { isSeedClassPassword, allowSeedCredentials } from '../../_lib/defaults.js';
 import { findUsablePassByLookup, passSessionTtlSeconds, PASS_LABELS } from '../../_lib/passes.js';
-import { parsePersonalLogin, findPersonalByClassAndName, findUnboundByName, UNBOUND_PREFIX } from '../../_lib/personal.js';
+import {
+  parsePersonalLogin, findPersonalByClassAndName, findUnboundByName,
+  isPersonalBanned, UNBOUND_PREFIX,
+} from '../../_lib/personal.js';
+import { ensureDeviceIdentity } from '../../_lib/device.js';
+
+/**
+ * 纯班级口令是否仍按“完整班级身份”登录。
+ *
+ * 4.0.0 起生产环境默认 **不再** 这样做：只输班级口令会拿到只读游客会话，
+ * 前端用内置弹窗提示回登录页用「班级口令@姓名」重登（用户 2026-10-17 确认）。
+ * 测试与本地预览显式设 ALLOW_PLAIN_CLASS_LOGIN=1 可保留旧行为 ——
+ * 整套测试大量用班级口令模拟学生，这个开关让测试不必逐个改造。
+ */
+function plainClassLoginAllowed(env) {
+  return String((env && env.ALLOW_PLAIN_CLASS_LOGIN) || '') === '1';
+}
 
 /**
  * 班级口令登录。
@@ -269,6 +285,27 @@ async function handleLoginPost(context) {
         if (pRow) {
           const pp = await findPersonalByClassAndName(env, pRow.id, personal.username);
           if (pp) {
+            // 017：封禁人员不能登录（前端提示与这里同一句）。
+            if (await isPersonalBanned(env, pp.id)) {
+              return error('该姓名已被封禁，请联系广播站管理员', 403);
+            }
+
+            // 017：设备-姓名绑定。规则见 _lib/device.js 顶部注释：
+            // 同一设备在同一班级只能登一个姓名，登录时锁定，三天后解锁；
+            // 一个姓名可以登录多台设备。前端登录页会带 fingerprint；
+            // 老客户端/测试没带时跳过绑定（不因此拒绝登录）。
+            const fp = parseFingerprint(parsed.value.fingerprint);
+            if (fp.ok) {
+              const bind = await ensureDeviceIdentity(env, {
+                fingerprint: fp.value,
+                classId: pRow.id,
+                username: personal.username,
+              });
+              if (bind.conflict) {
+                return error('这台设备近三天已绑定本班的其他姓名，请更换设备，或等三天后再试', 403);
+              }
+            }
+
             const session = await createSession(env, request, {
               subject: 'class',
               subjectId: pRow.id,
@@ -277,7 +314,14 @@ async function handleLoginPost(context) {
             });
             await clearRateLimit(env, loginBucket);
             return json(
-              { ok: true, class_id: pRow.id, class_name: pRow.name, personal: true, username: personal.username },
+              {
+                ok: true,
+                class_id: pRow.id,
+                class_name: pRow.name,
+                personal: true,
+                username: personal.username,
+                device_bound: fp.ok,
+              },
               200,
               { 'Set-Cookie': session.setCookie }
             );
@@ -325,6 +369,36 @@ async function handleLoginPost(context) {
     } catch {
       /* 升级失败不影响本次登录 */
     }
+  }
+
+  // 4.0.0（用户 2026-10-17 确认）：纯班级口令不再授予完整身份。
+  //
+  // 输入里没有 @ 时，这条口令可能只是“班级公共口令”，无法确定是谁在投票。
+  // 生产环境默认签发**只读游客会话**，由登录页内置弹窗给两个选择：
+  // 「回登录页重输」或「游客浏览」。真正要投票/投稿，必须用
+  // 「班级口令@姓名」重新登录 —— 这样设备-姓名绑定才有可执行的对象。
+  //
+  // ALLOW_PLAIN_CLASS_LOGIN=1 是测试/本地预览开关，保留旧行为；
+  // 生产不配这个变量，落到上面这条新逻辑。
+  if (!secret.value.includes('@') && !plainClassLoginAllowed(env)) {
+    const session = await createSession(env, request, {
+      subject: 'class',
+      subjectId: 0,
+      role: GUEST_ROLE,
+      ttlSeconds: CLASS_TTL_SECONDS,
+    });
+    await clearRateLimit(env, loginBucket);
+    return json(
+      {
+        ok: true,
+        class_id: 0,
+        class_name: GUEST_CLASS_NAME,
+        guest: true,
+        need_name: true,
+      },
+      200,
+      { 'Set-Cookie': session.setCookie }
+    );
   }
 
   const session = await createSession(env, request, {

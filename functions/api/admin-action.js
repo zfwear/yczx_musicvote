@@ -11,6 +11,60 @@ const NEXT_STATUS = {
 };
 
 /**
+ * 单首歌的投票明细（4.0.0 需求：审核页「查看具体投票」）。
+ *
+ * 按投票班级汇总：每班多少票、多少台设备参与。用于人工核查刷票。
+ * class_id=0 的行是历史重置名额时留下的（见 操作-增量补丁.txt 的重置 SQL），
+ * 单独显示为「未归属/已重置」，不混进真实班级。
+ */
+export async function onRequestGet(context) {
+  const { request, env } = context;
+
+  const auth = await requireStaff(env, request);
+  if (!auth.ok) return auth.response;
+
+  const url = new URL(request.url);
+  const id = parsePositiveInt(url.searchParams.get('id'), { field: '歌曲' });
+  if (!id.ok) return error(id.error, 400);
+
+  const song = await env.DB.prepare('SELECT id, title, artist FROM songs WHERE id = ?')
+    .bind(id.value).first();
+  if (!song) return error('歌曲不存在', 404);
+
+  let rows = [];
+  try {
+    const res = await env.DB.prepare(
+      `SELECT u.class_id,
+              COALESCE(NULLIF(c.name, ''), '未归属/已重置') AS class_name,
+              COUNT(*) AS votes,
+              COUNT(DISTINCT u.fingerprint) AS voters
+         FROM upvote_logs u
+         LEFT JOIN classes c ON c.id = u.class_id
+        WHERE u.song_id = ?
+        GROUP BY u.class_id
+        ORDER BY votes DESC, u.class_id ASC`
+    ).bind(id.value).all();
+    rows = res.results || [];
+  } catch (err) {
+    if (!/no such table/i.test(String((err && err.message) || ''))) throw err;
+  }
+
+  const detail = rows.map((row) => ({
+    class_id: Number(row.class_id),
+    class_name: String(row.class_name || '未归属/已重置'),
+    votes: Number(row.votes) || 0,
+    voters: Number(row.voters) || 0,
+  }));
+
+  return json({
+    ok: true,
+    song: { id: Number(song.id), title: song.title, artist: song.artist },
+    rows: detail,
+    total: detail.reduce((sum, row) => sum + row.votes, 0),
+  });
+}
+
+/**
  * 后台审核与回收站处置。
  *
  * 注意区分两个概念（它们是完全独立的两套数据）：

@@ -15,18 +15,28 @@ import { revokeSession, clearSessionCookies, revokeCurrentDebugSession } from '.
 export async function onRequestPost(context) {
   const { request, env } = context;
 
+  // 4.0.0 前后台分离：?subject=class|admin 只退那一侧；
+  // 不带参数保持旧行为（两边都退）。调试会话属于学生侧。
+  let only = null;
+  try {
+    const raw = new URL(request.url).searchParams.get('subject') || '';
+    if (raw === 'class' || raw === 'admin') only = raw;
+  } catch { /* URL 解析失败按全退 */ }
+
   if (env && env.DB) {
-    try {
-      await revokeCurrentDebugSession(env, request);
-    } catch {
-      // 会话表可能尚未迁移；退出登录本身不应报错。
+    if (only !== 'admin') {
+      try {
+        await revokeCurrentDebugSession(env, request);
+      } catch {
+        // 会话表可能尚未迁移；退出登录本身不应报错。
+      }
     }
     try {
-      await revokeSession(env, request, null);
+      await revokeSession(env, request, only);
     } catch {
       // 同上。
     }
   }
 
-  return jsonWithCookies({ ok: true }, 200, clearSessionCookies(request));
+  return jsonWithCookies({ ok: true }, 200, clearSessionCookies(request, only));
 }
