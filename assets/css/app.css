@@ -19,6 +19,7 @@
   --primary-soft: #EFF6FF;
   --accent: #2563EB;
   --accent-soft: #DBEAFE;
+  --accent-strong: #1D4ED8;
   --title: #111827;
   --body: #374151;
   --secondary: #6B7280;
@@ -64,6 +65,7 @@
     --primary-soft: #1E3A8A;
     --accent: #60A5FA;
     --accent-soft: #1E3A8A;
+    --accent-strong: #93C5FD;
     --title: #F9FAFB;
     --body: #D1D5DB;
     --secondary: #9CA3AF;
@@ -133,6 +135,10 @@ input, select, textarea { font-family: inherit; }
 /* 登录页卡片顶部英文需要保留大小写（用户指定 YZstudent RadioLight），
    不能被全局 .kicker 的 text-transform: uppercase 改成全大写。 */
 .kicker-case { text-transform: none; letter-spacing: .08em; }
+/* 登录口令框：必须是普通文本输入，手机才会调出可输入中文的键盘。
+   用 WebKit 的 text-security 做视觉遮罩（Chromium/Safari 支持）；
+   不支持该属性的浏览器会显示明文，但中文输入正常工作。 */
+.password-mask { -webkit-text-security: disc; text-security: disc; }
 
 /* ---------- 布局 ---------- */
 .shell {
@@ -1545,5 +1551,74 @@ dialog.track-dialog {
 @media (max-width: 640px) {
   .palette-grid { grid-template-columns: 1fr; }
 }
+
+/* ==========================================================================
+   v4.0.0 主题副色落地
+   --------------------------------------------------------------------------
+   用户反馈“主题差异化不大、有的配色还没用”。这里让每套主题的第二个颜色
+   （--accent / --accent-soft / --accent-strong）真正参与界面：
+     · 页面顶部一层副色渐变；
+     · 面板标题前的小圆点；
+     · 票数徽章（副色底 + 可读的深色副色文字）；
+     · 公告左侧竖条、歌曲悬停底色；
+     · 主按钮底部 2px 副色边；
+     · 后台/榜单激活项用副色底。
+   --accent-strong 是各主题里“压在副色浅底上仍然读得清”的深色版本。
+   ========================================================================== */
+:root[data-theme="mono"] { --accent-strong: #141414; }
+:root[data-theme="mint"] { --accent-strong: #096B5C; }
+:root[data-theme="beige"] { --accent-strong: #8F6238; }
+:root[data-theme="lavender"] { --accent-strong: #6B5596; }
+:root[data-theme="marrs"] { --accent-strong: #B03A6B; }
+:root[data-theme="klein"] { --accent-strong: #007A70; }
+:root[data-theme="cream"] { --accent-strong: #7B5FA6; }
+:root[data-theme="gold"] { --accent-strong: #FFD700; }
+:root[data-theme="taro"] { --accent-strong: #C98EFF; }
+:root[data-theme="xuan"] { --accent-strong: #FC6315; }
+
+:root, :root[data-theme] { --nav-active: var(--accent-soft); }
+:root .admin-nav button.active,
+:root .rank-tabs button.active { color: var(--accent-strong); }
+
+/* 页面顶部副色渐变：每套主题一眼能看出第二个颜色。 */
+body {
+  background-color: var(--page);
+  background-image: linear-gradient(180deg, var(--accent-soft) 0, var(--page) 300px);
+  background-repeat: no-repeat;
+}
+
+/* 面板标题的副色圆点 */
+.panel-head h2::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* 票数徽章：副色浅底 + 深色副色文字 */
+.votes {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* 公告左侧副色竖条 */
+.announcement { border-left: 3px solid var(--accent); }
+
+/* 歌曲悬停用副色浅底与副色描边 */
+.song {
+  transition: transform .16s ease, box-shadow .16s ease,
+    border-color .16s ease, background-color .16s ease;
+}
+.song:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+/* 主按钮底部一条副色边（默认主题主副同色，几乎看不出来） */
+.btn.primary { box-shadow: inset 0 -2px 0 var(--accent); }
 
 
